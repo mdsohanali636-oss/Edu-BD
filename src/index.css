@@ -1,0 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --animate-spin-slow: spin 8s linear infinite;
+}
+
+@variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  body {
+    @apply font-sans antialiased bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-x-hidden scroll-smooth;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  @keyframes section-flash {
+    0% { background-color: transparent; }
+    20% { background-color: rgba(59, 130, 246, 0.08); }
+    100% { background-color: transparent; }
+  }
+
+  .animate-section-flash {
+    animation: section-flash 2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}

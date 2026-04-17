@@ -1,0 +1,165 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, email format)
+    //   - displayName: string
+    //   - photoURL: string
+    //   - role: string (user/admin)
+    //   - createdAt: number
+    //
+    // Collection: contents
+    // Document ID: {contentId}
+    // Fields:
+    //   - id: string (required)
+    //   - title: string (required, size < 200)
+    //   - description: string (size < 2000)
+    //   - category: string (required)
+    //   - academicClass: string
+    //   - subject: string
+    //   - url: string (required)
+    //   - thumbnail: string
+    //   - authorId: string
+    //   - status: string (pending/approved/rejected)
+    //   - createdAt: number
+    //
+    // Collection: users/{userId}/bookmarks
+    // Document ID: {bookmarkId}
+    // Fields:
+    //   - userId: string (required)
+    //   - contentId: string (required)
+    //   - createdAt: number
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+             (request.auth.token.email == "mdsohanali636@gmail.com" || 
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+
+    function canUserUpload() {
+      return isAdmin() || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.canUpload == true;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUser(data, userId) {
+      return data.uid == userId &&
+             isValidEmail(data.email);
+    }
+
+    function isValidContent(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.url is string && data.url.size() > 0 &&
+             data.category is string &&
+             data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    function isValidPlaylist(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.type in ['youtube', 'custom'] &&
+             data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow read: if isAdmin();
+      
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data, userId);
+      
+      allow update: if isOwner(userId) && isValidUser(request.resource.data, userId) && 
+                    request.resource.data.role == resource.data.role;
+      allow update: if isAdmin() && isValidUser(request.resource.data, userId);
+      
+      match /bookmarks/{bookmarkId} {
+        allow read, write: if isOwner(userId);
+        allow read, write: if isAdmin();
+      }
+    }
+
+    match /contents/{contentId} {
+      // Split read into multiple allow statements to avoid unnecessary evaluation of isAdmin()
+      allow read: if resource.data.status == 'approved';
+      allow read: if isAuthenticated() && resource.data.authorId == request.auth.uid;
+      allow read: if isAdmin();
+      
+      allow create: if isAuthenticated() && 
+                    canUserUpload() &&
+                    isValidContent(request.resource.data) && 
+                    request.resource.data.authorId == request.auth.uid &&
+                    request.resource.data.status == 'pending';
+      
+      allow create: if isAdmin() && isValidContent(request.resource.data);
+                    
+      allow update: if isAdmin();
+      allow update: if isAuthenticated() && 
+                    resource.data.authorId == request.auth.uid && 
+                    isValidContent(request.resource.data) &&
+                    request.resource.data.status == resource.data.status;
+                     
+      allow delete: if isAdmin();
+    }
+
+    match /external_resources/{resourceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /playlists/{playlistId} {
+      allow read: if resource.data.status == 'approved';
+      allow read: if isAuthenticated() && resource.data.authorId == request.auth.uid;
+      allow read: if isAdmin();
+      
+      allow create: if isAuthenticated() && 
+                    canUserUpload() &&
+                    isValidPlaylist(request.resource.data) && 
+                    request.resource.data.authorId == request.auth.uid &&
+                    request.resource.data.status == 'pending';
+      
+      allow create: if isAdmin() && isValidPlaylist(request.resource.data);
+                    
+      allow update: if isAdmin();
+      allow update: if isAuthenticated() && 
+                    resource.data.authorId == request.auth.uid && 
+                    isValidPlaylist(request.resource.data) &&
+                    request.resource.data.status == resource.data.status;
+                      
+      allow delete: if isAdmin();
+    }
+
+    match /feedback/{feedbackId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && 
+                    request.resource.data.text is string && 
+                    request.resource.data.text.size() > 0 &&
+                    request.resource.data.text.size() < 5000 &&
+                    request.resource.data.userId == request.auth.uid;
+    }
+  }
+}

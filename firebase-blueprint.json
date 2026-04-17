@@ -1,0 +1,124 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user account information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique identifier from Firebase Auth" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "canUpload": { "type": "boolean", "description": "Whether the user has permission to upload resources" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Content": {
+      "title": "Study Resource",
+      "description": "Notes, books, and videos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "academicClass": { "type": "string", "description": "Class level (e.g. Class 10, HSC, Engineering Admission-science, etc.)" },
+        "subject": { "type": "string" },
+        "url": { "type": "string" },
+        "thumbnail": { "type": "string" },
+        "authorId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "title", "url", "category", "status"]
+    },
+    "Bookmark": {
+      "title": "User Bookmark",
+      "description": "Saved resources for a user",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "contentId": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "contentId"]
+    },
+    "ExternalResource": {
+      "title": "External Platform Link",
+      "description": "Links to external educational platforms",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "url": { "type": "string" },
+        "icon": { "type": "string" },
+        "thumbnail": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["title", "url", "icon"]
+    },
+    "Feedback": {
+      "title": "User Feedback",
+      "description": "Feedback submitted by users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["text", "createdAt"]
+    },
+    "Playlist": {
+      "title": "Video Playlist",
+      "description": "A collection of videos from YouTube or internal content",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "thumbnail": { "type": "string" },
+        "authorId": { "type": "string" },
+        "type": { "type": "string", "enum": ["youtube", "custom"] },
+        "youtubePlaylistId": { "type": "string" },
+        "videoIds": { "type": "array", "items": { "type": "string" } },
+        "academicClass": { "type": "string" },
+        "subject": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "title", "type", "authorId", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/contents/{contentId}": {
+      "schema": "Content",
+      "description": "Study resource documents"
+    },
+    "/playlists/{playlistId}": {
+      "schema": "Playlist",
+      "description": "Video playlist documents"
+    },
+    "/users/{userId}/bookmarks/{bookmarkId}": {
+      "schema": "Bookmark",
+      "description": "User specific bookmarks"
+    },
+    "/external_resources/{resourceId}": {
+      "schema": "ExternalResource",
+      "description": "External platform links"
+    },
+    "/feedback/{feedbackId}": {
+      "schema": "Feedback",
+      "description": "User feedback submissions"
+    }
+  }
+}
