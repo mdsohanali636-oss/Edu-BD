@@ -656,7 +656,7 @@ const MiniRobot = () => {
       }}
       onClick={handleInteraction}
       onTouchStart={handleInteraction}
-      className="relative w-14 h-14 sm:w-20 sm:h-20 cursor-pointer group z-10 p-2"
+      className="relative w-20 h-20 cursor-pointer group z-10 p-2"
     >
       {/* 3D Body Construction */}
       <div className={`absolute inset-2 transition-all duration-1000 rounded-[22px] transform-gpu rotate-x-12 rotate-y-12 border-b-[6px] border-r-[6px] ${
@@ -669,7 +669,7 @@ const MiniRobot = () => {
           isSad ? 'border-zinc-800' : 'border-rose-400/20'
         }`}>
           {/* Eyes Container */}
-          <div className="flex gap-2.5 sm:gap-4 mb-2.5 relative">
+          <div className="flex gap-4 mb-2.5 relative">
             {/* Blushing Cheeks (Happy only) */}
             {!isSad && (
               <>
@@ -706,7 +706,7 @@ const MiniRobot = () => {
                 <motion.div 
                   animate={isSad ? { scaleY: 0.15, opacity: 0.6 } : { scaleY: [1, 0.1, 1], opacity: 1 }}
                   transition={{ duration: 3.5, repeat: Infinity, times: [0, 0.05, 0.1] }}
-                  className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full transition-all duration-1000 relative overflow-hidden ${
+                  className={`w-2.5 h-2.5 rounded-full transition-all duration-1000 relative overflow-hidden ${
                     isSad ? 'bg-zinc-200' : 'bg-rose-300 shadow-[0_0_15px_rgba(251,113,133,0.8)]'
                   }`} 
                 >
@@ -724,7 +724,7 @@ const MiniRobot = () => {
                 <motion.div 
                   animate={isSad ? { scaleY: 0.15, opacity: 0.6 } : { scaleY: [1, 0.1, 1], opacity: 1 }}
                   transition={{ duration: 3.5, repeat: Infinity, times: [0, 0.05, 0.1], delay: 0.15 }}
-                  className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full transition-all duration-1000 relative overflow-hidden ${
+                  className={`w-2.5 h-2.5 rounded-full transition-all duration-1000 relative overflow-hidden ${
                     isSad ? 'bg-zinc-200' : 'bg-rose-300 shadow-[0_0_15px_rgba(251,113,133,0.8)]'
                   }`} 
                 >
@@ -822,7 +822,7 @@ const MiniRobot = () => {
       </div>
 
       {/* Permanent Status Label */}
-      <div className="absolute -top-16 left-1/2 -translate-x-1/2 bg-zinc-950/90 text-white text-[9px] sm:text-[10px] font-black px-4 py-2 rounded-[20px] transition-all whitespace-nowrap pointer-events-none uppercase tracking-[0.2em] shadow-xl border border-white/10 backdrop-blur-xl z-20">
+      <div className="absolute -top-16 left-1/2 -translate-x-1/2 bg-zinc-950/90 text-white text-[10px] font-black px-4 py-2 rounded-[20px] transition-all whitespace-nowrap pointer-events-none uppercase tracking-[0.2em] shadow-xl border border-white/10 backdrop-blur-xl z-20">
         {isSad ? "Paaro needs attention..." : "Paaro is Happy!"}
       </div>
     </motion.div>
@@ -2124,7 +2124,7 @@ export default function App() {
       id={id} 
       className={`space-y-4 sm:space-y-6 scroll-mt-24 p-4 sm:p-6 -mx-4 sm:-mx-6 rounded-2xl sm:rounded-[32px] transition-colors duration-500 relative group/section ${highlightedSection === id ? 'animate-section-flash ring-1 ring-blue-500/20' : ''}`}
     >
-      <div className="absolute top-2 right-12 hidden sm:block pointer-events-none">
+      <div className="absolute top-2 right-4 sm:right-12 pointer-events-none">
         <div className="pointer-events-auto">
           <MiniRobot />
         </div>
@@ -2201,7 +2201,7 @@ export default function App() {
 
     return (
       <section className="space-y-6 p-6 -mx-6 rounded-[32px] transition-colors duration-500 relative group/section">
-        <div className="absolute top-2 right-12 hidden sm:block pointer-events-none">
+        <div className="absolute top-2 right-4 sm:right-12 pointer-events-none">
           <div className="pointer-events-auto">
             <MiniRobot />
           </div>
@@ -2278,7 +2278,7 @@ export default function App() {
 
     return (
       <section className="space-y-6 relative group/section">
-        <div className="absolute top-2 right-12 hidden sm:block pointer-events-none">
+        <div className="absolute top-2 right-4 sm:right-12 pointer-events-none">
           <div className="pointer-events-auto">
             <MiniRobot />
           </div>
@@ -3946,7 +3946,7 @@ export default function App() {
         {renderFilters()}
         {/* Featured Exams Section */}
         <section id="exams-section" className="space-y-8 group/section relative">
-          <div className="absolute top-2 right-12 hidden sm:block pointer-events-none">
+          <div className="absolute top-2 right-4 sm:right-12 pointer-events-none">
             <div className="pointer-events-auto">
               <MiniRobot />
             </div>
