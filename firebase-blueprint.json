@@ -2,123 +2,164 @@
   "entities": {
     "User": {
       "title": "User Profile",
-      "description": "Stores user account information",
+      "description": "User account information",
       "type": "object",
       "properties": {
-        "uid": { "type": "string", "description": "Unique identifier from Firebase Auth" },
-        "email": { "type": "string", "format": "email" },
-        "displayName": { "type": "string" },
-        "photoURL": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "class": { "type": "string" },
         "role": { "type": "string", "enum": ["user", "admin"] },
-        "canUpload": { "type": "boolean", "description": "Whether the user has permission to upload resources" },
         "createdAt": { "type": "number" }
       },
-      "required": ["uid", "email"]
+      "required": ["name", "email", "class", "role", "createdAt"]
+    },
+    "Bookmark": {
+      "title": "User Bookmark",
+      "description": "Saved content item for a user",
+      "type": "object",
+      "properties": {
+        "contentId": { "type": "string" },
+        "savedAt": { "type": "number" }
+      },
+      "required": ["contentId", "savedAt"]
+    },
+    "Exam": {
+      "title": "Scalable Exam",
+      "description": "Exam configuration and metadata",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "class": { "type": "string" },
+        "subject": { "type": "string" },
+        "chapter": { "type": "string" },
+        "chapterNameCustom": { "type": "string" },
+        "examType": { "type": "string", "enum": ["mcq", "written"] },
+        "totalQuestionsToShow": { "type": "number" },
+        "negativeMarking": { "type": "boolean" },
+        "negativeValue": { "type": "number" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] }
+      },
+      "required": ["title", "class", "subject", "examType", "createdBy", "createdAt"]
+    },
+    "Question": {
+      "title": "Exam Question",
+      "description": "Individual question in an exam pool",
+      "type": "object",
+      "properties": {
+        "questionText": { "type": "string" },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "correctAnswer": { "type": "number" },
+        "type": { "type": "string", "enum": ["mcq", "written"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["questionText", "type", "createdAt"]
+    },
+    "Attempt": {
+      "title": "Exam Attempt",
+      "description": "Result of a student taking an exam",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "examId": { "type": "string" },
+        "answers": { "type": "array" },
+        "score": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "timeTaken": { "type": "number" },
+        "submittedAt": { "type": "number" }
+      },
+      "required": ["userId", "examId", "score", "totalQuestions", "submittedAt"]
+    },
+    "Leaderboard": {
+      "title": "Leaderboard Ranking",
+      "description": "Best performance per student per exam",
+      "type": "object",
+      "properties": {
+        "class": { "type": "string" },
+        "examId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "bestScore": { "type": "number" },
+        "timeTaken": { "type": "number" },
+        "lastUpdated": { "type": "number" }
+      },
+      "required": ["class", "examId", "userId", "bestScore", "timeTaken", "lastUpdated"]
     },
     "Content": {
       "title": "Study Resource",
       "description": "Notes, books, and videos",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
         "title": { "type": "string" },
         "description": { "type": "string" },
         "category": { "type": "string" },
-        "academicClass": { "type": "string", "description": "Class level (e.g. Class 10, HSC, Engineering Admission-science, etc.)" },
+        "academicClass": { "type": "string" },
         "subject": { "type": "string" },
         "url": { "type": "string" },
-        "thumbnail": { "type": "string" },
-        "authorId": { "type": "string" },
-        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "status": { "type": "string" },
         "createdAt": { "type": "number" }
-      },
-      "required": ["id", "title", "url", "category", "status"]
+      }
     },
-    "Bookmark": {
-      "title": "User Bookmark",
-      "description": "Saved resources for a user",
+    "Playlist": {
+      "title": "Video Playlist",
+      "description": "YouTube or custom playlists",
       "type": "object",
       "properties": {
-        "userId": { "type": "string" },
-        "contentId": { "type": "string" },
-        "createdAt": { "type": "number" }
-      },
-      "required": ["userId", "contentId"]
-    },
-    "ExternalResource": {
-      "title": "External Platform Link",
-      "description": "Links to external educational platforms",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
         "title": { "type": "string" },
         "description": { "type": "string" },
-        "url": { "type": "string" },
-        "icon": { "type": "string" },
-        "thumbnail": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "type": "string" },
         "createdAt": { "type": "number" }
-      },
-      "required": ["title", "url", "icon"]
+      }
     },
     "Feedback": {
       "title": "User Feedback",
-      "description": "Feedback submitted by users",
+      "description": "User feedback messages",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
         "userId": { "type": "string" },
         "userEmail": { "type": "string" },
         "userName": { "type": "string" },
         "text": { "type": "string" },
         "createdAt": { "type": "number" }
-      },
-      "required": ["text", "createdAt"]
+      }
     },
-    "Playlist": {
-      "title": "Video Playlist",
-      "description": "A collection of videos from YouTube or internal content",
+    "ExternalResource": {
+      "title": "External Study Tool",
+      "description": "Links to external study tools or calculators",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
         "title": { "type": "string" },
         "description": { "type": "string" },
-        "thumbnail": { "type": "string" },
-        "authorId": { "type": "string" },
-        "type": { "type": "string", "enum": ["youtube", "custom"] },
-        "youtubePlaylistId": { "type": "string" },
-        "videoIds": { "type": "array", "items": { "type": "string" } },
-        "academicClass": { "type": "string" },
-        "subject": { "type": "string" },
-        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "url": { "type": "string" },
+        "icon": { "type": "string" },
         "createdAt": { "type": "number" }
-      },
-      "required": ["id", "title", "type", "authorId", "status"]
+      }
+    },
+    "NewsletterSubscriber": {
+      "title": "Newsletter Subscription",
+      "description": "Subscriber email for newsletter",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "timestamp": { "type": "number" }
+      }
     }
   },
   "firestore": {
-    "/users/{userId}": {
-      "schema": "User",
-      "description": "User profile documents"
-    },
-    "/contents/{contentId}": {
-      "schema": "Content",
-      "description": "Study resource documents"
-    },
-    "/playlists/{playlistId}": {
-      "schema": "Playlist",
-      "description": "Video playlist documents"
-    },
-    "/users/{userId}/bookmarks/{bookmarkId}": {
-      "schema": "Bookmark",
-      "description": "User specific bookmarks"
-    },
-    "/external_resources/{resourceId}": {
-      "schema": "ExternalResource",
-      "description": "External platform links"
-    },
-    "/feedback/{feedbackId}": {
-      "schema": "Feedback",
-      "description": "User feedback submissions"
-    }
+    "/users/{userId}": { "schema": "User", "description": "User profiles" },
+    "/users/{userId}/bookmarks/{bookmarkId}": { "schema": "Bookmark", "description": "User bookmarks" },
+    "/exams/{examId}": { "schema": "Exam", "description": "Exams configurations" },
+    "/exams/{examId}/questions/{questionId}": { "schema": "Question", "description": "Questions pool for specific exam" },
+    "/attempts/{attemptId}": { "schema": "Attempt", "description": "Exam attempts" },
+    "/leaderboards/{leaderboardId}": { "schema": "Leaderboard", "description": "Rankings" },
+    "/contents/{contentId}": { "schema": "Content", "description": "Resources" },
+    "/playlists/{playlistId}": { "schema": "Playlist", "description": "Playlists" },
+    "/feedback/{feedbackId}": { "schema": "Feedback", "description": "User feedback" },
+    "/questions/{questionId}": { "schema": "Question", "description": "Global questions pool" },
+    "/external_resources/{resourceId}": { "schema": "ExternalResource", "description": "External resource links" },
+    "/newsletter_subscribers/{subscriberId}": { "schema": "NewsletterSubscriber", "description": "Newsletter subscribers" }
   }
 }

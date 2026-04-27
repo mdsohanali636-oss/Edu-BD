@@ -1,165 +1,142 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {userId}
-    // Fields:
-    //   - uid: string (required)
-    //   - email: string (required, email format)
-    //   - displayName: string
-    //   - photoURL: string
-    //   - role: string (user/admin)
-    //   - createdAt: number
-    //
-    // Collection: contents
-    // Document ID: {contentId}
-    // Fields:
-    //   - id: string (required)
-    //   - title: string (required, size < 200)
-    //   - description: string (size < 2000)
-    //   - category: string (required)
-    //   - academicClass: string
-    //   - subject: string
-    //   - url: string (required)
-    //   - thumbnail: string
-    //   - authorId: string
-    //   - status: string (pending/approved/rejected)
-    //   - createdAt: number
-    //
-    // Collection: users/{userId}/bookmarks
-    // Document ID: {bookmarkId}
-    // Fields:
-    //   - userId: string (required)
-    //   - contentId: string (required)
-    //   - createdAt: number
-    //
-    // ===============================================================
-
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    
-    function isAuthenticated() {
-      return request.auth != null;
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function isAdmin() { 
+      return isSignedIn() && (
+        request.auth.token.email == 'mdsohanali636@gmail.com' || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      ); 
+    }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // --- Validation Blueprints ---
+    function isValidUser(data) {
+      return data.name is string && data.name.size() <= 100
+          && data.email is string && data.email.size() <= 100
+          && data.class is string && data.class.size() <= 50
+          && data.role in ['user', 'admin']
+          && data.createdAt is number;
     }
 
-    function isAdmin() {
-      return isAuthenticated() && 
-             (request.auth.token.email == "mdsohanali636@gmail.com" || 
-              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    function isValidExam(data) {
+      return data.title is string && data.title.size() <= 200
+          && data.class is string && data.class.size() <= 50
+          && data.subject is string && data.subject.size() <= 100
+          && (data.chapter == null || data.chapter is string)
+          && (data.chapterNameCustom == null || data.chapterNameCustom is string)
+          && data.examType in ['mcq', 'written']
+          && data.totalQuestionsToShow is number
+          && data.negativeMarking is bool
+          && data.negativeValue is number
+          && data.createdBy is string
+          && data.createdAt is number;
     }
 
-    function canUserUpload() {
-      return isAdmin() || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.canUpload == true;
+    function isValidQuestion(data) {
+      return data.questionText is string && data.questionText.size() <= 2000
+          && data.type in ['mcq', 'written']
+          && (data.type != 'mcq' || (data.options is list && data.options.size() >= 2 && data.options.size() <= 10))
+          && (data.type != 'mcq' || data.correctAnswer is number)
+          && data.createdAt is number;
     }
 
-    function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    function isValidAttempt(data) {
+      return data.userId == request.auth.uid
+          && data.examId is string
+          && data.answers is list
+          && data.score is number
+          && data.totalQuestions is number
+          && data.timeTaken is number
+          && data.submittedAt is number;
     }
 
-    function isValidUser(data, userId) {
-      return data.uid == userId &&
-             isValidEmail(data.email);
+    function isValidLeaderboard(data) {
+      return data.userId == request.auth.uid
+          && data.class is string
+          && data.examId is string
+          && data.userName is string
+          && data.bestScore is number
+          && data.timeTaken is number
+          && data.lastUpdated is number;
     }
 
-    function isValidContent(data) {
-      return data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             data.url is string && data.url.size() > 0 &&
-             data.category is string &&
-             data.status in ['pending', 'approved', 'rejected'];
-    }
-
-    function isValidPlaylist(data) {
-      return data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             data.type in ['youtube', 'custom'] &&
-             data.status in ['pending', 'approved', 'rejected'];
-    }
-
-    // ===============================================================
-    // Rules
-    // ===============================================================
+    // --- Rules ---
 
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow read: if isAdmin();
-      
-      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data, userId);
-      
-      allow update: if isOwner(userId) && isValidUser(request.resource.data, userId) && 
-                    request.resource.data.role == resource.data.role;
-      allow update: if isAdmin() && isValidUser(request.resource.data, userId);
-      
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId) && isValidUser(incoming());
+
       match /bookmarks/{bookmarkId} {
         allow read, write: if isOwner(userId);
-        allow read, write: if isAdmin();
       }
     }
 
-    match /contents/{contentId} {
-      // Split read into multiple allow statements to avoid unnecessary evaluation of isAdmin()
-      allow read: if resource.data.status == 'approved';
-      allow read: if isAuthenticated() && resource.data.authorId == request.auth.uid;
-      allow read: if isAdmin();
-      
-      allow create: if isAuthenticated() && 
-                    canUserUpload() &&
-                    isValidContent(request.resource.data) && 
-                    request.resource.data.authorId == request.auth.uid &&
-                    request.resource.data.status == 'pending';
-      
-      allow create: if isAdmin() && isValidContent(request.resource.data);
-                    
-      allow update: if isAdmin();
-      allow update: if isAuthenticated() && 
-                    resource.data.authorId == request.auth.uid && 
-                    isValidContent(request.resource.data) &&
-                    request.resource.data.status == resource.data.status;
-                     
+    match /exams/{examId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin() && isValidExam(incoming());
+      allow update: if isAdmin() && isValidExam(incoming());
       allow delete: if isAdmin();
+
+      match /questions/{questionId} {
+        allow read: if isSignedIn();
+        allow create, update: if isAdmin() && isValidQuestion(incoming());
+        allow delete: if isAdmin();
+      }
     }
 
-    match /external_resources/{resourceId} {
+    match /attempts/{attemptId} {
+      allow read: if isSignedIn() && (isAdmin() || (resource != null && resource.data.userId == request.auth.uid));
+      allow create: if isSignedIn(); // Allow any signed in user to save attempt
+    }
+
+    match /leaderboards/{leaderboardId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn(); // Allow any signed in user to create leaderboard entry
+      allow update: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid); // Simplified
+    }
+
+    match /contents/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin() || (isSignedIn() && incoming().authorId == request.auth.uid && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.canUpload == true);
+      allow delete: if isAdmin() || (isSignedIn() && existing().authorId == request.auth.uid);
+    }
+
+    match /playlists/{id} {
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin() || (isSignedIn() && incoming().authorId == request.auth.uid && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.canUpload == true);
+      allow delete: if isAdmin() || (isSignedIn() && existing().authorId == request.auth.uid);
+    }
+
+    match /external_resources/{id} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    match /playlists/{playlistId} {
-      allow read: if resource.data.status == 'approved';
-      allow read: if isAuthenticated() && resource.data.authorId == request.auth.uid;
+    match /feedback/{id} {
       allow read: if isAdmin();
-      
-      allow create: if isAuthenticated() && 
-                    canUserUpload() &&
-                    isValidPlaylist(request.resource.data) && 
-                    request.resource.data.authorId == request.auth.uid &&
-                    request.resource.data.status == 'pending';
-      
-      allow create: if isAdmin() && isValidPlaylist(request.resource.data);
-                    
-      allow update: if isAdmin();
-      allow update: if isAuthenticated() && 
-                    resource.data.authorId == request.auth.uid && 
-                    isValidPlaylist(request.resource.data) &&
-                    request.resource.data.status == resource.data.status;
-                      
-      allow delete: if isAdmin();
+      allow create: if isSignedIn();
     }
 
-    match /feedback/{feedbackId} {
+    match /questions/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /newsletter_subscribers/{id} {
       allow read: if isAdmin();
-      allow create: if isAuthenticated() && 
-                    request.resource.data.text is string && 
-                    request.resource.data.text.size() > 0 &&
-                    request.resource.data.text.size() < 5000 &&
-                    request.resource.data.userId == request.auth.uid;
+      allow create: if true; // Public signup
     }
   }
 }

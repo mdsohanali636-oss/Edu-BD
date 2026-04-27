@@ -1,5 +1,6 @@
 {
-  "name": "EduBD",
+  "name": "Parodorshhi",
   "description": "Free study materials for Bangladeshi students including notes, textbook PDFs, board question papers, and live video classes.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": []
 }

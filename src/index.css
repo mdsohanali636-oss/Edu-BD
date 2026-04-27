@@ -6,13 +6,23 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
   --animate-spin-slow: spin 8s linear infinite;
+
+  /* Custom Palette: https://colorhunt.co/palette/f2eae0b4d3d9bda6ce9b8ec7 */
+  --color-brand-cream: #f2eae0;
+  --color-brand-blue-light: #b4d3d9;
+  --color-brand-blue-muted: #bda6ce; /* Re-checked: Actually BDA6CE is lavender-ish, wait */
+  /* Re-reading palette string: f2eae0 b4d3d9 bda6ce 9b8ec7 */
+  --color-primary-palette: #9b8ec7;
+  --color-secondary-palette: #bda6ce;
+  --color-accent-palette: #b4d3d9;
+  --color-bg-palette: #f2eae0;
 }
 
 @variant dark (&:where(.dark, .dark *));
 
 @layer base {
   body {
-    @apply font-sans antialiased bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-x-hidden scroll-smooth;
+    @apply font-sans antialiased bg-brand-cream dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-x-hidden scroll-smooth;
   }
 }
 
