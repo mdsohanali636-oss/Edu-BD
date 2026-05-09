@@ -5,13 +5,18 @@
       "description": "User account information",
       "type": "object",
       "properties": {
+        "uid": { "type": "string" },
         "name": { "type": "string" },
         "email": { "type": "string" },
+        "phoneNumber": { "type": "string" },
         "class": { "type": "string" },
         "role": { "type": "string", "enum": ["user", "admin"] },
+        "hasPremiumAccess": { "type": "boolean" },
+        "premiumExpiry": { "type": "number" },
+        "canUpload": { "type": "boolean" },
         "createdAt": { "type": "number" }
       },
-      "required": ["name", "email", "class", "role", "createdAt"]
+      "required": ["uid", "name", "email", "class", "role", "hasPremiumAccess", "createdAt"]
     },
     "Bookmark": {
       "title": "User Bookmark",
@@ -99,6 +104,7 @@
         "subject": { "type": "string" },
         "url": { "type": "string" },
         "status": { "type": "string" },
+        "isPremium": { "type": "boolean" },
         "createdAt": { "type": "number" }
       }
     },
@@ -111,6 +117,7 @@
         "description": { "type": "string" },
         "type": { "type": "string" },
         "status": { "type": "string" },
+        "isPremium": { "type": "boolean" },
         "createdAt": { "type": "number" }
       }
     },
@@ -146,6 +153,81 @@
         "email": { "type": "string" },
         "timestamp": { "type": "number" }
       }
+    },
+    "AcademicClass": {
+      "title": "Academic Class",
+      "description": "Custom academic level definition",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "order": { "type": "number" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["name", "order", "active"]
+    },
+    "AcademicSubject": {
+      "title": "Academic Subject",
+      "description": "Subject within a class",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "name": { "type": "string" },
+        "order": { "type": "number" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["classId", "name", "order", "active"]
+    },
+    "AcademicChapter": {
+      "title": "Academic Chapter",
+      "description": "Chapter within a subject",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "name": { "type": "string" },
+        "order": { "type": "number" },
+        "active": { "type": "boolean" },
+        "mcqCount": { "type": "number" },
+        "writtenCount": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["classId", "subjectId", "name", "order", "active"]
+    },
+    "AcademicTopic": {
+      "title": "Academic Topic",
+      "description": "Topic within a chapter",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "chapterId": { "type": "string" },
+        "name": { "type": "string" },
+        "order": { "type": "number" },
+        "active": { "type": "boolean" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "mcqCount": { "type": "number" },
+        "writtenCount": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["classId", "subjectId", "chapterId", "name", "order", "active"]
+    },
+    "ExamTemplate": {
+      "title": "Exam Preset Template",
+      "description": "Saved custom exam configuration",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "settings": { "type": "object" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "name", "settings", "createdAt"]
     }
   },
   "firestore": {
@@ -160,6 +242,11 @@
     "/feedback/{feedbackId}": { "schema": "Feedback", "description": "User feedback" },
     "/questions/{questionId}": { "schema": "Question", "description": "Global questions pool" },
     "/external_resources/{resourceId}": { "schema": "ExternalResource", "description": "External resource links" },
-    "/newsletter_subscribers/{subscriberId}": { "schema": "NewsletterSubscriber", "description": "Newsletter subscribers" }
+    "/newsletter_subscribers/{subscriberId}": { "schema": "NewsletterSubscriber", "description": "Newsletter subscribers" },
+    "/academic_classes/{classId}": { "schema": "AcademicClass", "description": "Academic classes" },
+    "/subjects/{subjectId}": { "schema": "AcademicSubject", "description": "Academic subjects" },
+    "/chapters/{chapterId}": { "schema": "AcademicChapter", "description": "Academic chapters" },
+    "/topics/{topicId}": { "schema": "AcademicTopic", "description": "Academic topics" },
+    "/exam_templates/{templateId}": { "schema": "ExamTemplate", "description": "Custom exam templates" }
   }
 }

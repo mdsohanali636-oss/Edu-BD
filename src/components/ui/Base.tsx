@@ -2,17 +2,19 @@ import * as React from 'react';
 import { motion } from 'motion/react';
 import { LucideIcon } from 'lucide-react';
 
-export interface CardProps {
+export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
   className?: string;
   onClick?: () => void;
+  key?: React.Key;
 }
 
-export const Card = ({ children, className = '', onClick }: CardProps) => (
+export const Card = ({ children, className = '', onClick, ...props }: CardProps) => (
   <motion.div
     whileHover={onClick ? { y: -4, transition: { duration: 0.3, ease: "easeOut" } } : {}}
     onClick={onClick}
-    className={`bg-white/80 dark:bg-zinc-900/50 backdrop-blur-xl rounded-3xl border border-zinc-200/60 dark:border-zinc-800/60 overflow-hidden shadow-[0_2px_10px_-3px_rgba(0,0,0,0.07)] hover:shadow-[0_20px_25px_-5px_rgba(0,0,0,0.1),0_10px_10px_-5px_rgba(0,0,0,0.04)] transition-all duration-300 cursor-pointer ${className}`}
+    className={`glass-card rounded-[32px] overflow-hidden transition-all duration-300 cursor-pointer ${className}`}
+    {...props}
   >
     {children}
   </motion.div>
@@ -67,8 +69,8 @@ export const Button = ({
   );
 };
 
-export const Badge = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
-  <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest whitespace-nowrap ${className}`}>
+export const Badge = ({ children, className = '', ...props }: { children: React.ReactNode; className?: string; key?: React.Key }) => (
+  <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest whitespace-nowrap ${className}`} {...props}>
     {children}
   </span>
 );

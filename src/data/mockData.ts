@@ -12,7 +12,8 @@ export const INITIAL_DATA: ContentItem[] = [
     status: 'approved',
     chapter: 'Chapter 2',
     authorId: 'system',
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    isPremium: false
   }
 ];
 
@@ -30,7 +31,8 @@ export const MOCK_EXAMS: Exam[] = [
     negativeValue: 0.25,
     status: 'approved',
     createdAt: Date.now(),
-    createdBy: 'system'
+    createdBy: 'system',
+    isPremium: false
   },
   {
     id: 'e2',
@@ -45,6 +47,7 @@ export const MOCK_EXAMS: Exam[] = [
     negativeValue: 0,
     status: 'approved',
     createdAt: Date.now(),
-    createdBy: 'system'
+    createdBy: 'system',
+    isPremium: false
   }
 ];

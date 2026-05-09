@@ -1,5 +1,18 @@
 export type Category = 'Notes' | 'Books' | 'Question Papers' | 'YouTube Classes' | 'External Resources' | 'Practice Sheet';
-export type AcademicClass = 'Class 6' | 'Class 7' | 'Class 8' | 'Class 9' | 'Class 10' | 'Class 11' | 'Class 12' | 'General' | 'Engineering Admission-science' | 'Medical Admission-science' | 'Varsity Admission-science' | 'Varsity Admission-humanities' | 'Varsity Admission-commerce';
+export type AcademicClass = 'Class 6' | 'Class 7' | 'Class 8' | 'Class 9' | 'Class 10' | 'Class 11' | 'Class 12' | 'SSC' | 'HSC' | 'Admission' | 'Job Prep' | 'General' | 'Engineering Admission-science' | 'Medical Admission-science' | 'Varsity Admission-science' | 'Varsity Admission-humanities' | 'Varsity Admission-commerce';
+
+export interface UserProfile {
+  uid: string;
+  name: string;
+  email: string;
+  phoneNumber?: string;
+  class: AcademicClass;
+  role: 'user' | 'admin';
+  hasPremiumAccess: boolean;
+  premiumExpiry?: number;
+  canUpload?: boolean;
+  createdAt: number;
+}
 
 export interface ContentItem {
   id: string;
@@ -16,7 +29,9 @@ export interface ContentItem {
   authorId?: string;
   status: 'pending' | 'approved' | 'rejected';
   chapter?: string;
+  tags?: string[];
   createdAt: number;
+  isPremium: boolean;
 }
 
 export interface Bookmark {
@@ -59,6 +74,7 @@ export interface Playlist {
   status: 'pending' | 'approved' | 'rejected';
   chapter?: string;
   createdAt: number;
+  isPremium: boolean;
 }
 
 export interface Question {
@@ -72,6 +88,7 @@ export interface Question {
   class: AcademicClass;
   subject: string;
   chapter: string;
+  topicId?: string;
   createdAt: number;
 }
 
@@ -82,6 +99,7 @@ export interface Exam {
   subject: string;
   chapter: string;
   chapterNameCustom?: string;
+  topicIds?: string[];
   timeLimit: number; // Added back as it's essential for timer logic
   examType: 'mcq' | 'written';
   totalQuestionsToShow: number;
@@ -91,6 +109,7 @@ export interface Exam {
   createdAt: number;
   updatedAt?: number;
   createdBy: string;
+  isPremium: boolean;
 }
 
 export interface ExamAttempt {
@@ -111,6 +130,7 @@ export interface ExamAttempt {
   unansweredCount: number;
   startTime: number;
   examTitle: string;
+  isPremium?: boolean;
 }
 
 export interface LeaderboardEntry {
@@ -127,4 +147,146 @@ export interface LeaderboardEntry {
   examTitle: string;
   firstSubmissionAt: number;
   totalAttempts: number;
+}
+
+export interface AcademicClassInfo {
+  id: string;
+  name: string;
+  active: boolean;
+  order: number;
+  createdAt: number;
+  updatedAt?: number;
+}
+
+export interface AcademicSubject {
+  id: string;
+  name: string;
+  classId: string;
+  active: boolean;
+  order: number;
+  icon?: string;
+  color?: string;
+  createdAt: number;
+  updatedAt?: number;
+}
+
+export interface AcademicChapter {
+  id: string;
+  name: string;
+  subjectId: string;
+  classId: string;
+  active: boolean;
+  order: number;
+  createdAt: number;
+  updatedAt?: number;
+}
+
+export interface AcademicTopic {
+  id: string;
+  name: string;
+  chapterId: string;
+  subjectId: string;
+  classId: string;
+  active: boolean;
+  order: number;
+  tags?: string[]; // e.g., 'Important', 'Board Favorite'
+  mcqCount?: number;
+  writtenCount?: number;
+  createdAt: number;
+  updatedAt?: number;
+}
+
+export interface Chapter {
+  id: string;
+  subjectId: string;
+  name: string;
+  mcqCount: number;
+  writtenCount: number;
+}
+
+export interface Subject {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+}
+
+export interface CustomExamSettings {
+  classId?: string;
+  subjects: string[];
+  chapters: string[]; // List of chapter IDs
+  topics: string[]; // List of topic IDs
+  mcqCount: number;
+  writtenCount: number;
+  duration: number; // in minutes
+  difficulty: 'Easy' | 'Medium' | 'Hard';
+  difficultyDistribution?: {
+    easy: number;
+    medium: number;
+    hard: number;
+  };
+  negativeMarking: boolean;
+  marksPerMcq: number;
+  marksPerWritten: number;
+  randomizeQuestions: boolean;
+  randomizeOptions: boolean;
+  strictMode: boolean;
+  fullscreenMode: boolean;
+  tabSwitchDetection: boolean;
+  preventCopyPaste: boolean;
+  instantResult: boolean;
+}
+
+export interface ExamTemplate {
+  id: string;
+  userId: string;
+  name: string;
+  settings: CustomExamSettings;
+  createdAt: number;
+}
+
+export interface UserAnalytics {
+  userId: string;
+  accuracy: number;
+  speed: number;
+  strongChapters: string[];
+  weakChapters: string[];
+  strongTopics: string[];
+  weakTopics: string[];
+  improvementData: { date: number; score: number }[];
+  mistakePatterns: string[];
+  fastestSubject: string;
+  fastestSpeed: number;
+  slowestSubject: string;
+  slowestSpeed: number;
+  examDNA: {
+    traits: string[];
+    description: string;
+  };
+}
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
 }
