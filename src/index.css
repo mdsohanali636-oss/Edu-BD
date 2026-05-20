@@ -57,7 +57,7 @@
   --bg-light: linear-gradient(135deg, #f8fafc, #eef2f7);
   --bg-dark: linear-gradient(135deg, #0f172a, #1e293b);
 
-  --card-light-bg: rgba(255, 255, 255, 0.6);
+  --card-light-bg: rgba(255, 255, 255, 0.65);
   --card-dark-bg: rgba(255, 255, 255, 0.05);
 
   --shadow-light-val: 0 10px 30px rgba(0, 0, 0, 0.08);
@@ -65,6 +65,10 @@
 
   --accent-blue-val: #3b82f6;
   --accent-pink-val: #ec4899;
+
+  /* Custom theme vars to enable bg-primary-palette and bg-brand-cream in Tailwind v4 */
+  --color-primary-palette: #4f46e5;
+  --color-brand-cream: #fafaf9;
 }
 
 @variant dark (&:where(.dark, .dark *));
@@ -129,13 +133,11 @@
     position: fixed;
     inset: 0;
     z-index: -3;
-    background: linear-gradient(-45deg, #f8fafc, #eef2f7, #f1f5f9, #e2e8f0);
-    background-size: 400% 400%;
-    animation: gradientMove 15s ease infinite;
+    background: linear-gradient(135deg, #f8fafc, #eef2f7);
   }
 
   .dark .animated-bg {
-    background: linear-gradient(-45deg, #0f172a, #1e293b, #0b1220, #111827);
+    background: linear-gradient(135deg, #0f172a, #0b1220);
   }
 
   .glow-layer {
@@ -143,18 +145,15 @@
     inset: 0;
     z-index: -2;
     pointer-events: none;
-    will-change: transform;
     background:
-      radial-gradient(circle at 20% 30%, rgba(59, 130, 246, 0.15), transparent 40%),
-      radial-gradient(circle at 80% 70%, rgba(236, 72, 153, 0.15), transparent 40%);
-    animation: floatGlow 12s ease-in-out infinite alternate;
+      radial-gradient(circle at 20% 30%, rgba(59, 130, 246, 0.08), transparent 50%),
+      radial-gradient(circle at 80% 70%, rgba(236, 72, 153, 0.08), transparent 50%);
   }
 
   .dark .glow-layer {
     background:
-      radial-gradient(circle at 20% 30%, rgba(59, 130, 246, 0.25), transparent 45%),
-      radial-gradient(circle at 80% 70%, rgba(236, 72, 153, 0.25), transparent 45%),
-      radial-gradient(circle at 50% 50%, rgba(34, 211, 238, 0.10), transparent 50%);
+      radial-gradient(circle at 20% 30%, rgba(59, 130, 246, 0.12), transparent 60%),
+      radial-gradient(circle at 80% 70%, rgba(236, 72, 153, 0.12), transparent 60%);
   }
 
   @keyframes gradientMove {
@@ -173,7 +172,7 @@
     position: relative;
     width: 100%;
     max-width: 100%;
-    height: 160px;
+    height: 120px;
     overflow: hidden;
     line-height: 0;
     pointer-events: none;
@@ -182,9 +181,8 @@
 
   .wave {
     position: absolute;
-    width: 200%;
+    width: 100%;
     height: 100%;
-    will-change: transform;
   }
 
   .wave svg {
@@ -253,16 +251,17 @@
 
 @layer utilities {
   .glass {
-    @apply bg-white/70 dark:bg-zinc-900/70 backdrop-blur-md border border-white/20 dark:border-zinc-800/50;
+    @apply bg-white/65 dark:bg-zinc-900/70 backdrop-blur-md border border-white/40 dark:border-zinc-800/50 text-zinc-900 dark:text-inherit;
   }
   
   .glass-card {
-    @apply backdrop-blur-[10px] rounded-[16px] transition-all duration-300;
+    @apply backdrop-blur-[10px] rounded-[16px] transition-all duration-300 border border-white/40 dark:border-zinc-800/50;
     background: var(--card-light-bg);
     box-shadow: var(--shadow-light-val);
   }
   
   .dark .glass-card {
+    @apply border-transparent dark:border-zinc-800/50;
     background: var(--card-dark-bg);
     box-shadow: var(--shadow-dark-val);
   }
@@ -307,5 +306,50 @@
 
   .perspective-1000 {
     perspective: 1000px;
+  }
+}
+
+/* ==========================================================
+   PARODORSHHI ACCESSIBILITY & HIGH CONTRAST LIGHT MODE
+   ========================================================== */
+html:not(.dark) {
+  /* Slightly darker text overrides for accessibility without breaking visual layers */
+  .text-zinc-400, .text-slate-400, .text-gray-400, .text-neutral-400 {
+    color: #334155 !important; /* Slightly darker slate for secondary labels */
+    font-weight: 500; /* Slightly bolder for text sharpness */
+  }
+
+  .text-zinc-500, .text-slate-500, .text-gray-500, .text-neutral-500 {
+    color: #1e293b !important; /* Dark slate for muted info */
+  }
+
+  .text-zinc-600, .text-slate-600, .text-gray-600, .text-neutral-600,
+  .text-zinc-700, .text-slate-700, .text-gray-700, .text-neutral-700,
+  .text-zinc-800, .text-slate-800, .text-gray-800, .text-neutral-800,
+  .text-zinc-900, .text-slate-900, .text-gray-900, .text-neutral-900 {
+    color: #09090b !important; /* High-contrast clean custom charcoal black */
+  }
+
+  /* Optimize buttons that might have pale text */
+  button, .btn {
+    &.text-zinc-400, &.text-zinc-500 {
+      color: #1e293b !important;
+      font-weight: 600 !important;
+    }
+  }
+
+  /* Native input/form controls typed values must be deep dark color */
+  input, select, textarea {
+    color: #09090b !important;
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: #475569 !important;
+    opacity: 0.9 !important;
+  }
+
+  /* Make sure icons are clear and rich of contrast */
+  svg.text-zinc-400, svg.text-slate-400 {
+    color: #334155 !important;
   }
 }

@@ -1,6 +1,13 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import React, { useState, useMemo, useEffect, useRef, ChangeEvent, FormEvent, cloneElement, useCallback } from 'react';
 import { 
+  MathQuestionContent, 
+  MathOptionContent, 
+  parseQuestionText, 
+  parseOption, 
+  serializeQuestionText 
+} from './components/Exam/MathQuestionContent';
+import { 
   Search, 
   BookOpen, 
   FileText, 
@@ -67,73 +74,35 @@ import {
   Sparkles,
   Zap,
   MousePointer2,
-  File as FileIcon
+  File as FileIcon,
+  Image as ImageIcon
 } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
 import { Card, Button, Badge } from './components/ui/Base';
 import { INITIAL_DATA, MOCK_EXAMS } from './data/mockData';
-import { ContentItem, Category, AcademicClass, ExternalResource, Feedback, Playlist, Exam, Question, ExamAttempt, LeaderboardEntry, CustomExamSettings, AcademicClassInfo, AcademicSubject, AcademicChapter, OperationType, FirestoreErrorInfo } from './types';
+import { ContentItem, Category, AcademicClass, ExternalResource, Feedback, Playlist, Exam, Question, ExamAttempt, LeaderboardEntry, CustomExamSettings, AcademicClassInfo, AcademicSubject, AcademicChapter, AcademicTopic, AcademicGroup, OperationType, FirestoreErrorInfo } from './types';
+import { supabase } from './supabaseClient';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { PremiumExamSection } from './components/PremiumExam/PremiumExamSection';
 import { AcademicManagement } from './components/Admin/AcademicManagement';
-import { 
-  collection, 
-  addDoc, 
-  getDocs, 
-  getDoc,
-  query, 
-  where, 
-  onSnapshot, 
-  doc, 
-  setDoc, 
-  deleteDoc,
-  orderBy,
-  serverTimestamp,
-  limit,
-  updateDoc,
-  increment,
-  writeBatch
-} from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL, uploadBytes } from 'firebase/storage';
-import { User, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
-import { auth, db, storage, googleProvider, signInWithPopup, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, sendPasswordResetEmail } from './firebase';
+import { LandingPage } from './components/Landing/LandingPage';
+import { PdfViewer } from './components/ui/PdfViewer';
+import { TiltContainer, FlyInteraction, MiniRobot, WaveDivider, ScrollSection } from './components/Landing/LandingComponents';
+import { supabaseService, TABLE_MAP } from './services/supabaseService';
+import { User } from '@supabase/supabase-js';
 
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
+// Firebase utilities from types.ts were already imported, removing local duplicates.
 
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null, setError?: (err: string | null) => void) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-    },
+function handleSupabaseError(error: any, operationType: OperationType, path: string | null, setError?: (err: string | null) => void) {
+  const message = error?.message || error?.details || (typeof error === 'string' ? error : JSON.stringify(error));
+  const errInfo = {
+    error: message,
     operationType,
     path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  };
+  console.error('Supabase Error: ', JSON.stringify(errInfo));
   if (setError) {
-    setError(`Firestore ${operationType} error at ${path}: ${errInfo.error}`);
+    setError(`Supabase ${operationType} error at ${path}: ${message}`);
   }
 }
 
@@ -157,93 +126,9 @@ const formatDate = (date: any) => {
   }
 };
 
-const TiltContainer = ({ children, className = "", style = {} }: { children: React.ReactNode, className?: string, style?: any }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [transform, setTransform] = useState("perspective(1000px) rotateX(0deg) rotateY(0deg) scale(1)");
-  const [isResetting, setIsResetting] = useState(false);
+// TiltContainer moved to LandingComponents.tsx
 
-  const handleMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (window.innerWidth < 768) return;
-    if (!containerRef.current) return;
-    setIsResetting(false);
-    const rect = containerRef.current.getBoundingClientRect();
-    
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    const midX = rect.width / 2;
-    const midY = rect.height / 2;
-    
-    const rotateY = ((x - midX) / midX) * 10;
-    const rotateX = -((y - midY) / midY) * 10;
-    
-    setTransform(`
-      perspective(1000px)
-      rotateX(${rotateX}deg)
-      rotateY(${rotateY}deg)
-      scale(1.03)
-    `);
-  };
-
-  const handleLeave = () => {
-    if (window.innerWidth < 768) return;
-    setIsResetting(true);
-    setTransform("perspective(1000px) rotateX(0deg) rotateY(0deg) scale(1)");
-    setTimeout(() => {
-      setIsResetting(false);
-    }, 400);
-  };
-
-  return (
-    <div 
-      ref={containerRef}
-      onMouseMove={handleMove}
-      onMouseLeave={handleLeave}
-      className={`tilt ${isResetting ? 'reset' : ''} ${className} overflow-hidden md:overflow-visible`}
-      style={{ ...style, transform, maxWidth: '100%' }}
-    >
-      <div className="tilt-inner h-full w-full overflow-hidden md:overflow-visible">
-        {children}
-      </div>
-    </div>
-  );
-};
-
-const WaveDivider = () => (
-  <div className="wave-transition">
-    <div className="wave wave-back wave-back-anim">
-      <svg viewBox="0 0 1440 320" preserveAspectRatio="none">
-        <path d="M0,160 C480,280 960,40 1440,160 L1440,320 L0,320 Z"></path>
-      </svg>
-    </div>
-    <div className="wave wave-mid wave-mid-anim">
-      <svg viewBox="0 0 1440 320" preserveAspectRatio="none">
-        <path d="M0,180 C480,320 960,0 1440,180 L1440,320 L0,320 Z"></path>
-      </svg>
-    </div>
-    <div className="wave wave-front wave-front-anim">
-      <svg viewBox="0 0 1440 320" preserveAspectRatio="none">
-        <path d="M0,200 C480,260 960,60 1440,200 L1440,320 L0,320 Z"></path>
-      </svg>
-    </div>
-  </div>
-);
-
-const ScrollSection = ({ children, id, className = "", style = {} }: { children: React.ReactNode, id?: string, className?: string, style?: any }) => {
-  return (
-    <motion.section
-      id={id}
-      style={{ ...style, transformStyle: typeof window !== 'undefined' && window.innerWidth > 768 ? "preserve-3d" : "flat" }}
-      initial={{ opacity: 0, y: 20 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: "-50px" }}
-      transition={{ duration: 0.6, ease: "easeOut" }}
-      className={`relative w-full max-w-full overflow-x-hidden ${className}`}
-    >
-      {children}
-    </motion.section>
-  );
-};
+// WaveDivider and ScrollSection moved to LandingComponents.tsx
 
 const getYouTubePlaylistId = (url: string) => {
   // Support formats like:
@@ -266,11 +151,16 @@ const getEmbedUrl = (url: string | null) => {
   
   // Google Drive Link Handling
   if (url.includes('drive.google.com')) {
-    // Extract file ID from various Drive URL formats
     const fileIdMatch = url.match(/\/d\/([^\/]+)/) || url.match(/id=([^\&]+)/);
     if (fileIdMatch && fileIdMatch[1]) {
       return `https://drive.google.com/file/d/${fileIdMatch[1]}/preview`;
     }
+  }
+
+  // Handle PDF files directly using Google Docs Viewer proxy
+  // This is the most reliable way to bypass browser "Blocked" or CSP issues
+  if (url.toLowerCase().endsWith('.pdf') || url.includes('/storage/v1/object/public/')) {
+    return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
   }
   
   return url;
@@ -278,980 +168,48 @@ const getEmbedUrl = (url: string | null) => {
 
 
 
-const CharacterSpeechBubble = ({ children }: { children: React.ReactNode }) => (
-  <motion.div 
-    initial={{ opacity: 0, scale: 0.5, y: 20 }}
-    animate={{ opacity: 1, scale: 1, y: 0 }}
-    className="relative bg-white dark:bg-zinc-900 border-2 border-zinc-100 dark:border-white/10 rounded-2xl px-6 py-4 shadow-2xl mb-8 max-w-[280px] text-center"
-  >
-    <div className="text-lg font-bold text-zinc-900 dark:text-white leading-tight">
-      {children}
-    </div>
-    <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-white dark:bg-zinc-900 border-r-2 border-b-2 border-zinc-100 dark:border-white/10 rotate-45" />
-  </motion.div>
-);
+// CharacterSpeechBubble and CinematicBackground moved to LandingComponents.tsx
 
-const CinematicBackground = ({ mousePos, isNight }: { mousePos: { x: number, y: number }, isNight: boolean }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+// FlyInteraction moved to LandingComponents.tsx
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+// NewBoyCharacter moved to LandingComponents.tsx
 
-    canvas.width = 190;
-    canvas.height = 228;
 
-    const drops = Array.from({ length: 45 }, () => ({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      s: 1.2 + Math.random() * 2.8,
-      l: 7 + Math.random() * 13,
-      o: 0.1 + Math.random() * 0.28
-    }));
 
-    const drawCity = () => {
-      const h = canvas.height;
-      const blds = [
-        { x: 0, w: 28, h: 80 }, { x: 22, w: 18, h: 105 }, { x: 36, w: 24, h: 92 },
-        { x: 56, w: 32, h: 128 }, { x: 84, w: 18, h: 98 }, { x: 99, w: 28, h: 118 },
-        { x: 124, w: 24, h: 95 }, { x: 145, w: 28, h: 112 }, { x: 170, w: 18, h: 83 },
-        { x: 185, w: 28, h: 103 }
-      ];
-      blds.forEach(b => {
-        ctx.fillStyle = '#10182A';
-        ctx.fillRect(b.x, h - b.h, b.w, b.h);
-        for (let wy = h - b.h + 8; wy < h - 6; wy += 13) {
-          for (let wx = b.x + 3; wx < b.x + b.w - 7; wx += 9) {
-            if (Math.random() > 0.38) {
-              const wc = ['rgba(255,220,100,0.75)', 'rgba(255,255,200,0.65)', 'rgba(200,220,255,0.6)'][Math.floor(Math.random() * 3)];
-              ctx.fillStyle = wc; ctx.fillRect(wx, wy, 5, 7);
-            }
-          }
+// Landing page components moved to LandingPage.tsx and LandingComponents.tsx
+
+const Logo = ({ className = "h-10 w-auto", alt = "Parodorshhi Logo" }: { className?: string, alt?: string }) => {
+  const [error, setError] = useState(false);
+  const paths = [
+    "/api/v1/files/Gemini_Generated_Image_ro03d6ro03d6ro03.png",
+    "/api/v1/files/input_file_0.png",
+    "/api/v1/files/input_file_1.png"
+  ];
+  const [pathIndex, setPathIndex] = useState(0);
+
+  if (error && pathIndex >= paths.length - 1) {
+    return <span className="font-black text-rose-500 tracking-tighter">Paro</span>;
+  }
+
+  return (
+    <img 
+      src={paths[pathIndex]} 
+      alt={alt} 
+      className={`${className} object-contain transition-all duration-300 drop-shadow-[0_2px_10px_rgba(255,255,255,0.2)]`}
+      referrerPolicy="no-referrer"
+      onError={() => {
+        if (pathIndex < paths.length - 1) {
+          setPathIndex(pathIndex + 1);
+        } else {
+          setError(true);
         }
-      });
-    };
-
-    const drawClouds = () => {
-      ctx.fillStyle = 'rgba(255,255,255,0.72)';
-      [[28, 38, 28], [118, 22, 22], [78, 58, 18]].forEach(([x, y, r]) => {
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.arc(x + r * 0.7, y - r * 0.3, r * 0.7, 0, Math.PI * 2);
-        ctx.arc(x + r * 1.4, y, r * 0.9, 0, Math.PI * 2);
-        ctx.fill();
-      });
-    };
-
-    let animationFrame: number;
-    const animate = () => {
-      const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      if (isNight) {
-        g.addColorStop(0, '#0b1320'); g.addColorStop(0.5, '#14233A'); g.addColorStop(1, '#0e1b2e');
-      } else {
-        g.addColorStop(0, '#A8D8EA'); g.addColorStop(0.5, '#87CEEB'); g.addColorStop(1, '#b8dcf0');
-      }
-      ctx.fillStyle = g; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      isNight ? drawCity() : drawClouds();
-      drops.forEach(d => {
-        ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - 1, d.y + d.l);
-        ctx.strokeStyle = `rgba(180,210,240,${d.o})`; ctx.lineWidth = 1; ctx.stroke();
-        d.y += d.s; if (d.y > canvas.height) { d.y = -d.l; d.x = Math.random() * canvas.width; }
-      });
-      animationFrame = requestAnimationFrame(animate);
-    };
-    animate();
-    return () => cancelAnimationFrame(animationFrame);
-  }, [isNight]);
-
-  const dx = (mousePos.x - window.innerWidth / 2) / (window.innerWidth / 2);
-  const dy = (mousePos.y - window.innerHeight / 2) / (window.innerHeight / 2);
-
-  return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
-      {/* Wall & Floor */}
-      <div className={`absolute inset-0 transition-colors duration-500 ${isNight ? 'bg-[linear-gradient(180deg,#0E1A2B_0%,#142035_62%,#080E17_62%)]' : 'bg-[linear-gradient(180deg,#F2E5D0_0%,#EDD9BC_62%,#C9A27A_62%)]'}`} />
-      
-      {/* Stars for dark mode */}
-      <div className={`absolute inset-0 transition-opacity duration-500 ${isNight ? 'opacity-100' : 'opacity-0'}`}>
-        {Array.from({ length: 45 }).map((_, i) => (
-          <div 
-            key={i}
-            className="absolute bg-white rounded-full animate-sparkle"
-            style={{ 
-              left: `${Math.random() * 100}%`, 
-              top: `${Math.random() * 60}%`, 
-              width: `${1 + Math.random() * 2.5}px`, 
-              height: `${1 + Math.random() * 2.5}px`,
-              '--duration': `${0.8 + Math.random() * 2}s`,
-              '--dl': `${Math.random() * 2}s`
-            } as any}
-          />
-        ))}
-      </div>
-
-      <div 
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-[640px] h-[380px] transition-all duration-500"
-        style={{ 
-          background: `radial-gradient(ellipse at 50% 0%, ${isNight ? 'rgba(130,80,255,0.2)' : 'rgba(255,203,107,0.45)'} 0%, transparent 68%)`,
-          transform: `translateX(calc(-50% + ${dx * -5}px))`
-        }} 
-      />
-
-      {/* Window */}
-      <div 
-        className={`absolute top-[55px] right-[10%] w-[190px] h-[228px] border-[10px] rounded-lg overflow-hidden shadow-2xl transition-all duration-500 ${isNight ? 'border-[#1E2D40]' : 'border-[#C48E4A]'}`}
-        style={{ transform: `translate(${dx * 7}px, ${dy * 4}px)` }}
-      >
-        <canvas ref={canvasRef} className="absolute inset-0 z-1" />
-        <div className={`absolute top-1/2 left-0 right-0 h-2 -translate-y-1/2 z-[3] ${isNight ? 'bg-[#1E2D40]' : 'bg-[#C48E4A]'}`} />
-        <div className={`absolute top-0 bottom-0 left-1/2 w-2 -translate-x-1/2 z-[3] ${isNight ? 'bg-[#1E2D40]' : 'bg-[#C48E4A]'}`} />
-      </div>
-
-      {/* Fairy Lights */}
-      <div className="absolute top-0 left-0 right-0 h-14 z-[3]">
-        <div className="absolute top-[10px] left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-black/15 to-transparent" />
-        {Array.from({ length: 24 }).map((_, i) => {
-          const colors = ['#FFD700', '#FF6BAE', '#A0E7FF', '#90FF90', '#FFB347', '#FF9DE2', '#B5EEFF'];
-          const x = (i / 23) * 96 + 2;
-          const y = 10 + Math.sin(i * 0.85) * 13;
-          const c = colors[i % colors.length];
-          return (
-            <div
-              key={i}
-              className="absolute w-[9px] h-[11px] rounded-[50%_50%_40%_40%] animate-twinkle"
-              style={{ 
-                left: `${x}%`,
-                top: `${y}px`,
-                backgroundColor: c,
-                boxShadow: `0 0 7px ${c}`,
-                '--duration': `${1.4 + Math.random() * 2.2}s`,
-                '--dl': `${Math.random() * 2}s`
-              } as any}
-            />
-          );
-        })}
-      </div>
-
-      {/* Desk */}
-      <div className={`absolute bottom-0 left-0 right-0 h-[110px] border-t-8 transition-colors duration-500 z-[4] ${isNight ? 'bg-[#0A0F18] border-[#0F1520]' : 'bg-[#8B5E3C] border-[#A0714B]'}`} />
-
-      {/* Floating Particles */}
-      {Array.from({ length: 14 }).map((_, i) => {
-        const colors = ['rgba(255,200,100,0.45)', 'rgba(120,200,255,0.4)', 'rgba(255,150,200,0.38)', 'rgba(150,255,180,0.38)'];
-        return (
-          <div
-            key={i}
-            className="absolute rounded-full opacity-0 animate-floatup"
-            style={{
-              left: `${5 + Math.random() * 90}%`,
-              bottom: `${18 + Math.random() * 22}%`,
-              width: `${3 + Math.random() * 5}px`,
-              height: `${3 + Math.random() * 5}px`,
-              backgroundColor: colors[i % 4],
-              '--duration': `${6 + Math.random() * 9}s`,
-              '--dl': `${Math.random() * 9}s`
-            } as any}
-          />
-        );
-      })}
-    </div>
-  );
-};
-
-const FlyInteraction = ({ onShoo }: { onShoo: () => void }) => {
-  const [pos, setPos] = useState({ x: -10, y: 30 });
-  const [isActive, setIsActive] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsActive(true);
-    }, 8000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (!isActive) return null;
-
-  return (
-    <motion.div
-      animate={{ 
-        x: [pos.x + "%", "50%", pos.x + "%"], 
-        y: [pos.y + "%", "30%", pos.y + "%"] 
       }}
-      transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-      className="absolute w-6 h-6 z-50 pointer-events-auto cursor-pointer"
-      onMouseEnter={() => {
-        onShoo();
-        setPos({ x: Math.random() * 100, y: Math.random() * 100 });
-      }}
-    >
-      <svg viewBox="0 0 22 22" width="22" height="22">
-        <ellipse cx="11" cy="14" rx="5.5" ry="3.5" fill="#222"/>
-        <motion.ellipse 
-          animate={{ opacity: [0.3, 0.8] }}
-          transition={{ duration: 0.1, repeat: Infinity }}
-          cx="6" cy="10" rx="5.5" ry="3" fill="rgba(160,210,255,0.65)" 
-          transform="rotate(-20 6 10)"
-        />
-        <motion.ellipse 
-          animate={{ opacity: [0.3, 0.8] }}
-          transition={{ duration: 0.1, repeat: Infinity }}
-          cx="16" cy="10" rx="5.5" ry="3" fill="rgba(160,210,255,0.65)" 
-          transform="rotate(20 16 10)"
-        />
-        <circle cx="9" cy="11.5" r="1.8" fill="#AA0000"/>
-        <circle cx="13" cy="11.5" r="1.8" fill="#AA0000"/>
-      </svg>
-    </motion.div>
-  );
-};
-
-const NewBoyCharacter = ({ mood, mousePos, isTyping }: { mood: string, mousePos: { x: number, y: number }, isTyping: boolean }) => {
-  const eyeX = useSpring(0, { stiffness: 150, damping: 20 });
-  const eyeY = useSpring(0, { stiffness: 150, damping: 20 });
-
-  useEffect(() => {
-    if (isTyping) {
-      eyeX.set(0);
-      eyeY.set(8);
-    } else {
-      const centerX = window.innerWidth / 2;
-      const centerY = window.innerHeight / 2;
-      const dx = (mousePos.x - centerX) / 30;
-      const dy = (mousePos.y - centerY) / 30;
-      eyeX.set(Math.max(-10, Math.min(10, dx)));
-      eyeY.set(Math.max(-10, Math.min(10, dy)));
-    }
-  }, [mousePos, isTyping, eyeX, eyeY]);
-
-  return (
-    <div id="svgwrap" className="relative animate-breathe origin-bottom">
-      <svg id="charsvg" viewBox="0 0 300 420" width="270" height="368" className="drop-shadow-2xl">
-        <defs>
-          <radialGradient id="tg" cx="50%" cy="30%">
-            <stop offset="0%" stopColor="#74B9FF" />
-            <stop offset="100%" stopColor="#2471A3" />
-          </radialGradient>
-          <filter id="glow">
-            <feGaussianBlur stdDeviation="2.5" result="c" />
-            <feMerge>
-              <feMergeNode in="c" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
-        
-        {/* Shadow */}
-        <ellipse cx="150" cy="412" rx="88" ry="11" fill="rgba(0,0,0,0.13)" />
-        
-        {/* Pants */}
-        <rect x="102" y="303" width="46" height="96" rx="17" fill="#243447" />
-        <rect x="152" y="303" width="46" height="96" rx="17" fill="#243447" />
-        <rect x="122" y="310" width="3" height="82" rx="1" fill="rgba(255,255,255,0.07)" />
-        <rect x="172" y="310" width="3" height="82" rx="1" fill="rgba(255,255,255,0.07)" />
-        
-        {/* Shoes */}
-        <ellipse cx="123" cy="396" rx="29" ry="13" fill="#181825" />
-        <ellipse cx="177" cy="396" rx="29" ry="13" fill="#181825" />
-        <ellipse cx="118" cy="392" rx="11" ry="4.5" fill="rgba(255,255,255,0.13)" />
-        <ellipse cx="172" cy="392" rx="11" ry="4.5" fill="rgba(255,255,255,0.13)" />
-        
-        {/* Hoodie body */}
-        <path d="M87,198 Q80,252 76,308 L224,308 Q220,252 213,198 Q175,214 150,214 Q125,214 87,198 Z" fill="#38BCC8" />
-        <path d="M87,198 Q80,252 76,308 L150,308 L150,214 Q125,214 87,198 Z" fill="rgba(255,255,255,0.05)" />
-        
-        {/* Pocket */}
-        <rect x="114" y="260" width="72" height="36" rx="10" fill="#2EAAB5" />
-        <rect x="116" y="262" width="68" height="32" rx="9" fill="rgba(0,0,0,0.05)" />
-        
-        {/* Hoodie strings */}
-        <line x1="143" y1="214" x2="139" y2="244" stroke="#2EAAB5" strokeWidth="2.2" />
-        <line x1="157" y1="214" x2="161" y2="244" stroke="#2EAAB5" strokeWidth="2.2" />
-        <circle cx="139" cy="246" r="3.5" fill="#26979F" />
-        <circle cx="161" cy="246" r="3.5" fill="#26979F" />
-        
-        {/* Collar */}
-        <path d="M108,196 Q150,210 192,196 Q174,205 150,207 Q126,205 108,196 Z" fill="#2EAAB5" />
-
-        {/* LEFT ARM */}
-        <g id="armleft" style={{ display: mood === 'welcoming' || mood === 'annoyed' ? 'none' : 'block' }}>
-          <path d="M89,204 Q56,232 52,292 Q52,313 70,316 Q90,318 97,298 Q102,258 110,218 Z" fill="#38BCC8" />
-          <ellipse cx="63" cy="311" rx="19" ry="13" fill="#F0B07A" transform="rotate(-15 63 311)" />
-        </g>
-        
-        <g id="armwave" style={{ display: mood === 'annoyed' ? 'block' : 'none', transformOrigin: '92px 210px' }}>
-          <motion.path 
-            animate={{ rotate: [0, 20, -20, 0] }}
-            transition={{ duration: 0.5, repeat: Infinity }}
-            d="M89,204 Q56,220 45,260 Q36,290 50,304 Q64,316 78,295 Q94,264 110,218 Z" 
-            fill="#38BCC8" 
-          />
-          <ellipse cx="52" cy="300" rx="18" ry="12" fill="#F0B07A" transform="rotate(-35 52 300)" />
-        </g>
-
-        <g id="armthumb" style={{ display: mood === 'welcoming' ? 'block' : 'none', transformOrigin: '92px 210px' }}>
-          <path d="M89,204 Q65,190 52,165 Q44,145 55,135 Q65,126 75,145 Q85,165 110,218 Z" fill="#38BCC8" />
-          <ellipse cx="57" cy="131" rx="15" ry="12" fill="#F0B07A" transform="rotate(20 57 131)" />
-        </g>
-
-        {/* RIGHT ARM */}
-        <g id="armright">
-          <path d="M211,204 Q244,232 248,311 Q248,313 230,316 Q210,318 203,298 Q198,258 190,218 Z" fill="#38BCC8" />
-          <ellipse cx="237" cy="311" rx="19" ry="13" fill="#F0B07A" transform="rotate(15 237 311)" />
-        </g>
-        
-        <rect x="196" y="222" width="70" height="92" rx="9" fill="#1C2938" />
-        <rect x="200" y="226" width="62" height="84" rx="7" fill="#2471A3" />
-        <rect x="203" y="229" width="56" height="78" rx="5" fill="url(#tg)" />
-
-        <rect x="129" y="184" width="42" height="27" rx="7" fill="#F0B07A" />
-        <ellipse cx="150" cy="118" rx="73" ry="79" fill="#F5B57A" />
-        <ellipse cx="79" cy="120" rx="15" ry="20" fill="#F5B57A" />
-        <ellipse cx="221" cy="120" rx="15" ry="20" fill="#F5B57A" />
-
-        <ellipse cx="150" cy="62" rx="68" ry="46" fill="#221409" />
-        <path d="M83,88 Q79,48 102,33 Q122,20 150,18 Q178,20 198,33 Q221,48 217,88 Q198,56 150,54 Q102,56 83,88 Z" fill="#2D1B0E" />
-
-        <motion.path 
-          animate={{ d: mood === 'annoyed' ? 'M107,93 Q121,90 134,92' : mood === 'excited' ? 'M107,77 Q121,69 134,74' : 'M107,88 Q121,80 134,85' }}
-          stroke="#2D1B0E" strokeWidth="4.5" fill="none" strokeLinecap="round" 
-        />
-        <motion.path 
-          animate={{ d: mood === 'annoyed' ? 'M166,92 Q179,90 193,93' : mood === 'excited' ? 'M166,74 Q179,69 193,77' : 'M166,85 Q179,80 193,88' }}
-          stroke="#2D1B0E" strokeWidth="4.5" fill="none" strokeLinecap="round" 
-        />
-
-        <g>
-          <ellipse cx="119" cy="114" rx="20" ry="22" fill="white" />
-          <motion.circle style={{ x: eyeX, y: eyeY }} cx={119} cy={114} r={13.5} fill="#5A3E28" />
-          <motion.circle style={{ x: eyeX, y: eyeY }} cx={119} cy={114} r={7.8} fill="#160C06" />
-        </g>
-        <g>
-          <ellipse cx="181" cy="114" rx="20" ry="22" fill="white" />
-          <motion.circle style={{ x: eyeX, y: eyeY }} cx={181} cy={114} r={13.5} fill="#5A3E28" />
-          <motion.circle style={{ x: eyeX, y: eyeY }} cx={181} cy={114} r={7.8} fill="#160C06" />
-        </g>
-
-        <ellipse cx="150" cy="140" rx="8.5" ry="5.5" fill="#E99A5E" opacity="0.65" />
-        <motion.path 
-          animate={{ 
-            d: mood === 'excited' ? "M120,157 Q150,186 180,157" :
-               mood === 'thinking' ? "M130,164 Q152,172 170,163" :
-               mood === 'annoyed' ? "M131,170 Q150,163 169,170" :
-               mood === 'welcoming' ? "M123,160 Q150,182 177,160" :
-               "M129,162 Q150,176 171,162"
-          }}
-          stroke="#C47A4A" strokeWidth="3.5" fill="none" strokeLinecap="round" 
-        />
-      </svg>
-    </div>
-  );
-};
-
-
-
-const LandingPage = ({ onGoogleLogin, onEmailLogin, onEmailSignUp, onForgotPassword, onPhoneSignIn, onVerifyOtp, error, isLoading }: { 
-  onGoogleLogin: () => void;
-  onEmailLogin: (email: string, pass: string) => void;
-  onEmailSignUp: (name: string, email: string, pass: string, academicClass: AcademicClass) => void;
-  onForgotPassword: (email: string) => void;
-  onPhoneSignIn: (phone: string) => Promise<any>;
-  onVerifyOtp: (otp: string) => Promise<void>;
-  error: string | null;
-  isLoading: boolean;
-}) => {
-  const [mode, setMode] = useState<'landing' | 'login' | 'signup' | 'forgot-password' | 'phone-login' | 'otp-verify'>('landing');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
-  const [name, setName] = useState('');
-  const [academicClass, setAcademicClass] = useState<AcademicClass>('Class 9');
-  const [resetSent, setResetSent] = useState(false);
-  const [resendTimer, setResendTimer] = useState(0);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [inputVal, setInputVal] = useState('');
-  const [mood, setMood] = useState<'idle' | 'excited' | 'welcoming' | 'thinking' | 'annoyed'>('idle');
-
-  useEffect(() => {
-    const handleMove = (e: MouseEvent) => setMousePos({ x: e.clientX, y: e.clientY });
-    window.addEventListener('mousemove', handleMove);
-    return () => window.removeEventListener('mousemove', handleMove);
-  }, []);
-
-  const handleInputSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    processCommand(inputVal);
-  };
-
-  const processCommand = (val: string) => {
-    const v = val.toLowerCase().trim();
-    if (v === 'login' || v === 'log in' || v === 'sign in') {
-      setMood('excited');
-      setTimeout(() => setMode('login'), 400);
-    } else if (v === 'signup' || v === 'sign up' || v === 'register') {
-      setMood('welcoming');
-      setTimeout(() => setMode('signup'), 400);
-    }
-  };
-
-  useEffect(() => {
-    if (mode === 'landing') {
-      const v = inputVal.toLowerCase().trim();
-      const loginWords = ['login', 'log in', 'sign in'];
-      const signupWords = ['signup', 'sign up', 'register'];
-      
-      if (loginWords.includes(v) || signupWords.includes(v)) {
-        processCommand(inputVal);
-      } else if (inputVal.length > 0) {
-        setMood('thinking');
-      } else {
-        setMood('idle');
-      }
-    }
-  }, [inputVal, mode]);
-
-  const [isNight, setIsNight] = useState(() => {
-    const saved = typeof window !== 'undefined' ? localStorage.getItem('theme') : null;
-    if (saved) return saved === 'dark';
-    return new Date().getHours() > 18 || new Date().getHours() < 6;
-  });
-
-  useEffect(() => {
-    if (isNight) document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
-  }, [isNight]);
-  
-  return (
-    <div className={`min-h-[100dvh] flex flex-col items-center justify-end pb-12 sm:pb-24 relative overflow-hidden transition-all duration-500`}>
-      <CinematicBackground mousePos={mousePos} isNight={isNight} />
-      
-      {/* Branding - Website Name & Logo */}
-      <motion.div 
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        className="absolute top-6 left-6 z-50 flex items-center gap-4 pointer-events-none"
-      >
-        <div className="bg-white/10 dark:bg-black/20 backdrop-blur-xl border border-white/20 p-2.5 rounded-2xl shadow-2xl">
-          <img src="/api/v1/files/input_file_0.png" alt="Parodorshhi Logo" className="h-8 sm:h-10 w-auto brightness-110 contrast-125 drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]" />
-        </div>
-        <h1 className="text-xl sm:text-2xl font-black tracking-tighter text-zinc-900/80 dark:text-white/60 uppercase">
-          Parodorshhi
-        </h1>
-      </motion.div>
-
-      <motion.button
-        onClick={() => {
-          const next = !isNight;
-          setIsNight(next);
-          localStorage.setItem('theme', next ? 'dark' : 'light');
-        }}
-        className="fixed top-[18px] right-[18px] w-[42px] h-[42px] rounded-full bg-white dark:bg-zinc-800 border-none cursor-pointer text-xl flex items-center justify-center shadow-lg z-50 transition-all hover:scale-110"
-      >
-        {isNight ? '🌙' : '☀️'}
-      </motion.button>
-
-      <motion.div className="w-full max-w-6xl flex flex-col items-center justify-center relative z-10">
-        <motion.div layout className="relative group flex flex-col items-center">
-          <FlyInteraction onShoo={() => {
-            setMood('annoyed');
-            setTimeout(() => setMood('idle'), 3000);
-          }} />
-          
-          <div id="bubble" className="relative bg-white dark:bg-[#121c30] rounded-[18px] px-6 py-3.5 mb-[18px] max-w-[330px] text-[1.02rem] font-bold text-zinc-900 dark:text-zinc-100 shadow-xl border-2 border-white/80 animate-bubblepop z-20 text-center after:content-[''] after:absolute after:bottom-[-15px] after:left-1/2 after:-translate-x-1/2 after:border-[9px] after:border-transparent after:border-t-white dark:after:border-t-[#121c30] transition-colors duration-300">
-            {mode === 'landing' ? (
-               <>Hey there 👋 Do you want to <strong>log in</strong> or <strong>sign up</strong>?</>
-            ) : mode === 'login' ? (
-               <>Awesome! Welcome back! 🎉</>
-            ) : (
-               <>Yay! Let's get you started! 🌟</>
-            )}
-          </div>
-
-          <motion.div 
-            layout
-            animate={{ 
-              scale: mode === 'landing' ? 1.2 : 0.8,
-              y: mode === 'landing' ? 0 : -20
-            }}
-            transition={{ type: "spring", damping: 20, stiffness: 100 }}
-            className="relative"
-          >
-            <NewBoyCharacter mood={mood} mousePos={mousePos} isTyping={inputVal.length > 0} />
-          </motion.div>
-
-          <AnimatePresence mode="wait">
-            {mode === 'landing' && (
-              <motion.div 
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, filter: 'blur(10px)' }}
-                className="mt-[26px] flex flex-col items-center"
-              >
-                <form onSubmit={handleInputSubmit} className="relative w-[310px] group/input">
-                  <input 
-                    id="maininput"
-                    type="text"
-                    value={inputVal}
-                    onChange={(e) => setInputVal(e.target.value)}
-                    placeholder="type 'login' or 'sign up'..."
-                    autoFocus
-                    autoComplete="off"
-                    spellCheck="false"
-                    className="w-full bg-white/90 dark:bg-zinc-900/90 backdrop-blur-xl border-[2.5px] border-white/75 rounded-[14px] px-6 py-[15px] text-zinc-900 dark:text-white outline-none focus:border-red-500 focus:shadow-[0_4px_20px_rgba(255,96,96,0.18)] transition-all font-bold text-lg text-center placeholder:text-zinc-400/45 shadow-lg"
-                  />
-                  <div id="hint" className="text-center text-[0.78rem] text-orange-800/70 dark:text-zinc-400 mt-[7px] font-bold">
-                    ✨ Just type what you'd like to do!
-                  </div>
-                </form>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-
-        {/* Modal Panels */}
-        <AnimatePresence>
-          {(mode === 'login' || mode === 'signup' || mode === 'forgot-password' || mode === 'phone-login' || mode === 'otp-verify') && (
-            <div className="fixed inset-0 flex items-center justify-center z-[100]">
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => { setMode('landing'); setInputVal(''); }}
-                className="absolute inset-0 bg-black/40 backdrop-blur-md"
-              />
-              
-              <motion.div 
-                initial={{ opacity: 0, y: 15, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 15, scale: 0.98 }}
-                transition={{ type: "spring", damping: 25, stiffness: 350 }}
-                className="relative bg-white/88 dark:bg-zinc-900/90 backdrop-blur-[22px] border-2 border-white/70 dark:border-zinc-800/50 rounded-[26px] p-[38px_42px] w-[min(420px,88vw)] shadow-2xl"
-              >
-                {mode === 'login' && (
-                  <div className="space-y-6">
-                    <div className="text-center">
-                      <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100" style={{ fontFamily: "'Fredoka One', cursive" }}>Welcome back! 👋</h2>
-                      <p className="text-zinc-500 dark:text-zinc-400 font-bold text-[0.88rem] mt-1">Sign in to continue your adventure</p>
-                    </div>
-                    
-                    <div className="space-y-4">
-                      <div className="space-y-1">
-                        <label className="text-[0.75rem] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Email Address</label>
-                        <input 
-                          type="email" 
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          placeholder="you@example.com"
-                          className="w-full bg-white/90 dark:bg-zinc-800/80 border-2 border-zinc-100 dark:border-zinc-700 rounded-xl p-[13px_17px] text-zinc-900 dark:text-white outline-none focus:border-red-500 transition-all font-bold"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[0.75rem] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Password</label>
-                        <input 
-                          type="password"
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          placeholder="••••••••"
-                          className="w-full bg-white/90 dark:bg-zinc-800/80 border-2 border-zinc-100 dark:border-zinc-700 rounded-xl p-[13px_17px] text-zinc-900 dark:text-white outline-none focus:border-red-500 transition-all font-bold"
-                        />
-                      </div>
-                    </div>
-
-                    <button 
-                      onClick={() => onEmailLogin(email, password)}
-                      disabled={isLoading}
-                      className="w-full p-4 bg-gradient-to-br from-red-500 to-orange-500 text-white rounded-xl font-bold text-lg shadow-xl shadow-red-500/30 transition-all hover:-translate-y-0.5 active:scale-95 disabled:opacity-50"
-                    >
-                      {isLoading ? 'Wait...' : 'Let me in! 🚀'}
-                    </button>
-
-                    <div className="flex flex-col gap-3">
-                      <button 
-                        onClick={onGoogleLogin}
-                        className="w-full p-3 bg-white dark:bg-zinc-800 border-2 border-zinc-100 dark:border-zinc-700 text-zinc-900 dark:text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-zinc-50 transition-colors"
-                      >
-                        <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" /><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" /><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" /><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" /></svg>
-                        Sign in with Google
-                      </button>
-                      
-                      <button 
-                        onClick={() => setMode('forgot-password')}
-                        className="text-center font-bold text-sm text-zinc-500 hover:text-red-500 transition-colors"
-                      >
-                        Forgot Password?
-                      </button>
-
-                      <button 
-                        onClick={() => { setMode('landing'); setInputVal(''); }}
-                        className="text-center font-bold text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
-                      >
-                        ← Go back
-                      </button>
-                    </div>
-                    {error && (
-                      <div className="p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl text-red-600 dark:text-red-400 text-xs font-bold text-center">
-                         {error}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {mode === 'signup' && (
-                  <div className="space-y-5">
-                    <div className="text-center">
-                      <h2 className="text-3xl font-black text-zinc-900 dark:text-zinc-100" style={{ fontFamily: "'Fredoka One', cursive" }}>Join the crew! 🚀</h2>
-                      <p className="text-zinc-500 dark:text-zinc-400 font-bold text-[0.88rem] mt-1">Create your account to start your journey</p>
-                    </div>
-                    
-                    <div className="space-y-4">
-                      <div className="space-y-1">
-                        <label className="text-[0.75rem] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Full Name</label>
-                        <input 
-                          type="text" 
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                          placeholder="Your Name"
-                          className="w-full bg-white/90 dark:bg-zinc-800/80 border-2 border-zinc-100 dark:border-zinc-700 rounded-xl p-[13px_17px] text-zinc-900 dark:text-white outline-none focus:border-red-500 transition-all font-bold"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[0.75rem] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Email Address</label>
-                        <input 
-                          type="email" 
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          placeholder="you@example.com"
-                          className="w-full bg-white/90 dark:bg-zinc-800/80 border-2 border-zinc-100 dark:border-zinc-700 rounded-xl p-[13px_17px] text-zinc-900 dark:text-white outline-none focus:border-red-500 transition-all font-bold"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                          <label className="text-[0.75rem] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Class</label>
-                          <select 
-                            value={academicClass}
-                            onChange={(e) => setAcademicClass(e.target.value as AcademicClass)}
-                            className="w-full bg-white/90 dark:bg-zinc-800/80 border-2 border-zinc-100 dark:border-zinc-700 rounded-xl p-[13px_17px] text-zinc-900 dark:text-white outline-none focus:border-red-500 transition-all font-bold"
-                          >
-                            <option value="Class 9">Class 9</option>
-                            <option value="Class 10">Class 10</option>
-                            <option value="Class 11">Class 11</option>
-                            <option value="Class 12">Class 12</option>
-                            <option value="Admission">Admission</option>
-                            <option value="Jobs">Jobs</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[0.75rem] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Password</label>
-                          <input 
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            placeholder="••••••••"
-                            className="w-full bg-white/90 dark:bg-zinc-800/80 border-2 border-zinc-100 dark:border-zinc-700 rounded-xl p-[13px_17px] text-zinc-900 dark:text-white outline-none focus:border-red-500 transition-all font-bold"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <button 
-                      onClick={() => onEmailSignUp(name, email, password, academicClass)}
-                      disabled={isLoading}
-                      className="w-full p-4 bg-gradient-to-br from-red-500 to-orange-500 text-white rounded-xl font-bold text-lg shadow-xl shadow-red-500/30 transition-all hover:-translate-y-0.5 active:scale-95 disabled:opacity-50"
-                    >
-                      {isLoading ? 'Creating...' : 'Create Account! ✨'}
-                    </button>
-
-                    <button 
-                      onClick={() => { setMode('landing'); setInputVal(''); }}
-                      className="w-full text-center font-bold text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors"
-                    >
-                      ← Go back
-                    </button>
-
-                    {error && (
-                      <div className="p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl text-red-600 dark:text-red-400 text-xs font-bold text-center">
-                         {error}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {(mode === 'forgot-password' || mode === 'phone-login' || mode === 'otp-verify') && (
-                  <div className="space-y-6">
-                    <div className="text-center">
-                       <h2 className="text-2xl font-black text-zinc-900 dark:text-zinc-100" style={{ fontFamily: "'Fredoka One', cursive" }}>Reset Password 🔑</h2>
-                       <p className="text-zinc-500 dark:text-zinc-400 font-bold text-sm mt-1">Don't worry, it happens!</p>
-                    </div>
-                    {resetSent ? (
-                      <div className="p-6 bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20 rounded-2xl text-center space-y-4">
-                        <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-white mx-auto">✅</div>
-                        <p className="font-bold text-green-600 dark:text-green-400 text-sm">Reset link sent! Please check your email.</p>
-                        <button onClick={() => { setResetSent(false); setMode('login'); }} className="text-sm font-black text-green-700 underline">Back to Login</button>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div className="space-y-1">
-                          <label className="text-[0.75rem] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">Email Address</label>
-                          <input 
-                            type="email" 
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            placeholder="you@example.com"
-                            className="w-full bg-white/90 dark:bg-zinc-800/80 border-2 border-zinc-100 dark:border-zinc-700 rounded-xl p-[13px_17px] text-zinc-900 dark:text-white outline-none font-bold"
-                          />
-                        </div>
-                        <button 
-                          onClick={async () => {
-                            await onForgotPassword(email);
-                            setResetSent(true);
-                          }}
-                          disabled={isLoading}
-                          className="w-full p-4 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-xl font-bold shadow-xl transition-all active:scale-95"
-                        >
-                          Send Reset Link
-                        </button>
-                        <button onClick={() => setMode('login')} className="w-full text-center font-bold text-sm text-zinc-500">Cancel</button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
-      </motion.div>
-    </div>
-  );
-};
-
-const MiniRobot = () => {
-  const [isSad, setIsSad] = useState(false);
-  const [justClicked, setJustClicked] = useState(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const handleInteraction = () => {
-    setIsSad(false);
-    setJustClicked(true);
-    setTimeout(() => setJustClicked(false), 1200);
-    
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setIsSad(true), 5000);
-  };
-
-  useEffect(() => {
-    timerRef.current = setTimeout(() => setIsSad(true), 5000);
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.5 }}
-      animate={{ 
-        opacity: 1, 
-        scale: justClicked ? 1.2 : 1,
-        y: justClicked ? -30 : (isSad ? [0, -6, 0] : [0, -12, 0]),
-        rotateY: justClicked ? 360 : 0,
-        filter: isSad ? 'grayscale(0.8) contrast(1.1)' : 'grayscale(0) contrast(1)',
-      }}
-      transition={{ 
-        y: { 
-          duration: justClicked ? 0.3 : (isSad ? 5 : 3), 
-          repeat: justClicked ? 0 : Infinity, 
-          ease: justClicked ? "easeOut" : "easeInOut" 
-        },
-        rotateY: { duration: 0.8, ease: "easeInOut" },
-        scale: { type: "spring", stiffness: 400, damping: 15 },
-        filter: { duration: 1 }
-      }}
-      whileHover={{ scale: 1.1 }}
-      onClick={handleInteraction}
-      onTouchStart={handleInteraction}
-      className="relative w-16 h-16 cursor-pointer group z-10 p-1.5"
-      style={{ transformStyle: "preserve-3d" }}
-    >
-      {/* Dynamic Glow Base */}
-      <div className={`absolute inset-2 blur-2xl transition-all duration-500 opacity-40 group-hover:opacity-70 ${isSad ? 'bg-zinc-400' : 'bg-rose-500 group-hover:bg-rose-400'}`} />
-
-      {/* 3D Body Construction */}
-      <div 
-        className={`absolute inset-1.5 transition-all duration-1000 rounded-[16px] transform-gpu border-b-[6px] border-r-[6px] ${
-          isSad 
-            ? 'bg-zinc-200 border-zinc-400 shadow-inner' 
-            : 'bg-gradient-to-br from-rose-400 via-rose-500 to-rose-600 border-rose-700 shadow-[0_20px_40px_-5px_rgba(244,63,94,0.4)]'
-        }`}
-        style={{ transform: "perspective(1000px) rotateX(10deg) rotateY(10deg)", transformStyle: "preserve-3d" }}
-      >
-        {/* Face Screen */}
-        <div className={`absolute inset-[4px] bg-zinc-950 rounded-[10px] overflow-hidden flex flex-col items-center justify-center border transition-colors duration-1000 ${
-          isSad ? 'border-zinc-800' : 'border-rose-400/20'
-        }`}>
-          {/* Eyes Container */}
-          <div className="flex gap-2.5 mb-1.5 relative">
-            {/* Blushing Cheeks (Happy only) */}
-            {!isSad && (
-              <>
-                <motion.div 
-                  animate={{ opacity: [0.2, 0.5, 0.2], scale: [1, 1.4, 1] }}
-                  transition={{ duration: 2.5, repeat: Infinity }}
-                  className="absolute -left-3 top-1 w-2.5 h-1 bg-rose-500/40 blur-[3px] rounded-full"
-                />
-                <motion.div 
-                  animate={{ opacity: [0.2, 0.5, 0.2], scale: [1, 1.4, 1] }}
-                  transition={{ duration: 2.5, repeat: Infinity, delay: 0.5 }}
-                  className="absolute -right-3 top-1 w-2.5 h-1 bg-rose-500/40 blur-[3px] rounded-full"
-                />
-                {/* Joyful Hearts */}
-                {justClicked && (
-                  <motion.div 
-                    initial={{ y: 0, opacity: 1, scale: 0.5 }}
-                    animate={{ y: -25, opacity: 0, scale: 1.8 }}
-                    className="absolute -top-12 left-1/2 -translate-x-1/2 text-rose-400 text-lg"
-                  >
-                    ❤️
-                  </motion.div>
-                )}
-              </>
-            )}
-
-            <div className="relative">
-              {!isSad && <div className="absolute -top-1 left-0 w-full h-[1px] bg-rose-400/50 -rotate-12 rounded-full" />}
-              {justClicked ? (
-                <div className="w-2 h-2 text-rose-300 font-black leading-none transform -rotate-12 text-center text-[10px]">
-                  v
-                </div>
-              ) : (
-                <motion.div 
-                  animate={isSad ? { scaleY: 0.15, opacity: 0.6 } : { scaleY: [1, 0.1, 1], opacity: 1 }}
-                  transition={{ duration: 3.5, repeat: Infinity, times: [0, 0.05, 0.1] }}
-                  className={`w-1.5 h-1.5 rounded-full transition-all duration-1000 relative overflow-hidden ${
-                    isSad ? 'bg-zinc-200' : 'bg-rose-300 shadow-[0_0_10px_rgba(251,113,133,0.8)]'
-                  }`} 
-                >
-                  {!isSad && <div className="absolute top-0 left-0 w-0.5 h-0.5 bg-white rounded-full opacity-70" />}
-                </motion.div>
-              )}
-            </div>
-            <div className="relative">
-              {!isSad && <div className="absolute -top-1 left-0 w-full h-[1px] bg-rose-400/50 rotate-12 rounded-full" />}
-              {justClicked ? (
-                <div className="w-2 h-2 text-rose-300 font-black leading-none transform rotate-12 text-center text-[10px]">
-                  v
-                </div>
-              ) : (
-                <motion.div 
-                  animate={isSad ? { scaleY: 0.15, opacity: 0.6 } : { scaleY: [1, 0.1, 1], opacity: 1 }}
-                  transition={{ duration: 3.5, repeat: Infinity, times: [0, 0.05, 0.1], delay: 0.15 }}
-                  className={`w-1.5 h-1.5 rounded-full transition-all duration-1000 relative overflow-hidden ${
-                    isSad ? 'bg-zinc-200' : 'bg-rose-300 shadow-[0_0_10px_rgba(251,113,133,0.8)]'
-                  }`} 
-                >
-                  {!isSad && <div className="absolute top-0 left-0 w-0.5 h-0.5 bg-white rounded-full opacity-70" />}
-                </motion.div>
-              )}
-            </div>
-          </div>
-          
-          {/* Mouth - Realistic & Beautiful SVG Smile */}
-          <motion.div className="flex items-center justify-center mt-0.5 h-3">
-            <svg width="24" height="12" viewBox="0 0 32 16" className="overflow-visible">
-              <defs>
-                <linearGradient id="smileGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#fda4af" />
-                  <stop offset="50%" stopColor="#fb7185" />
-                  <stop offset="100%" stopColor="#fda4af" />
-                </linearGradient>
-              </defs>
-              
-              {/* Mouth Glow */}
-              {!isSad && (
-                <motion.path
-                  d="M 6 4 Q 16 14 26 4"
-                  fill="none"
-                  stroke="#fb7185"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  className="blur-[5px] opacity-20"
-                  animate={{
-                    d: justClicked 
-                      ? "M 4 2 Q 16 18 28 2" 
-                      : ["M 8 5 Q 16 10 24 5", "M 6 4 Q 16 14 26 4", "M 8 5 Q 16 10 24 5"]
-                  }}
-                  transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-                />
-              )}
-
-              {/* Main Mouth Path */}
-              <motion.path
-                d={isSad 
-                  ? "M 12 10 Q 16 6 20 10" 
-                  : "M 8 5 Q 16 12 24 5"}
-                fill="none"
-                stroke={isSad ? "#52525b" : "url(#smileGradient)"}
-                strokeWidth="2"
-                strokeLinecap="round"
-                animate={{
-                  d: isSad 
-                    ? "M 12 10 Q 16 6 20 10" 
-                    : justClicked 
-                      ? "M 4 2 Q 16 18 28 2" 
-                      : ["M 8 5 Q 16 10 24 5", "M 6 4 Q 16 14 26 4", "M 8 5 Q 16 10 24 5"]
-                }}
-                transition={{
-                  duration: 2.5,
-                  repeat: isSad ? 0 : Infinity,
-                  ease: "easeInOut"
-                }}
-              />
-            </svg>
-          </motion.div>
-        </div>
-        
-        {/* Side Details */}
-        <div className={`absolute -right-1 top-3.5 w-1.5 h-5 transition-colors duration-1000 rounded-r-lg ${isSad ? 'bg-zinc-300' : 'bg-rose-700 shadow-md'}`} />
-        <div className={`absolute -left-1 top-3.5 w-1.5 h-5 transition-colors duration-1000 rounded-l-lg ${isSad ? 'bg-zinc-300' : 'bg-rose-700 shadow-md'}`} />
-      </div>
-      
-      {/* Ribbon / Bow Antenna */}
-      <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-1 h-5 bg-zinc-600 rounded-full shadow-sm">
-        <motion.div 
-          animate={{ 
-            rotate: isSad ? 0 : [0, 180, 360],
-            scale: isSad ? 0.7 : [1, 1.25, 1],
-            y: isSad ? 0 : [0, -2, 0]
-          }}
-          transition={{ 
-            rotate: { duration: 5, repeat: Infinity, ease: "linear" },
-            scale: { duration: 2.5, repeat: Infinity, ease: "easeInOut" },
-            y: { duration: 2.5, repeat: Infinity, ease: "easeInOut" }
-          }}
-          className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-4 h-3 flex items-center justify-center"
-        >
-          <div className={`w-2 h-2 rounded-full relative z-10 transition-all duration-1000 ${
-            isSad ? 'bg-zinc-400 border border-zinc-500' : 'bg-rose-400 shadow-[0_0_10px_rgba(251,113,133,1)]'
-          }`} />
-          <div className={`absolute -left-1 w-3 h-3 transition-all duration-1000 rounded-sm rotate-45 border-l-2 ${
-            isSad ? 'bg-zinc-300 border-zinc-400' : 'bg-rose-500 border-rose-600/50 shadow-sm'
-          }`} />
-          <div className={`absolute -right-1 w-3 h-3 transition-all duration-1000 rounded-sm -rotate-45 border-r-2 ${
-            isSad ? 'bg-zinc-300 border-zinc-400' : 'bg-rose-500 border-rose-600/50 shadow-sm'
-          }`} />
-        </motion.div>
-      </div>
-
-      {/* Permanent Status Label */}
-      <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-zinc-950/90 text-white text-[8px] font-black px-3 py-1.5 rounded-[16px] transition-all whitespace-nowrap pointer-events-none uppercase tracking-[0.2em] shadow-xl border border-white/10 backdrop-blur-xl z-20">
-        {isSad ? "Paaro needs attention..." : "Paaro is Happy!"}
-      </div>
-    </motion.div>
+    />
   );
 };
 
 export default function App() {
-  const [contents, setContents] = useState<ContentItem[]>(INITIAL_DATA);
+  const [contents, setContents] = useState<ContentItem[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [externalResources, setExternalResources] = useState<ExternalResource[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
@@ -1263,7 +221,21 @@ export default function App() {
   const [dynamicSubjects, setDynamicSubjects] = useState<AcademicSubject[]>([]);
   const [dynamicChapters, setDynamicChapters] = useState<AcademicChapter[]>([]);
   const [dynamicTopics, setDynamicTopics] = useState<AcademicTopic[]>([]);
+  const [academicGroups, setAcademicGroups] = useState<AcademicGroup[]>([]);
   const [canUpload, setCanUpload] = useState(false);
+  const [canManageExams, setCanManageExams] = useState(false);
+  const [canManageQuestions, setCanManageQuestions] = useState(false);
+  const [canManageResources, setCanManageResources] = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
+
+  const hasPremiumAccess = useMemo(() => {
+    return isPremium || firestoreUser?.hasPremiumAccess === true || userRole === 'admin';
+  }, [isPremium, firestoreUser?.hasPremiumAccess, userRole]);
+
+  const hasAdminAccess = useMemo(() => {
+    return userRole === 'admin' || canUpload || canManageExams || canManageQuestions || canManageResources;
+  }, [userRole, canUpload, canManageExams, canManageQuestions, canManageResources]);
+
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [view, setView] = useState<'home' | 'category' | 'saved' | 'admin' | 'dashboard' | 'exam' | 'leaderboard' | 'privacy' | 'terms' | 'cookies' | 'premium-exam'>('home');
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
@@ -1284,86 +256,58 @@ export default function App() {
 
   const [contentTypeFilter, setContentTypeFilter] = useState<'free' | 'premium'>('free');
 
-  // Parallax Effect Logic
-  useEffect(() => {
-    if (window.innerWidth < 768) return;
-    
-    let mouseX = 0;
-    let mouseY = 0;
-    let currentX = 0;
-    let currentY = 0;
-    let frameId: number;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      mouseX = (e.clientX / window.innerWidth - 0.5) * 2;
-      mouseY = (e.clientY / window.innerHeight - 0.5) * 2;
-    };
-
-    const animate = () => {
-      currentX += (mouseX - currentX) * 0.05;
-      currentY += (mouseY - currentY) * 0.05;
-
-      // Constrain move range on mobile to prevent potential layer shifting outside bounds
-      const sensitivity = window.innerWidth < 768 ? 10 : 30;
-      const moveX = currentX * sensitivity;
-      const moveY = currentY * sensitivity;
-
-      const glowLayer = document.getElementById("glowLayer");
-      if (glowLayer) {
-        glowLayer.style.transform = `translate3d(${moveX}px, ${moveY}px, 0) scale(1.05)`;
-      }
-      frameId = requestAnimationFrame(animate);
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    frameId = requestAnimationFrame(animate);
-
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      cancelAnimationFrame(frameId);
-    };
-  }, []);
-
-  // Scroll-reactive wave motion
-  useEffect(() => {
-    const handleScroll = () => {
-      const scrollY = window.scrollY;
-      const waves = document.querySelectorAll(".wave");
-      
-      waves.forEach((wave, index) => {
-        const speed = (index + 1) * 0.05;
-        const element = wave as HTMLElement;
-        // Combine base animation with scroll offset
-        element.style.transform = `translateX(${-scrollY * speed}px)`;
-      });
-    };
-
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-  
   // Filters
   const [classFilter, setClassFilter] = useState<AcademicClass | 'All'>('All');
+  const [groupFilter, setGroupFilter] = useState<string>('All');
   const [subjectFilter, setSubjectFilter] = useState<string>('All');
   const [examClassFilter, setExamClassFilter] = useState<AcademicClass | 'All'>('All');
+  const [examGroupFilter, setExamGroupFilter] = useState<string>('All');
   const [questionClassFilter, setQuestionClassFilter] = useState<string>('All');
+  const [questionGroupFilter, setQuestionGroupFilter] = useState<string>('All');
 
-  const getSubjectNamesForClass = useCallback((className: string | 'All') => {
-    if (dynamicSubjects.length > 0) {
-      if (className === 'All') {
-        // Return unique names if multiple classes have same subject name
-        return Array.from(new Set(dynamicSubjects.map(s => s.name)));
-      }
-      const matchedClass = dynamicClasses.find(c => c.name === className);
-      if (!matchedClass) return [];
-      return dynamicSubjects.filter(s => s.classId === matchedClass.id).map(s => s.name);
+  const isGroupNeeded = (className: any) => {
+    if (!className || typeof className !== 'string') return false;
+    const classNum = parseInt(className.replace(/\D/g, ''));
+    return !isNaN(classNum) && classNum >= 9 && classNum <= 12;
+  };
+
+  // Reset group filter when class changes to non-stream level
+  useEffect(() => {
+    if (!isGroupNeeded(classFilter)) {
+      setGroupFilter('All');
     }
-    return ['Math', 'Physics', 'Chemistry', 'Biology', 'English', 'ICT', 'General Knowledge', 'General'];
+  }, [classFilter]);
+
+  useEffect(() => {
+    if (!isGroupNeeded(examClassFilter)) {
+      setExamGroupFilter('All');
+    }
+  }, [examClassFilter]);
+
+  useEffect(() => {
+    if (!isGroupNeeded(questionClassFilter)) {
+      setQuestionGroupFilter('All');
+    }
+  }, [questionClassFilter]);
+
+  const getSubjectNamesForClass = useCallback((className: string | 'All', groupName: string = 'All') => {
+    if (className === 'All') {
+      // Return unique names if multiple classes have same subject name
+      return Array.from(new Set(dynamicSubjects.map(s => s.name)));
+    }
+    const matchedClass = dynamicClasses.find(c => c.name === className);
+    if (!matchedClass) return [];
+    
+    return dynamicSubjects.filter(s => {
+      const matchClass = s.classId === matchedClass.id;
+      const matchGroup = groupName === 'All' || s.academicGroup === groupName || s.academicGroup === 'All' || (s as any).academic_group === 'All';
+      return matchClass && matchGroup;
+    }).map(s => s.name);
   }, [dynamicSubjects, dynamicClasses]);
 
-  const currentSubjects = useMemo(() => getSubjectNamesForClass(classFilter), [getSubjectNamesForClass, classFilter]);
-  const examSubjects = useMemo(() => getSubjectNamesForClass(examClassFilter), [getSubjectNamesForClass, examClassFilter]);
-  const questionSubjects = useMemo(() => getSubjectNamesForClass(questionClassFilter), [getSubjectNamesForClass, questionClassFilter]);
+  const currentSubjects = useMemo(() => getSubjectNamesForClass(classFilter, groupFilter), [getSubjectNamesForClass, classFilter, groupFilter]);
+  const examSubjects = useMemo(() => getSubjectNamesForClass(examClassFilter, examGroupFilter), [getSubjectNamesForClass, examClassFilter, examGroupFilter]);
+  const questionSubjects = useMemo(() => getSubjectNamesForClass(questionClassFilter, questionGroupFilter), [getSubjectNamesForClass, questionClassFilter, questionGroupFilter]);
 
   // Modals
   const [activePdf, setActivePdf] = useState<{ url: string; isRestricted: boolean } | null>(null);
@@ -1379,24 +323,30 @@ export default function App() {
   const [examTimeLeft, setExamTimeLeft] = useState(0);
   const [examResults, setExamResults] = useState<ExamAttempt | null>(null);
   const [isExamActive, setIsExamActive] = useState(false);
+  const [currentAttemptId, setCurrentAttemptId] = useState<string | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
-  const [profileFormData, setProfileFormData] = useState({ displayName: '', academicClass: 'Class 9' as AcademicClass });
+  const [profileFormData, setProfileFormData] = useState({ 
+    displayName: '', 
+    academicClass: (dynamicClasses[0]?.name || 'Class 9') as AcademicClass,
+    academicGroup: 'All'
+  });
   const [examSubjectFilter, setExamSubjectFilter] = useState('All');
   const [examChapterFilter, setExamChapterFilter] = useState<string>('');
+  const [examTopicFilter, setExamTopicFilter] = useState<string>('All');
   const [examSetup, setExamSetup] = useState<{
     academicClass: AcademicClass;
     subject: string;
     chapter: string;
   }>({
-     academicClass: 'Class 9',
+     academicClass: dynamicClasses[0]?.name || 'Class 9',
      subject: '',
      chapter: 'All Chapters'
    });
   const [isGeneratingExam, setIsGeneratingExam] = useState(false);
 
   const handlePremiumExamClick = () => {
-    if (firestoreUser?.hasPremiumAccess || userRole === 'admin') {
+    if (hasPremiumAccess) {
       setView('premium-exam');
       setActiveExam(null);
     } else {
@@ -1445,19 +395,38 @@ export default function App() {
   const handleForward = () => window.history.forward();
 
   const fetchPlaylistVideos = async (playlistId: string) => {
-    if (!ai) return [];
+    // 1. First, attempt to fetch videos from our lightweight Express proxy
     try {
-      const prompt = `You are a YouTube expert. I need a COMPLETE and UNIQUE list of videos from this playlist: https://www.youtube.com/playlist?list=${playlistId}.
+      console.log(`Querying scraper proxy for playlist ${playlistId}...`);
+      const response = await fetch(`/api/youtube/playlist/${playlistId}`);
+      if (response.ok) {
+        const proxyData = await response.json();
+        if (Array.isArray(proxyData) && proxyData.length > 0) {
+          console.log(`Successfully fetched ${proxyData.length} videos from Express proxy for playlist:`, playlistId);
+          return proxyData;
+        }
+      }
+      console.warn("Express proxy playlist fetched empty or failed, trying Gemini fallback...");
+    } catch (e) {
+      console.error("Express proxy playlist fetch error:", e);
+    }
+
+    // 2. Fallback to Gemini AI if the local proxy fails to parse
+    try {
+      const apiKey = process.env.GEMINI_API_KEY || "";
+      if (!apiKey) {
+        console.warn("Gemini API key is not configured inside environment for playlist video fetching fallback.");
+        return [];
+      }
+      const genAI = ai || new GoogleGenAI({ apiKey });
+      const prompt = `Find and retrieve a complete, search-grounded list of videos from the YouTube playlist with URL: https://www.youtube.com/playlist?list=${playlistId}.
       
       Instructions:
-      1. Find the playlist page and look at the video list.
-      2. Extract the 'title' and the unique YouTube video 'url' for EVERY video you see.
-      3. Double-check that you don't repeat the same URL for different titles.
-      4. If there are 4 videos, I expect 4 objects in the JSON array.
-      5. Return ONLY a JSON array of objects with { "title": "...", "url": "...", "description": "..." }.`;
+      1. Perform a Google search for the playlist and extract the 'title', the unique YouTube video 'url' (like https://www.youtube.com/watch?v=VIDEO_ID), and a short 'description' for each video listed on the playlist.
+      2. Return a JSON array containing these video objects. No block markdown format, just solid JSON array.`;
 
-      const result = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+      const result = await genAI.models.generateContent({
+        model: "gemini-3.5-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -1472,21 +441,22 @@ export default function App() {
               },
               required: ["title", "url", "description"]
             }
-          }
+          },
+          tools: [{ googleSearch: {} }]
         }
       });
       const data = JSON.parse(result.text || "[]");
-      // Safely handle duplicates in case the AI hallunicates
+      // Safely handle duplicates in case the AI hallucinates
       const unique = data.reduce((acc: any[], current: any) => {
         const id = getYouTubeId(current.url);
-        if (!acc.find(item => getYouTubeId(item.url) === id)) {
+        if (id && !acc.find(item => getYouTubeId(item.url) === id)) {
           acc.push(current);
         }
         return acc;
       }, []);
       return unique;
     } catch (error) {
-      console.error("Error fetching playlist videos:", error);
+      console.error("Error fetching playlist videos via Gemini fallback:", error);
       return [];
     }
   };
@@ -1560,11 +530,136 @@ export default function App() {
   const [examPrep, setExamPrep] = useState<Exam | null>(null);
 
   // Exam Mode Handlers
+  const getFallbackQuestions = (subject: string, className: string, examId: string): any[] => {
+    const isScience = (subject || '').toLowerCase().includes('math') || 
+                      (subject || '').toLowerCase().includes('phys') || 
+                      (subject || '').toLowerCase().includes('chem') || 
+                      (subject || '').toLowerCase().includes('gk') || 
+                      (subject || '').toLowerCase().includes('general') || 
+                      (subject || '').toLowerCase().includes('science') || 
+                      (subject || '').toLowerCase().includes('biol');
+    
+    if (isScience) {
+      return [
+        {
+          id: `${examId}-fall-1`,
+          examId: examId,
+          type: 'mcq',
+          questionText: JSON.stringify({
+            text: "What is the correct solution for the quadratic equation: $x^2 - 5x + 6 = 0$?",
+            image: "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=800&auto=format&fit=crop&q=60"
+          }),
+          options: [
+            JSON.stringify({ text: "x = 2 or x = 3", image: "" }),
+            JSON.stringify({ text: "x = -2 or x = -3", image: "" }),
+            JSON.stringify({ text: "x = 1 or x = 5", image: "" }),
+            JSON.stringify({ text: "x = 0 or x = 6", image: "" })
+          ],
+          correctAnswer: 0,
+          points: 1.5,
+          class: className,
+          subject: subject,
+          chapter: "Algebra"
+        },
+        {
+          id: `${examId}-fall-2`,
+          examId: examId,
+          type: 'mcq',
+          questionText: JSON.stringify({
+            text: "In a right-angled triangle, if the base measures 3 units and the height is 4 units, calculate the length of its hypotenuse.",
+            image: "https://images.unsplash.com/photo-1509228468518-180dd4864904?w=800&auto=format&fit=crop&q=60"
+          }),
+          options: [
+            JSON.stringify({ text: "5 units", image: "" }),
+            JSON.stringify({ text: "7 units", image: "" }),
+            JSON.stringify({ text: "12 units", image: "" }),
+            JSON.stringify({ text: "25 units", image: "" })
+          ],
+          correctAnswer: 0,
+          points: 1.5,
+          class: className,
+          subject: subject,
+          chapter: "Geometry"
+        },
+        {
+          id: `${examId}-fall-3`,
+          examId: examId,
+          type: 'mcq',
+          questionText: JSON.stringify({
+            text: "Which of the following describes the correct derivative of $\\sin(x)$ with respect to $x$?",
+            image: ""
+          }),
+          options: [
+            JSON.stringify({ text: "$\\cos(x)$", image: "" }),
+            JSON.stringify({ text: "$-\\cos(x)$", image: "" }),
+            JSON.stringify({ text: "$\\sin(x)$", image: "" }),
+            JSON.stringify({ text: "$\\sec^2(x)$", image: "" })
+          ],
+          correctAnswer: 0,
+          points: 2.0,
+          class: className,
+          subject: subject,
+          chapter: "Calculus"
+        },
+        {
+          id: `${examId}-fall-4`,
+          examId: examId,
+          type: 'mcq',
+          questionText: "Which unit is used to measure the rate of doing work (Power)?",
+          options: [
+            "Joule (J)",
+            "Watt (W)",
+            "Newton (N)",
+            "Pascal (Pa)"
+          ],
+          correctAnswer: 1,
+          points: 1.0,
+          class: className,
+          subject: subject,
+          chapter: "Force & Power"
+        }
+      ];
+    } else {
+      return [
+        {
+          id: `${examId}-fall-g1`,
+          examId: examId,
+          type: 'mcq',
+          questionText: "Which gas is most abundant in the Earth's atmosphere?",
+          options: ["Oxygen", "Nitrogen", "Carbon Dioxide", "Hydrogen"],
+          correctAnswer: 1,
+          points: 1.0,
+          class: className,
+          subject: subject,
+          chapter: "Atmosphere"
+        },
+        {
+          id: `${examId}-fall-g2`,
+          examId: examId,
+          type: 'mcq',
+          questionText: "What is the capital city of Bangladesh?",
+          options: ["Dhaka", "Chittagong", "Sylhet", "Khulna"],
+          correctAnswer: 0,
+          points: 1.0,
+          class: className,
+          subject: subject,
+          chapter: "Geography"
+        }
+      ];
+    }
+  };
+
   const handleStartExam = async (exam: Exam) => {
-    if (exam.isPremium && !firestoreUser?.hasPremiumAccess && userRole !== 'admin') {
+    if (exam.isPremium && !hasPremiumAccess) {
       setGlobalError("🔒 This Exam is for Premium users only. Contact admin for access.");
       return;
     }
+    
+    if (!user) {
+      setGlobalError("Please login to start the exam.");
+      return;
+    }
+
     setIsGeneratingExam(true);
     setExamPrep(null);
     setGlobalError(null);
@@ -1572,37 +667,26 @@ export default function App() {
     console.log('--- STARTING NEW EXAM SYSTEM ---');
 
     try {
-      // Fetch questions from the specific exam's subcollection
-      const examsSnap = await getDocs(collection(db, 'exams', exam.id, 'questions'));
-      const poolFromExam = examsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Question));
+      // 1. Create a row in 'attempts' table
+      const currentUserName = firestoreUser?.display_name || user.user_metadata?.full_name || 'Student';
+      const currentUserClass = firestoreUser?.academic_class || dynamicClasses[0]?.name || 'Class 9';
       
-      let pool = poolFromExam;
+      const attempt = await supabaseService.createAttempt({
+        user_id: user.id,
+        exam_id: exam.id,
+        user_name: currentUserName,
+        user_class: currentUserClass
+      });
       
-      // If exam pool is empty, try to fetch from global question bank filtering by subject and class
-      if (pool.length === 0) {
-        console.log("Exam pool empty, fetching from global question bank...");
-        const globalQ = query(
-          collection(db, 'questions'),
-          where('subject', '==', exam.subject),
-          where('class', '==', exam.class)
-        );
-        const globalSnap = await getDocs(globalQ);
-        pool = globalSnap.docs.map(d => ({ id: d.id, ...d.data() } as Question));
-      }
+      if (!attempt) throw new Error("Failed to initialize exam attempt.");
+      setCurrentAttemptId(attempt.id);
 
-      // Filter by chapter if requested (Local filtering for flexibility)
-      const isAllChapters = !exam.chapter || exam.chapter === 'All' || exam.chapter === 'All Chapters' || exam.chapter.trim() === '';
+      // 2. Fetch questions from the specific exam's ID
+      let pool = await supabaseService.fetchQuestions(exam.id);
       
-      if (!isAllChapters) {
-        const chapterTerm = exam.chapter.toLowerCase().trim();
-        pool = pool.filter(q => 
-          (q.chapter && q.chapter.toLowerCase().includes(chapterTerm)) ||
-          (q.chapter && chapterTerm.includes(q.chapter.toLowerCase()))
-        );
-      }
-
-      if (pool.length === 0) {
-        throw new Error(`No questions found for ${exam.subject} (${exam.class})${!isAllChapters ? ` Chapter: ${exam.chapter}` : ''}. We checked both the private exam pool and the public question bank.`);
+      if (!pool || pool.length === 0) {
+        console.warn("No questions fetched from DB for exam, generating robust fallback hybrid math/GK questions...");
+        pool = getFallbackQuestions(exam.subject || 'Math', exam.class || 'Class 9', exam.id);
       }
 
       // Selection Logic: Shuffle and slice based on totalQuestionsToShow
@@ -1636,131 +720,55 @@ export default function App() {
     }
   };
 
-  const handleExamAnswer = (questionId: string, value: string | number) => {
+  const handleExamAnswer = async (questionId: string, value: string | number) => {
     setExamAnswers(prev => ({
       ...prev,
       [questionId]: value
     }));
+
+    if (currentAttemptId) {
+      try {
+        await supabaseService.upsertAnswer({
+          attempt_id: currentAttemptId,
+          question_id: questionId,
+          selected_option: value
+        });
+      } catch (error) {
+        console.error("Error saving answer to Supabase:", error);
+      }
+    }
   };
 
   const handleExamSubmit = async () => {
-    if (!activeExam || !auth.currentUser) return;
+    if (!activeExam || !user || !currentAttemptId) return;
 
-    let score = 0;
-    let correctCount = 0;
-    let wrongCount = 0;
-    let unansweredCount = 0;
-    const maxScore = activeExam.questions.reduce((acc, q) => acc + q.points, 0);
-
-    activeExam.questions.forEach(q => {
-      const userAnswer = examAnswers[q.id];
-      if (userAnswer === undefined || userAnswer === null || userAnswer === '') {
-        unansweredCount++;
-      } else {
-        if (q.type === 'mcq') {
-          if (userAnswer === q.correctAnswer) {
-            score += q.points;
-            correctCount++;
-          } else {
-            wrongCount++;
-            if (activeExam.negativeMarking) {
-              score -= (activeExam.negativeValue || 0.25);
-            }
-          }
-        } else {
-          // Written logic: simple validation for now
-          if (typeof userAnswer === 'string' && userAnswer.trim().length > 0) {
-            score += q.points;
-            correctCount++;
-          } else {
-            unansweredCount++;
-          }
-        }
-      }
-    });
-
-    const timeTaken = Math.round(activeExam.timeLimit * 60 - examTimeLeft);
-    const now = Date.now();
-    const currentUserName = firestoreUser?.displayName || auth.currentUser?.displayName || 'Student';
-
-    const attempt: ExamAttempt = {
-      id: Math.random().toString(36).substring(7),
-      examId: activeExam.id,
-      userId: auth.currentUser.uid,
-      userName: currentUserName,
-      userClass: firestoreUser?.class || 'General',
-      answers: activeExam.questions.map(q => examAnswers[q.id] ?? null), // Use actual mapping for order
-      score: Math.max(0, score), // Don't let score be negative
-      maxScore,
-      correctCount,
-      wrongCount,
-      unansweredCount,
-      totalQuestions: activeExam.questions.length,
-      timeTaken,
-      startTime: now - timeTaken * 1000,
-      submittedAt: now,
-      examTitle: activeExam.title
-    };
-
-    setExamResults(attempt);
     setIsExamActive(false);
-    setView('exam'); // Ensure we stay in exam view to show results
-
+    setIsGeneratingExam(true); // Reuse as overall loading state
+    
     try {
-      // 1. Save detailed attempt to 'attempts'
-      await addDoc(collection(db, 'attempts'), {
-        ...attempt,
-        examTitle: activeExam.title,
-        timestamp: serverTimestamp()
-      });
+      // 1. Call Supabase Edge Function for auto scoring
+      await supabaseService.submitExam(currentAttemptId);
 
-      // 2. Update Leaderboard if this is the best score
-      // Logic for tie-breaking: Higher score, then Lower Time, then Earliest Submission
-      const entryId = `${auth.currentUser.uid}_${activeExam.id}`;
-      const leaderboardRef = doc(db, 'leaderboards', entryId);
-      const existingEntry = await getDoc(leaderboardRef);
-
-      let shouldUpdate = false;
-      if (!existingEntry.exists()) {
-        shouldUpdate = true;
-      } else {
-        const data = existingEntry.data() as LeaderboardEntry;
-        if (attempt.score > data.bestScore) {
-          shouldUpdate = true;
-        } else if (attempt.score === data.bestScore) {
-          if (attempt.timeTaken < data.timeTaken) {
-            shouldUpdate = true;
-          }
-        }
+      // 2. Fetch updated attempt with score
+      const updatedAttempt = await supabaseService.getAttempt(currentAttemptId);
+      
+      if (updatedAttempt) {
+        setExamResults({
+          ...updatedAttempt,
+          userName: updatedAttempt.user_name || 'Student',
+          totalQuestions: activeExam.questions.length,
+          examTitle: activeExam.title || (updatedAttempt as any).exams?.title
+        } as any);
       }
 
-      if (shouldUpdate) {
-        const leaderboardData: LeaderboardEntry = {
-          id: entryId,
-          userId: auth.currentUser.uid,
-          userName: currentUserName,
-          userPhoto: auth.currentUser?.photoURL || '',
-          examId: activeExam.id,
-          examTitle: activeExam.title,
-          class: activeExam.class,
-          bestScore: attempt.score,
-          timeTaken: attempt.timeTaken,
-          firstSubmissionAt: existingEntry.exists() ? existingEntry.data()?.firstSubmissionAt : now,
-          totalAttempts: existingEntry.exists() ? (existingEntry.data()?.totalAttempts || 0) + 1 : 1,
-          lastUpdated: now
-        };
-        await setDoc(leaderboardRef, leaderboardData);
-      } else {
-        // Just increment attempt count
-        await updateDoc(leaderboardRef, {
-          totalAttempts: increment(1),
-          userName: currentUserName,
-          userPhoto: auth.currentUser?.photoURL || '',
-          lastUpdated: now
-        });
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'attempts/leaderboards', setGlobalError);
+      setView('exam');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (error: any) {
+      console.error("Exam submission error:", error);
+      setGlobalError("Submission failed: " + (error.message || "Please try again."));
+    } finally {
+      setIsGeneratingExam(false);
+      setCurrentAttemptId(null);
     }
   };
 
@@ -1776,9 +784,9 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isExamActive, examTimeLeft]);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [confirmationResult, setConfirmationResult] = useState<any>(null);
-  const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
+  const [pendingPhone, setPendingPhone] = useState<string>('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingCategory, setDeletingCategory] = useState<Category | null>(null);
   const [deleteBankId, setDeleteBankId] = useState<string | null>(null);
 
   // Footer States
@@ -1794,9 +802,12 @@ export default function App() {
 
   const [newItem, setNewItem] = useState<Partial<ContentItem>>({
     category: 'Notes',
-    academicClass: 'Class 9',
+    academicClass: dynamicClasses[0]?.name || 'Class 9',
     subject: '',
     chapter: '',
+    chapterId: '',
+    topicId: '',
+    academicGroup: 'All',
     title: '',
     description: '',
     url: '',
@@ -1811,7 +822,8 @@ export default function App() {
     type: 'youtube',
     youtubePlaylistId: '',
     videoIds: [],
-    academicClass: 'Class 9',
+    academicClass: dynamicClasses[0]?.name || 'Class 9',
+    academicGroup: 'All',
     subject: '',
     chapter: '',
     thumbnail: '',
@@ -1819,7 +831,8 @@ export default function App() {
   });
   const [newExam, setNewExam] = useState<Partial<Exam>>({
     title: '',
-    class: 'Class 9',
+    class: dynamicClasses[0]?.name || 'Class 9',
+    academicGroup: 'All',
     subject: 'Math',
     chapter: '',
     chapterNameCustom: '',
@@ -1839,70 +852,158 @@ export default function App() {
     options: ['', '', '', ''],
     correctAnswer: 0,
     points: 1,
-    class: 'Class 9',
+    class: dynamicClasses[0]?.name || 'Class 9',
+    academicGroup: 'All',
     subject: '',
     chapter: '',
     topicId: ''
   });
 
+  const [questionImageFile, setQuestionImageFile] = useState<File | null>(null);
+  const [questionImagePreview, setQuestionImagePreview] = useState<string | null>(null);
+  const [optionImageFiles, setOptionImageFiles] = useState<(File | null)[]>([null, null, null, null]);
+  const [optionImagePreviews, setOptionImagePreviews] = useState<(string | null)[]>([null, null, null, null]);
+
+  const compressImage = (file: File): Promise<File> => {
+    return new Promise((resolve) => {
+      if (file.size < 150 * 1024) {
+        resolve(file);
+        return;
+      }
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const MAX_DIM = 1000;
+          if (width > MAX_DIM || height > MAX_DIM) {
+            if (width > height) {
+              height = Math.round((height * MAX_DIM) / width);
+              width = MAX_DIM;
+            } else {
+              width = Math.round((width * MAX_DIM) / height);
+              height = MAX_DIM;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(file);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob((blob) => {
+            if (blob) {
+              const compressedFile = new File([blob], file.name.substring(0, file.name.lastIndexOf('.')) + '.webp', {
+                type: 'image/webp',
+                lastModified: Date.now()
+              });
+              resolve(compressedFile);
+            } else {
+              resolve(file);
+            }
+          }, 'image/webp', 0.82);
+        };
+        img.onerror = () => resolve(file);
+      };
+      reader.onerror = () => resolve(file);
+    });
+  };
+
+  const handleTriggerEditQuestion = (q: any) => {
+    const rawText = q.questionText || q.question_text || "";
+    const parsedText = parseQuestionText(rawText);
+    const imageFromText = parsedText.image;
+    const directQuestionImage = q.question_image || imageFromText || null;
+
+    const rawOptions = q.options || ['', '', '', ''];
+    const parsedOptions: string[] = [];
+    const parsedOptionImages: (string | null)[] = [null, null, null, null];
+
+    rawOptions.forEach((opt: any, idx: number) => {
+      const parsedOpt = parseOption(opt);
+      parsedOptions[idx] = parsedOpt.text;
+      parsedOptionImages[idx] = parsedOpt.image || null;
+    });
+
+    if (q.option_a_image) parsedOptionImages[0] = q.option_a_image;
+    if (q.option_b_image) parsedOptionImages[1] = q.option_b_image;
+    if (q.option_c_image) parsedOptionImages[2] = q.option_c_image;
+    if (q.option_d_image) parsedOptionImages[3] = q.option_d_image;
+
+    setNewQuestion({
+      ...q,
+      questionText: parsedText.text,
+      options: parsedOptions,
+      correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : q.correct_answer,
+    });
+
+    setQuestionImageFile(null);
+    setQuestionImagePreview(directQuestionImage);
+    setOptionImageFiles([null, null, null, null]);
+    setOptionImagePreviews(parsedOptionImages);
+
+    setEditingQuestionId(q.id);
+    setIsAddingQuestion(true);
+  };
+
   const [temporaryQuestions, setTemporaryQuestions] = useState<Question[]>([]);
   const [allLeaderboards, setAllLeaderboards] = useState<LeaderboardEntry[]>([]);
-  const [leaderboardClassFilter, setLeaderboardClassFilter] = useState<'Class 6' | 'Class 7' | 'Class 8' | 'Class 9-10' | 'Class 11-12'>('Class 9-10');
+  const [leaderboardClassFilter, setLeaderboardClassFilter] = useState<string>('');
   const [leaderboardExamId, setLeaderboardExamId] = useState<string | null>(null);
   const [questionBankExamId, setQuestionBankExamId] = useState<string>('global');
 
-  const getClassGroup = (academicClass: AcademicClass): string => {
-    if (academicClass === 'Class 6') return 'Class 6';
-    if (academicClass === 'Class 7') return 'Class 7';
-    if (academicClass === 'Class 8') return 'Class 8';
-    if (academicClass === 'Class 9' || academicClass === 'Class 10') return 'Class 9-10';
-    if (academicClass === 'Class 11' || academicClass === 'Class 12') return 'Class 11-12';
+  const getClassGroup = (academicClass: string): string => {
     return academicClass;
   };
 
   const handleUpdateProfile = async (e: FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser) return;
+    if (!user) return;
     setIsUpdatingProfile(true);
     setGlobalError(null);
     try {
-      const userRef = doc(db, 'users', auth.currentUser.uid);
-      
-      // Update Firebase Auth name
-      if (profileFormData.displayName !== auth.currentUser.displayName) {
-        await updateProfile(auth.currentUser, { displayName: profileFormData.displayName });
-        await auth.currentUser.reload();
-        setUser({ ...auth.currentUser });
-      }
-
-      // Update Firestore user document
-      await updateDoc(userRef, {
-        displayName: profileFormData.displayName,
-        name: profileFormData.displayName,
-        class: profileFormData.academicClass,
-        updatedAt: Date.now()
+      // Update Supabase Auth metadata
+      const { error: authError } = await supabase.auth.updateUser({
+        data: { 
+          full_name: profileFormData.displayName,
+          academic_class: profileFormData.academicClass,
+          academic_group: profileFormData.academicGroup
+        }
       });
 
-      // Update name/class in all user's leaderboard entries
-      const q = query(collection(db, 'leaderboards'), where('userId', '==', auth.currentUser.uid));
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        const batch = writeBatch(db);
-        querySnapshot.docs.forEach((leaderDoc) => {
-          batch.update(leaderDoc.ref, {
-            userName: profileFormData.displayName,
-            class: profileFormData.academicClass,
-            lastUpdated: Date.now()
-          });
-        });
-        await batch.commit();
-      }
+      if (authError) throw authError;
+
+      // Update profiles table
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          display_name: profileFormData.displayName,
+          academic_class: profileFormData.academicClass,
+          academic_group: profileFormData.academicGroup,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id);
+
+      if (profileError) throw profileError;
+
+      // Update local state
+      setUser(prev => prev ? { ...prev, user_metadata: { ...prev.user_metadata, full_name: profileFormData.displayName } } : null);
+      setFirestoreUser(prev => prev ? { 
+        ...prev, 
+        display_name: profileFormData.displayName,
+        academic_class: profileFormData.academicClass,
+        academic_group: profileFormData.academicGroup
+      } : null);
 
       setIsEditingProfile(false);
-      // setGlobalError(null); // Success
     } catch (error: any) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${auth.currentUser.uid}`);
+      console.error("Profile update error:", error);
       setGlobalError("Failed to update profile. Please try again.");
     } finally {
       setIsUpdatingProfile(false);
@@ -1991,163 +1092,489 @@ export default function App() {
   }, [isDarkMode]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setIsAuthReady(true);
-      if (!currentUser) {
+    supabase.auth.getSession().then((res) => {
+      const session = res?.data?.session;
+      if (session?.user) {
+        const mappedUser = {
+          id: session.user.id,
+          uid: session.user.id,
+          email: session.user.email,
+          displayName: session.user.user_metadata?.full_name || session.user.email,
+          photoURL: session.user.user_metadata?.avatar_url || null,
+          emailVerified: !!session.user.email_confirmed_at,
+          user_metadata: session.user.user_metadata
+        } as any;
+        setUser(mappedUser);
+      } else {
+        setUser(null);
         setUserRole('user');
         setCanUpload(false);
-        setFirestoreUser(null);
+      }
+    }).catch(err => {
+      console.error("Auth session error:", err);
+    }).finally(() => {
+       setIsAuthReady(true);
+    });
+
+    const { data: { subscription: authListener } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        const mappedUser = {
+          id: session.user.id,
+          uid: session.user.id,
+          email: session.user.email,
+          displayName: session.user.user_metadata.full_name || session.user.email,
+          photoURL: session.user.user_metadata.avatar_url || null,
+          emailVerified: !!session.user.email_confirmed_at,
+          user_metadata: session.user.user_metadata
+        } as any;
+        setUser(mappedUser);
+      } else {
+        setUser(null);
+        setUserRole('user');
+        setCanUpload(false);
       }
     });
-    return () => unsubscribe();
+
+    return () => authListener.unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (!user) {
-      setFirestoreUser(null);
-      return;
-    }
+    if (!user) return;
 
-    const userRef = doc(db, 'users', user.uid);
-    const unsubscribe = onSnapshot(userRef, (docSnap) => {
+    // In Supabase, we can have a 'profiles' table. 
+    // For now, we'll use user_metadata or fetch a profile if available.
+    const fetchProfile = async () => {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
       const isAdminEmail = user.email === 'mdsohanali636@gmail.com';
       
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setFirestoreUser(data);
-        const currentRole = data.role || 'user';
-        const currentCanUpload = data.canUpload ?? false;
-        
-        setCanUpload(currentCanUpload);
-        
-        if (isAdminEmail && currentRole !== 'admin') {
-          setDoc(userRef, { role: 'admin', canUpload: true }, { merge: true });
-          setUserRole('admin');
-          setCanUpload(true);
+      // Fetch or query user_roles table
+      let userRoleData = null;
+      try {
+        const { data, error: rError } = await supabase
+          .from('user_roles')
+          .select('*')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (!rError && data) {
+          userRoleData = data;
         } else {
-          setUserRole(currentRole);
+          // fallback query with id
+          const { data: dataById, error: rErrorById } = await supabase
+            .from('user_roles')
+            .select('*')
+            .eq('id', user.id)
+            .maybeSingle();
+          if (!rErrorById && dataById) {
+            userRoleData = dataById;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not query user_roles direct:", err);
+      }
+
+      // Default permissions
+      const defaultRole = isAdminEmail ? 'admin' : (profile?.role || 'user');
+      const defaultCanUpload = isAdminEmail ? true : (profile?.can_upload ?? false);
+      const defaultCanManageExams = isAdminEmail ? true : false;
+      const defaultCanManageQuestions = isAdminEmail ? true : false;
+      const defaultCanManageResources = isAdminEmail ? true : false;
+      const defaultIsPremium = isAdminEmail ? true : (profile?.has_premium_access ?? false);
+
+      let currentRole = defaultRole;
+      let currentCanUpload = defaultCanUpload;
+      let currentCanManageExams = defaultCanManageExams;
+      let currentCanManageQuestions = defaultCanManageQuestions;
+      let currentCanManageResources = defaultCanManageResources;
+      let currentIsPremium = defaultIsPremium;
+
+      if (userRoleData) {
+        currentRole = userRoleData.role || defaultRole;
+        currentCanUpload = userRoleData.can_upload ?? defaultCanUpload;
+        currentCanManageExams = userRoleData.can_manage_exams ?? defaultCanManageExams;
+        currentCanManageQuestions = userRoleData.can_manage_questions ?? defaultCanManageQuestions;
+        currentCanManageResources = userRoleData.can_manage_resources ?? defaultCanManageResources;
+        currentIsPremium = userRoleData.is_premium ?? defaultIsPremium;
+      } else {
+        // Upsert to user_roles
+        try {
+          const insertRec = {
+            user_id: user.id,
+            role: defaultRole,
+            can_upload: defaultCanUpload,
+            can_manage_exams: defaultCanManageExams,
+            can_manage_questions: defaultCanManageQuestions,
+            can_manage_resources: defaultCanManageResources,
+            is_premium: defaultIsPremium
+          };
+          const { error: insError } = await supabase.from('user_roles').insert([insertRec]);
+          if (insError) {
+            const altRec = {
+              id: user.id,
+              role: defaultRole,
+              can_upload: defaultCanUpload,
+              can_manage_exams: defaultCanManageExams,
+              can_manage_questions: defaultCanManageQuestions,
+              can_manage_resources: defaultCanManageResources,
+              is_premium: defaultIsPremium
+            };
+            await supabase.from('user_roles').insert([altRec]);
+          }
+        } catch (err) {
+          console.warn("Warning: Could not create default user_roles record:", err);
+        }
+      }
+
+      // Set user states
+      setUserRole(currentRole as any);
+      setCanUpload(currentCanUpload);
+      setCanManageExams(currentCanManageExams);
+      setCanManageQuestions(currentCanManageQuestions);
+      setCanManageResources(currentCanManageResources);
+      setIsPremium(currentIsPremium);
+
+      const hasPremium = currentIsPremium || (profile?.has_premium_access ?? false);
+
+      if (profile) {
+        // Map snake_case to camelCase for consistent frontend usage
+        const mappedProfile = {
+          ...profile,
+          displayName: profile.display_name,
+          academicClass: profile.academic_class,
+          hasPremiumAccess: hasPremium,
+          premiumExpiry: profile.premium_expiry,
+          canUpload: currentCanUpload,
+          createdAt: profile.created_at,
+          photoURL: profile.photo_url,
+          phoneNumber: profile.phone_number
+        };
+        
+        setFirestoreUser(mappedProfile);
+        
+        // Sync admin role/permission to profiles if email matches but role is user
+        if (isAdminEmail && profile.role !== 'admin') {
+          await supabase.from('profiles').update({ role: 'admin', can_upload: true }).eq('id', user.id);
         }
       } else {
-        // Initial sync for new user
-        const role = isAdminEmail ? 'admin' : 'user';
-        const uploadPermission = isAdminEmail ? true : false;
-        setDoc(userRef, {
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName,
-          name: user.displayName, // Requested: name
-          photoURL: user.photoURL,
-          role: role,
-          class: 'Class 9', // Default if missing
-          canUpload: uploadPermission,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          lastLogin: serverTimestamp()
-        }, { merge: true });
-        setUserRole(role);
-        setCanUpload(uploadPermission);
+        // Create initial profile
+        const { data: newProfile } = await supabase
+          .from('profiles')
+          .upsert({
+            id: user.id,
+            email: user.email,
+            display_name: user.user_metadata?.full_name || 'Student',
+            role: currentRole,
+            academic_class: user.user_metadata?.academic_class || dynamicClasses[0]?.name || 'Class 9',
+            can_upload: currentCanUpload,
+          })
+          .select()
+          .single();
+          
+        if (newProfile) {
+          const mappedNewProfile = {
+            ...newProfile,
+            displayName: newProfile.display_name,
+            academicClass: newProfile.academic_class,
+            hasPremiumAccess: hasPremium,
+            premiumExpiry: newProfile.premium_expiry,
+            canUpload: currentCanUpload,
+            createdAt: newProfile.created_at,
+            photoURL: newProfile.photo_url,
+            phoneNumber: newProfile.phone_number
+          };
+          setFirestoreUser(mappedNewProfile);
+        }
       }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchProfile();
   }, [user]);
 
   useEffect(() => {
-    // Main feed: only approved content
-    const q = query(
-      collection(db, 'contents'), 
-      where('status', '==', 'approved'),
-      orderBy('createdAt', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const dbContents = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ContentItem));
-      setContents(dbContents);
-      
-      // If DB is empty and user is admin, we can offer to seed
-      if (dbContents.length === 0 && userRole === 'admin' && !isSeeding) {
-        console.log("Database is empty. Admin can seed data.");
+    const fetchData = async () => {
+      try {
+        // Attempt to fetch resources and exams. Playlists/External resources might not exist yet.
+        const resourcePromise = supabaseService.fetchResources().catch(e => {
+          console.warn("Resources table might be missing or empty:", e);
+          return [];
+        });
+        const examPromise = supabaseService.fetchExams(userRole === 'admin' || canUpload).catch(e => {
+          console.warn("Exams table might be missing or empty:", e);
+          return [];
+        });
+        const externalPromise = supabase.from('external_links').select('*').order('created_at', { ascending: false });
+
+        const [dbResources, dbExams, dbExternals] = await Promise.all([
+          resourcePromise,
+          examPromise,
+          externalPromise
+        ]);
+
+        if (dbResources) {
+          setContents(dbResources as ContentItem[]);
+          setAllContents(dbResources as ContentItem[]);
+        }
+        if (dbExternals?.data) {
+          const mapped = dbExternals.data.map((r: any) => ({
+            ...r,
+            createdAt: r.created_at
+          }));
+          setExternalResources(mapped as ExternalResource[]);
+        }
+        if (dbExams) setAllExams(dbExams as Exam[]);
+        
+        // Optional: Playlists if needed, but handled gracefully
+        try {
+          const { data: dbPlaylists } = await supabase.from('playlists').select('*').order('created_at', { ascending: false });
+          if (dbPlaylists) {
+            setPlaylists(dbPlaylists as Playlist[]);
+            setAllPlaylists(dbPlaylists as Playlist[]);
+          }
+        } catch (e) {
+          console.warn("Playlists table might be missing:", e);
+        }
+
+      } catch (err) {
+        console.error("Error fetching initial data from Supabase:", err);
       }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'contents', setGlobalError);
-    });
-    return () => unsubscribe();
-  }, [userRole, isSeeding]);
+    };
+
+    fetchData();
+  }, [user, userRole]);
+
+  // Dynamic fetching of academic data
+  useEffect(() => {
+    const fetchClassesAndGroups = async () => {
+      try {
+        const { data: classData } = await supabase
+          .from('academic_classes')
+          .select('*')
+          .eq('active', true)
+          .order('order', { ascending: true });
+        if (classData) {
+          const mapped = (classData as any[]).map(c => ({
+            ...c,
+            createdAt: c.created_at,
+            updatedAt: c.updated_at
+          }));
+          setDynamicClasses(mapped as AcademicClassInfo[]);
+        }
+
+        const groupData = await supabaseService.fetchAcademicGroups();
+        if (groupData) {
+          const mapped = (groupData as any[]).map(g => ({
+            ...g,
+            createdAt: g.created_at
+          }));
+          setAcademicGroups(mapped as AcademicGroup[]);
+        }
+      } catch (err) {
+        console.error("Error fetching academic data:", err);
+      }
+    };
+    fetchClassesAndGroups();
+  }, []);
 
   useEffect(() => {
-    // Listen for academic classes
-    const classesUnsubscribe = onSnapshot(
-      query(collection(db, 'academic_classes'), orderBy('order', 'asc')), 
-      (snapshot) => {
-        setDynamicClasses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AcademicClassInfo)));
-      },
-      (error) => handleFirestoreError(error, OperationType.LIST, 'academic_classes', setGlobalError)
-    );
+    const fetchSubjects = async () => {
+      try {
+        let query = supabase
+          .from('subjects')
+          .select('*')
+          .eq('active', true)
+          .order('order', { ascending: true });
 
-    // Listen for subjects
-    const subjectsUnsubscribe = onSnapshot(
-      query(collection(db, 'subjects'), orderBy('order', 'asc')), 
-      (snapshot) => {
-        setDynamicSubjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AcademicSubject)));
-      },
-      (error) => handleFirestoreError(error, OperationType.LIST, 'subjects', setGlobalError)
-    );
+        if (classFilter !== 'All') {
+          const matchedClass = dynamicClasses.find(c => c.name === classFilter);
+          if (matchedClass) {
+            query = query.eq('class_id', matchedClass.id);
+          } else if (dynamicClasses.length > 0) {
+            // Class filter set but not found in loaded classes
+            setDynamicSubjects([]);
+            return;
+          }
+        }
 
-    // Listen for chapters
-    const chaptersUnsubscribe = onSnapshot(
-      query(collection(db, 'chapters'), orderBy('order', 'asc')), 
-      (snapshot) => {
-        setDynamicChapters(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AcademicChapter)));
-      },
-      (error) => handleFirestoreError(error, OperationType.LIST, 'chapters', setGlobalError)
-    );
-
-    // Listen for topics
-    const topicsUnsubscribe = onSnapshot(
-      query(collection(db, 'topics'), orderBy('order', 'asc')), 
-      (snapshot) => {
-        setDynamicTopics(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AcademicTopic)));
-      },
-      (error) => handleFirestoreError(error, OperationType.LIST, 'topics', setGlobalError)
-    );
-
-    return () => {
-      classesUnsubscribe();
-      subjectsUnsubscribe();
-      chaptersUnsubscribe();
-      topicsUnsubscribe();
+        const { data, error } = await query;
+        if (data) {
+          const mapped = (data as any[]).map(s => ({
+            ...s,
+            classId: s.class_id,
+            createdAt: s.created_at,
+            updatedAt: s.updated_at
+          }));
+          setDynamicSubjects(mapped as AcademicSubject[]);
+        }
+      } catch (err) {
+        console.error("Error fetching subjects:", err);
+      }
     };
-  }, []);
+
+    // Always fetch if we have classes or if it's "All"
+    if (classFilter === 'All' || dynamicClasses.length > 0) {
+      fetchSubjects();
+    }
+  }, [classFilter, dynamicClasses]);
+
+  useEffect(() => {
+    const fetchChapters = async () => {
+      try {
+        let query = supabase
+          .from('chapters')
+          .select('*')
+          .eq('active', true)
+          .order('order', { ascending: true });
+
+        const matchedClass = dynamicClasses.find(c => c.name === classFilter);
+        if (classFilter !== 'All' && matchedClass) {
+          query = query.eq('class_id', matchedClass.id);
+        }
+
+        if (subjectFilter !== 'All') {
+          const matchedSubject = dynamicSubjects.find(s => 
+            s.name === subjectFilter && 
+            (matchedClass ? s.classId === matchedClass.id : true)
+          );
+          if (matchedSubject) {
+            query = query.eq('subject_id', matchedSubject.id);
+          } else if (dynamicSubjects.length > 0) {
+             // Subject selected but not found in current subjects list
+             setDynamicChapters([]);
+             return;
+          }
+        }
+
+        const { data, error } = await query;
+        if (data) {
+          const mapped = (data as any[]).map(ch => ({
+            ...ch,
+            subjectId: ch.subject_id,
+            classId: ch.class_id,
+            createdAt: ch.created_at,
+            updatedAt: ch.updated_at
+          }));
+          setDynamicChapters(mapped as AcademicChapter[]);
+        }
+      } catch (err) {
+        console.error("Error fetching chapters:", err);
+      }
+    };
+
+    if (dynamicClasses.length > 0 || classFilter === 'All') {
+      fetchChapters();
+    }
+  }, [subjectFilter, classFilter, dynamicSubjects, dynamicClasses]);
+
+  // Reset subject filter if it's no longer valid for the selected class
+  useEffect(() => {
+    if (classFilter !== 'All' && subjectFilter !== 'All' && currentSubjects.length > 0) {
+      if (!currentSubjects.includes(subjectFilter)) {
+        setSubjectFilter('All');
+      }
+    }
+  }, [classFilter, currentSubjects, subjectFilter]);
+
+  // For Exam Chapters
+  useEffect(() => {
+    if (!examSetup.academicClass || !examSetup.subject) return;
+    
+    const matchedClass = dynamicClasses.find(c => c.name === examSetup.academicClass);
+    const matchedSubject = dynamicSubjects.find(s => s.name === examSetup.subject && (matchedClass ? s.classId === matchedClass.id : true));
+    
+    if (matchedSubject) {
+      const fetchChapters = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('chapters')
+            .select('*')
+            .eq('subject_id', matchedSubject.id)
+            .eq('active', true)
+            .order('order', { ascending: true });
+          if (data) {
+            const mapped = (data as any[]).map(ch => ({
+              ...ch,
+              subjectId: ch.subject_id,
+              classId: ch.class_id
+            }));
+            setDynamicChapters(mapped as AcademicChapter[]);
+          }
+        } catch (err) {
+          console.error("Error fetching chapters for exam:", err);
+        }
+      };
+      fetchChapters();
+    }
+  }, [examSetup.academicClass, examSetup.subject, dynamicClasses, dynamicSubjects]);
+
+  // Fetch Topics when chapter changes in Exam setup
+  useEffect(() => {
+    if (!examSetup.chapter || examSetup.chapter === 'All Chapters') {
+      setDynamicTopics([]);
+      return;
+    }
+
+    const matchedChapter = dynamicChapters.find(c => c.name === examSetup.chapter);
+    if (!matchedChapter) return;
+
+    const fetchTopics = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('topics')
+          .select('*')
+          .eq('chapter_id', matchedChapter.id)
+          .eq('active', true)
+          .order('order', { ascending: true });
+        if (data) {
+          const mapped = (data as any[]).map(t => ({
+            ...t,
+            chapterId: t.chapter_id,
+            subjectId: t.subject_id,
+            classId: t.class_id
+          }));
+          setDynamicTopics(mapped as AcademicTopic[]);
+        }
+      } catch (err) {
+        console.error("Error fetching topics:", err);
+      }
+    };
+    fetchTopics();
+  }, [examSetup.chapter, dynamicChapters]);
+
+  // Set default leaderboard filter when classes load
+  useEffect(() => {
+    if (dynamicClasses.length > 0 && !leaderboardClassFilter) {
+      setLeaderboardClassFilter(dynamicClasses[0].name);
+    }
+  }, [dynamicClasses, leaderboardClassFilter]);
 
   const handleSeedDatabase = async () => {
     if (userRole !== 'admin' || isSeeding) return;
     setIsSeeding(true);
     setGlobalError(null);
     try {
-      console.log("Seeding database...");
+      console.log("Seeding Supabase database...");
       for (const item of INITIAL_DATA) {
-        const { id, ...itemData } = item;
-        const docRef = await addDoc(collection(db, 'contents'), {
-          ...itemData,
-          authorId: user?.uid || 'system',
-          createdAt: Date.now()
-        });
-        await setDoc(docRef, { id: docRef.id }, { merge: true });
+        await supabaseService.createContent(item);
       }
-      console.log("Seeding COMPLETE content data.");
       for (const exam of MOCK_EXAMS) {
-        const docRef = await addDoc(collection(db, 'exams'), {
-          ...exam,
-          authorId: user?.uid || 'system',
-          createdAt: Date.now()
-        });
-        await setDoc(docRef, { id: docRef.id }, { merge: true });
+        const { id, questions, ...examData } = exam;
+        const mappedExam = {
+          ...examData,
+          academic_class: (examData as any).class || (examData as any).academicClass,
+          created_at: new Date().toISOString()
+        };
+        delete (mappedExam as any).class;
+        delete (mappedExam as any).academicClass;
+        
+        await supabase.from('exams').insert([mappedExam]);
       }
       console.log("Seeding complete.");
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'contents/seed', setGlobalError);
+    } catch (error: any) {
+      setGlobalError("Seeding failed: " + error.message);
     } finally {
       setIsSeeding(false);
     }
@@ -2155,40 +1582,113 @@ export default function App() {
 
   const [allContents, setAllContents] = useState<ContentItem[]>([]);
   const [allPlaylists, setAllPlaylists] = useState<Playlist[]>([]);
+
+  const fetchPlaylists = useCallback(async () => {
+    try {
+      const data = await supabaseService.fetchPlaylists(false);
+      if (data) setPlaylists(data as Playlist[]);
+    } catch (err) {
+      console.warn("Soft error in public playlists fetch:", err);
+    }
+  }, []);
+
+  const fetchAllPlaylists = useCallback(async () => {
+    try {
+      const data = await supabaseService.fetchPlaylists(true);
+      if (data) setAllPlaylists(data as Playlist[]);
+    } catch (err) {
+      console.warn("Soft error in admin playlists fetch:", err);
+    }
+  }, []);
   useEffect(() => {
     if (userRole !== 'admin') return;
     
-    // Admin view: all content
-    const q = query(collection(db, 'contents'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setAllContents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ContentItem)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'contents');
+    const fetchAllContents = async () => {
+      try {
+        const data = await supabaseService.fetchContents();
+        if (data) setAllContents(data as ContentItem[]);
+      } catch (err) {
+        console.warn("Soft error in admin contents fetch:", err);
+      }
+    };
+
+    fetchAllContents();
+    
+    // Subscribe to all relevant content tables
+    const tableNames = ['notes', 'books', 'video_classes', 'practice_sheets', 'external_links'];
+    const channels = tableNames.map(tableName => {
+      return supabase
+        .channel(`admin-all-${tableName}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, () => fetchAllContents())
+        .subscribe();
     });
-    return () => unsubscribe();
+
+    return () => {
+      channels.forEach(channel => supabase.removeChannel(channel));
+    };
   }, [userRole]);
 
   useEffect(() => {
     if (userRole !== 'admin') return;
-    const q = query(collection(db, 'playlists'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setAllPlaylists(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Playlist)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'playlists');
-    });
-    return () => unsubscribe();
-  }, [userRole]);
+    
+    fetchAllPlaylists();
+    const channel = supabase
+      .channel('admin-all-playlists')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'playlists' }, () => fetchAllPlaylists())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userRole, fetchAllPlaylists]);
 
   useEffect(() => {
     if (userRole !== 'admin') return;
-    const q = query(collection(db, 'feedback'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const feedbackData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Feedback));
-      setAllFeedback(feedbackData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'feedback');
-    });
-    return () => unsubscribe();
+    
+    // For feedback, we'll just fetch for now. We can add real-time later if needed.
+    const fetchFeedback = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('feedback')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (data) {
+          const mapped = data.map(f => ({
+            ...f,
+            userId: f.user_id,
+            userEmail: f.user_email,
+            userName: f.user_name,
+            text: f.content,
+            createdAt: f.created_at
+          }));
+          setAllFeedback(mapped as Feedback[]);
+        }
+        if (error) {
+          if (error.message.includes('schema cache')) {
+            console.warn("Feedback table missing in schema cache.");
+          } else {
+            console.error("Feedback fetch error:", error);
+          }
+        }
+      } catch (err) {
+        console.warn("Soft error in feedback fetch:", err);
+      }
+    };
+    
+    fetchFeedback();
+    
+    // Optional: Real-time
+    const channel = supabase
+      .channel('public:feedback')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, () => {
+        fetchFeedback();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [userRole]);
 
   const [userContents, setUserContents] = useState<ContentItem[]>([]);
@@ -2196,147 +1696,377 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     
-    // User dashboard: their own content
-    const q = query(
-      collection(db, 'contents'), 
-      where('authorId', '==', user.uid),
-      orderBy('createdAt', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setUserContents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ContentItem)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'contents');
+    const fetchUserContents = async () => {
+      try {
+        const tableNames = ['notes', 'books', 'video_classes', 'practice_sheets', 'external_links'];
+        const results = await Promise.all(tableNames.map(async (table) => {
+          const { data } = await supabase
+            .from(table)
+            .select('*')
+            .eq('author_id', user.id)
+            .order('created_at', { ascending: false });
+          
+          if (!data) return [];
+          
+          return data.map(item => ({
+            ...item,
+            category: Object.keys(TABLE_MAP).find(key => (TABLE_MAP as any)[key] === table) || 'Notes',
+            academicClass: item.academic_class,
+            authorId: item.author_id,
+            authorName: item.author_name,
+            channelName: item.channel_name,
+            createdAt: item.created_at,
+            isPremium: item.is_premium
+          }));
+        }));
+        
+        const allUserContents = results.flat().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setUserContents(allUserContents as ContentItem[]);
+      } catch (err) {
+        console.warn("Soft error in user contents fetch:", err);
+      }
+    };
+
+    fetchUserContents();
+    
+    // Subscribe to all relevant content tables for this user
+    const tableNames = ['notes', 'books', 'video_classes', 'practice_sheets', 'external_links'];
+    const channels = tableNames.map(tableName => {
+      return supabase
+        .channel(`user-contents-${tableName}-${user.id}`)
+        .on('postgres_changes', { 
+          event: '*', 
+          schema: 'public', 
+          table: tableName,
+          filter: `author_id=eq.${user.id}`
+        }, () => fetchUserContents())
+        .subscribe();
     });
-    return () => unsubscribe();
+
+    return () => {
+      channels.forEach(channel => supabase.removeChannel(channel));
+    };
   }, [user]);
 
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, 'playlists'),
-      where('authorId', '==', user.uid),
-      orderBy('createdAt', 'desc')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setUserPlaylists(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Playlist)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'playlists');
-    });
-    return () => unsubscribe();
+    
+    const fetchUserPlaylists = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('playlists')
+          .select('*')
+          .eq('author_id', user.id)
+          .order('created_at', { ascending: false });
+        
+        if (data) {
+          const mappedData = data.map(item => ({
+            ...item,
+            authorId: item.author_id,
+            youtubePlaylistId: item.youtube_playlist_id,
+            videoIds: item.video_ids,
+            academicClass: item.academic_class,
+            createdAt: item.created_at,
+            isPremium: item.is_premium
+          }));
+          setUserPlaylists(mappedData as Playlist[]);
+        }
+        if (error) console.warn("User fetchPlaylists error:", error);
+      } catch (err) {
+        console.warn("Soft error in user playlists fetch:", err);
+      }
+    };
+
+    fetchUserPlaylists();
+    
+    const channel = supabase
+      .channel(`user-playlists-${user.id}`)
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'playlists',
+        filter: `author_id=eq.${user.id}`
+      }, () => fetchUserPlaylists())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, 'leaderboards'),
-      orderBy('bestScore', 'desc'),
-      orderBy('timeTaken', 'asc'), // Score + Time Priority
-      limit(200)
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setAllLeaderboards(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LeaderboardEntry)));
-    });
-    return () => unsubscribe();
+    
+    const fetchLeaderboards = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('leaderboards')
+          .select('*')
+          .order('best_score', { ascending: false })
+          .order('time_taken', { ascending: true })
+          .limit(200);
+        
+        if (data) setAllLeaderboards(data as LeaderboardEntry[]);
+        if (error) {
+          if (error.message.includes('schema cache')) {
+            console.warn("Leaderboards table missing in schema cache.");
+          } else {
+            console.error("Leaderboards fetch error:", error);
+          }
+        }
+      } catch (err) {
+        console.warn("Soft error in leaderboards fetch:", err);
+      }
+    };
+
+    fetchLeaderboards();
+    
+    const channel = supabase
+      .channel('public:leaderboards')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leaderboards' }, () => fetchLeaderboards())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   useEffect(() => {
     if (userRole !== 'admin') return;
     
-    let unsubscribe: () => void;
+    const fetchQuestions = async () => {
+      let query = supabase.from('questions').select('*').order('created_at', { ascending: false });
+      
+      if (questionBankExamId !== 'global') {
+        query = query.eq('exam_id', questionBankExamId);
+      } else {
+        query = query.limit(100);
+      }
+      
+      const { data, error } = await query;
+      if (data) setAllQuestions(data as Question[]);
+      if (error) handleSupabaseError(error, OperationType.LIST, 'questions');
+    };
+
+    fetchQuestions();
     
-    if (questionBankExamId === 'global') {
-      const q = query(collection(db, 'questions'), orderBy('createdAt', 'desc'), limit(100));
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        setAllQuestions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question)));
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'questions');
-      });
-    } else {
-      const q = query(collection(db, 'exams', questionBankExamId, 'questions'), orderBy('createdAt', 'desc'));
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        setAllQuestions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question)));
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, `exams/${questionBankExamId}/questions`);
-      });
-    }
-    
-    return () => unsubscribe && unsubscribe();
+    const channel = supabase
+      .channel('public:questions')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'questions' }, () => fetchQuestions())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [userRole, questionBankExamId]);
 
   useEffect(() => {
-    // Admin sees ALL exams, regular users only see approved ones
-    let q;
-    if (userRole === 'admin') {
-      q = query(collection(db, 'exams'), orderBy('createdAt', 'desc'));
-    } else {
-      q = query(collection(db, 'exams'), where('status', '==', 'approved'), orderBy('createdAt', 'desc'));
-    }
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setAllExams(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Exam)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'exams', setGlobalError);
-    });
-    return () => unsubscribe();
+    const fetchExams = async () => {
+      let query = supabase.from('exams').select('*').order('created_at', { ascending: false });
+      const { data, error } = await query;
+      if (data) setAllExams(data as Exam[]);
+      if (error) handleSupabaseError(error, OperationType.LIST, 'exams', setGlobalError);
+    };
+
+    fetchExams();
+    const channel = supabase
+      .channel('public:exams')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'exams' }, () => fetchExams())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [userRole]);
 
   useEffect(() => {
-    const q = query(collection(db, 'external_resources'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setExternalResources(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ExternalResource)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'external_resources', setGlobalError);
+    if (!user) return;
+
+    // Real-time subscription for attempts
+    const attemptsChannel = supabase
+      .channel('attempts-realtime')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'attempts',
+        filter: `user_id=eq.${user.id}`
+      }, (payload) => {
+        console.log('Attempt change detected:', payload);
+        // If an attempt is updated (e.g. by edge function), we might want to refresh current results if they match
+        if (payload.new && (payload.new as any).id === currentAttemptId) {
+          // This will be handled by the manual fetch in handleExamSubmit, 
+          // but for general dashboard info, we could update a list here.
+        }
+      })
+      .subscribe();
+
+    // Real-time subscription for answers
+    const answersChannel = supabase
+      .channel('answers-realtime')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'answers'
+        // Filtering by attempt_id would be better if we had it in the filter string
+      }, (payload) => {
+        console.log('Answer change detected:', payload);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(attemptsChannel);
+      supabase.removeChannel(answersChannel);
+    };
+  }, [user, currentAttemptId]);
+
+  useEffect(() => {
+    const fetchResourcesData = async () => {
+      try {
+        const data = await supabaseService.fetchResources();
+        if (data) {
+          setContents(data as ContentItem[]);
+          setExternalResources(data.filter((r: any) => r.category === 'External Resources') as any as ExternalResource[]);
+        }
+      } catch (err) {
+        console.warn("Soft error in resources real-time fetch:", err);
+      }
+    };
+
+    fetchResourcesData();
+    const tableNames = ['notes', 'books', 'video_classes', 'practice_sheets', 'external_links'];
+    const channels = tableNames.map(tableName => {
+      return supabase
+        .channel(`public-${tableName}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, () => fetchResourcesData())
+        .subscribe();
     });
-    return () => unsubscribe();
+
+    return () => {
+      channels.forEach(channel => supabase.removeChannel(channel));
+    };
   }, []);
 
   useEffect(() => {
-    const q = query(collection(db, 'playlists'), where('status', '==', 'approved'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setPlaylists(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Playlist)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'playlists', setGlobalError);
-    });
-    return () => unsubscribe();
-  }, []);
+    fetchPlaylists();
+    const channel = supabase
+      .channel('public:playlists-approved')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'playlists' }, () => fetchPlaylists())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchPlaylists]);
 
   useEffect(() => {
     if (!user) {
       setBookmarks([]);
       return;
     }
-    const path = `users/${user.uid}/bookmarks`;
-    const q = query(collection(db, path));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setBookmarks(snapshot.docs.map(doc => doc.data().contentId));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
-    });
-    return () => unsubscribe();
+    
+    const fetchBookmarks = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('bookmarks')
+          .select('content_id')
+          .eq('user_id', user.id);
+        
+        if (data) setBookmarks(data.map(b => b.content_id));
+        if (error) {
+          if (error.message.includes('schema cache') || error.message.includes('does not exist')) {
+            console.warn("Bookmarks table or content_id column missing:", error.message);
+          } else {
+            console.error("Bookmarks fetch error:", error);
+          }
+        }
+      } catch (err) {
+        console.warn("Soft error in bookmarks fetch:", err);
+      }
+    };
+
+    fetchBookmarks();
+    const channel = supabase
+      .channel(`user-bookmarks-${user.id}`)
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'bookmarks',
+        filter: `user_id=eq.${user.id}` 
+      }, () => fetchBookmarks())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
+
+  const fetchUsersInfo = useCallback(async () => {
+    try {
+      const { data: profiles, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (profiles) {
+        let userRoles: any[] = [];
+        try {
+          const { data: rolesData } = await supabase.from('user_roles').select('*');
+          if (rolesData) userRoles = rolesData;
+        } catch (err) {
+          console.warn("Could not fetch user_roles inside fetchUsersInfo:", err);
+        }
+
+        const merged = profiles.map(p => {
+          const roleRec = userRoles.find(r => r.user_id === p.id || r.id === p.id);
+          return {
+            ...p,
+            name: p.display_name,
+            canUpload: roleRec ? (roleRec.can_upload ?? p.can_upload) : p.can_upload,
+            hasPremiumAccess: roleRec ? (roleRec.is_premium ?? p.has_premium_access) : p.has_premium_access,
+            role: roleRec ? (roleRec.role ?? p.role) : p.role,
+            canManageExams: roleRec ? (roleRec.can_manage_exams ?? false) : false,
+            canManageQuestions: roleRec ? (roleRec.can_manage_questions ?? false) : false,
+            canManageResources: roleRec ? (roleRec.can_manage_resources ?? false) : false,
+            isPremium: roleRec ? (roleRec.is_premium ?? p.has_premium_access) : p.has_premium_access
+          };
+        });
+        setAllUsers(merged);
+      }
+      if (error) handleSupabaseError(error, OperationType.LIST, 'profiles');
+    } catch (err) {
+      console.error("Error in fetchUsersInfo:", err);
+    }
+  }, []);
 
   useEffect(() => {
     if (userRole === 'admin') {
-      const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
-        setAllUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      });
-      return () => unsubscribe();
+      fetchUsersInfo();
+      const channel = supabase
+        .channel('public:profiles-admin')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => fetchUsersInfo())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'user_roles' }, () => fetchUsersInfo())
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     }
-  }, [userRole]);
+  }, [userRole, fetchUsersInfo]);
 
   const handleLogin = async () => {
-    if (isAuthLoading) return; // Prevent multiple clicks/popups
+    if (isAuthLoading) return;
     setAuthError(null);
     setIsAuthLoading(true);
     try {
-      await signInWithPopup(auth, googleProvider);
-      // Sync is now handled by the useEffect on 'user' state
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin
+        }
+      });
+      if (error) throw error;
     } catch (error: any) {
-      if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
-        handleAuthError(error);
-      } else {
-        console.log("Login popup closed/cancelled by user or app.");
-      }
+      setAuthError(error.message);
     } finally {
       setIsAuthLoading(false);
     }
@@ -2351,15 +2081,30 @@ export default function App() {
     }
     setIsAuthLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, trimmedEmail, pass);
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password: pass,
+      });
+      
+      if (error) {
+        setAuthError(error.message);
+        return;
+      }
+      
+      if (data.user) {
+        // Redirection to home usually happens by state change
+        // In this case, we might need to manually trigger a state sync or let a listener handle it
+        // The user specifically asked to redirect to home "/"
+        setView('home');
+      }
     } catch (error: any) {
-      handleAuthError(error);
+      setAuthError(error.message || "An unexpected error occurred during login.");
     } finally {
       setIsAuthLoading(false);
     }
   };
 
-  const handleEmailSignUp = async (name: string, email: string, pass: string, academicClass: AcademicClass) => {
+  const handleEmailSignUp = async (name: string, email: string, pass: string, academicClass: AcademicClass, academicGroup: string = 'All') => {
     setAuthError(null);
     const trimmedEmail = email.trim();
     if (!name || !trimmedEmail || !pass) {
@@ -2376,23 +2121,38 @@ export default function App() {
 
     setIsAuthLoading(true);
     try {
-      const result = await createUserWithEmailAndPassword(auth, trimmedEmail, pass);
-      await updateProfile(result.user, { displayName: name });
-      
-      // Save extra info to Firestore
-      await setDoc(doc(db, 'users', result.user.uid), {
-        uid: result.user.uid,
-        email: result.user.email,
-        displayName: name,
-        name: name, // Added for user requested schema
-        class: academicClass,
-        role: 'user',
-        createdAt: Date.now()
-      }, { merge: true });
+      const { data, error } = await supabase.auth.signUp({
+        email: trimmedEmail,
+        password: pass,
+        options: {
+          data: {
+            full_name: name,
+            academic_class: academicClass,
+            academic_group: academicGroup
+          }
+        }
+      });
 
-      // Let onAuthStateChanged handle the user state naturally
+      if (error) {
+        setAuthError(error.message);
+        return;
+      }
+
+      if (data.user) {
+        // Create initial profile record in profiles table
+        await supabase.from('profiles').insert([{
+          id: data.user.id,
+          display_name: name,
+          academic_class: academicClass,
+          academic_group: academicGroup,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }]);
+        // Successful signup
+        setView('home');
+      }
     } catch (error: any) {
-      handleAuthError(error);
+      setAuthError(error.message || "An unexpected error occurred during sign up.");
     } finally {
       setIsAuthLoading(false);
     }
@@ -2407,9 +2167,10 @@ export default function App() {
     }
     setIsAuthLoading(true);
     try {
-      await sendPasswordResetEmail(auth, trimmedEmail);
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail);
+      if (error) throw error;
     } catch (error: any) {
-      handleAuthError(error);
+      setAuthError(error.message);
       throw error;
     } finally {
       setIsAuthLoading(false);
@@ -2418,113 +2179,40 @@ export default function App() {
 
   const handleAuthError = (error: any) => {
     console.error("Auth error:", error);
-    let message = "An error occurred during authentication.";
+    let message = error.message || "An error occurred during authentication.";
     
-    // Extract error code - Firebase errors can be objects with a 'code' property
-    const errorCode = error.code || (error.message && error.message.match(/\((auth\/[^)]+)\)/)?.[1]);
-    
-    if (errorCode === 'auth/unauthorized-domain') {
-      message = "Domain not authorized. Please add this URL to 'Authorized domains' in Firebase Console.";
-    } else if (errorCode === 'auth/popup-blocked') {
-      message = "Login popup blocked. Please enable popups in your browser settings to continue.";
-    } else if (errorCode === 'auth/cancelled-popup-request') {
-      message = "Login request cancelled. Please try clicking the login button again.";
-    } else if (errorCode === 'auth/popup-closed-by-user') {
-      message = "Login window was closed. Please try again.";
-    } else if (errorCode === 'auth/email-already-in-use') {
-      message = "This email is already in use! Try logging in or use 'Forgot Password' if you don't remember your password.";
-    } else if (errorCode === 'auth/weak-password') {
-      message = "Password is too weak. Please use at least 6 characters.";
-    } else if (errorCode === 'auth/invalid-email') {
-      message = "The email address you entered is not valid. Please check for typos.";
-    } else if (errorCode === 'auth/user-not-found') {
-      message = "No account found with this email. Please sign up first!";
-    } else if (errorCode === 'auth/wrong-password' || errorCode === 'auth/invalid-credential' || errorCode === 'auth/invalid-login-credentials' || errorCode === 'auth/user-disabled') {
-      message = "Incorrect email or password. Please try again or sign up if you're new!";
-    } else if (errorCode === 'auth/account-exists-with-different-credential') {
-      message = "An account already exists with this email but was created using a different method (like Google). Please use that method to log in.";
-    } else if (errorCode === 'auth/operation-not-allowed') {
-      message = "This sign-in method is not enabled. Please contact support.";
-    } else if (errorCode === 'auth/invalid-phone-number') {
+    // Better Supabase error handling
+    if (message.includes('Invalid login credentials')) {
+      message = "Incorrect email or password. Please try again.";
+    } else if (message.includes('Email not confirmed')) {
+      message = "Please confirm your email address before logging in.";
+    } else if (message.includes('User already registered')) {
+      message = "This email is already registered. Try logging in instead.";
+    } else if (message.includes('invalid_phone_number')) {
       message = "Invalid phone number format. Please include country code (e.g., +880...)";
-    } else if (errorCode === 'auth/invalid-verification-code') {
+    } else if (message.includes('invalid_confirmation_code')) {
       message = "Invalid verification code. Please check and try again.";
-    } else if (errorCode === 'auth/too-many-requests') {
-      message = "Too many failed attempts. Please try again in a few minutes.";
-    } else if (error.message) {
-      // Fallback to error message if we don't recognize the code but have a message
-      message = error.message;
     }
     
     setAuthError(message);
   };
 
   useEffect(() => {
-    // We'll initialize reCAPTCHA right before we actually need it to ensure the container is ready
-    // and correctly attached to the DOM.
-    return () => {
-      if (recaptchaVerifierRef.current) {
-        try { recaptchaVerifierRef.current.clear(); } catch(e) {}
-        recaptchaVerifierRef.current = null;
-      }
-    };
+    // reCAPTCHA logic removed
+    return () => {};
   }, []);
 
   const handlePhoneSignIn = async (phoneNumber: string) => {
     setAuthError(null);
     setIsAuthLoading(true);
+    setPendingPhone(phoneNumber);
     try {
-      // Clear any existing verifier to be safe
-      if (recaptchaVerifierRef.current) {
-        try { recaptchaVerifierRef.current.clear(); } catch(e) {}
-        recaptchaVerifierRef.current = null;
-      }
-
-      // Ensure language is set
-      auth.languageCode = 'en';
-
-      recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
-        size: 'normal',
-        callback: () => {
-          console.log("reCAPTCHA solved");
-        },
-        'expired-callback': () => {
-          console.warn("reCAPTCHA expired");
-          if (recaptchaVerifierRef.current) {
-            try { recaptchaVerifierRef.current.clear(); } catch(e) {}
-            recaptchaVerifierRef.current = null;
-          }
-        }
+      const { error } = await supabase.auth.signInWithOtp({
+        phone: phoneNumber,
       });
-
-      // Render manually to catch errors early
-      await recaptchaVerifierRef.current.render();
-
-      const result = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifierRef.current);
-      setConfirmationResult(result);
-      return result;
+      if (error) throw error;
     } catch (error: any) {
-      console.error("Phone sign in error:", error);
-      if (recaptchaVerifierRef.current) {
-        try { recaptchaVerifierRef.current.clear(); } catch(e) {}
-        recaptchaVerifierRef.current = null;
-      }
-      
-      let message = "Phone authentication failed.";
-      if (error.code === 'auth/captcha-check-failed') {
-        message = "reCAPTCHA verification failed. Please check the widget below.";
-      } else if (error.code === 'auth/invalid-phone-number') {
-        message = "The phone number is invalid. Use E.164 format (e.g. +8801700000000).";
-      } else if (error.code === 'auth/too-many-requests') {
-        message = "Too many attempts (Quota exceeded). Please try again later or use Google Login.";
-      } else if (error.code === 'auth/operation-not-allowed') {
-        message = "Phone sign-in is not enabled in Firebase Console. Please enable it!";
-      } else if (error.code === 'auth/unauthorized-domain') {
-        message = `Domain ${window.location.hostname} is not authorized in Firebase Console.`;
-      } else {
-        message = error.message || "Could not send OTP. Check your connection/number.";
-      }
-      setAuthError(message);
+      setAuthError(error.message);
       throw error;
     } finally {
       setIsAuthLoading(false);
@@ -2535,11 +2223,14 @@ export default function App() {
     setAuthError(null);
     setIsAuthLoading(true);
     try {
-      if (!confirmationResult) throw new Error("No confirmation result");
-      await confirmationResult.confirm(otp);
-      setConfirmationResult(null);
+      const { error } = await supabase.auth.verifyOtp({
+        phone: pendingPhone,
+        token: otp,
+        type: 'sms'
+      });
+      if (error) throw error;
     } catch (error: any) {
-      handleAuthError(error);
+      setAuthError(error.message);
       throw error;
     } finally {
       setIsAuthLoading(false);
@@ -2547,10 +2238,8 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    console.log("Attempting logout...");
     try {
-      await signOut(auth);
-      console.log("Logout successful");
+      await supabase.auth.signOut();
       resetToHome();
     } catch (error) {
       console.error("Logout failed:", error);
@@ -2566,15 +2255,7 @@ export default function App() {
   };
 
   const classes: (string | 'All')[] = useMemo(() => {
-    if (dynamicClasses.length > 0) {
-      return ['All', ...dynamicClasses.map(c => c.name)];
-    }
-    return [
-      'All', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12',
-      'SSC', 'HSC', 'Admission', 'Job Prep', 'General',
-      'Engineering Admission-science', 'Medical Admission-science', 'Varsity Admission-science', 
-      'Varsity Admission-humanities', 'Varsity Admission-commerce'
-    ];
+    return ['All', ...dynamicClasses.map(c => c.name)];
   }, [dynamicClasses]);
   
   const subjectIcons: Record<string, any> = {
@@ -2594,23 +2275,33 @@ export default function App() {
 
   const years = ['All Years', '2024', '2023', '2022', '2021'];
   const [yearFilter, setYearFilter] = useState('All Years');
+  const [chapterFilter, setChapterFilter] = useState<string>('All');
+  const [topicFilter, setTopicFilter] = useState<string>('All');
   
-  // Derive chapters from allExams based on subject and class
+  // Derive chapters from dynamicChapters based on subject and class
   const chapters = useMemo(() => {
-    const set = new Set<string>();
-    allExams.forEach(e => {
-      if ((examSubjectFilter === 'All' || e.subject === examSubjectFilter) &&
-          (examClassFilter === 'All' || e.class === examClassFilter)) {
-        if (e.chapter && e.chapter !== 'All' && e.chapter !== 'All Chapters') {
-          set.add(e.chapter);
-        }
+    let list = dynamicChapters;
+    
+    if (examSubjectFilter !== 'All') {
+      const matchedSubject = dynamicSubjects.find(s => s.name === examSubjectFilter);
+      if (matchedSubject) {
+        list = list.filter(ch => ch.subjectId === matchedSubject.id);
       }
-    });
-    return ['All', ...Array.from(set).sort()];
-  }, [allExams, examSubjectFilter, examClassFilter]);
+    }
+    
+    if (examClassFilter !== 'All') {
+      const matchedClass = dynamicClasses.find(c => c.name === examClassFilter);
+      if (matchedClass) {
+        list = list.filter(ch => ch.classId === matchedClass.id);
+      }
+    }
+    
+    return ['All', ...Array.from(new Set(list.map(ch => ch.name))).sort()];
+  }, [dynamicChapters, examSubjectFilter, examClassFilter, dynamicClasses, dynamicSubjects]);
 
   const renderContentCard = (item: ContentItem) => {
-    const isLocked = item.isPremium && !firestoreUser?.hasPremiumAccess && userRole !== 'admin';
+    const isLocked = item.isPremium && !hasPremiumAccess;
+    const hasEditPermission = canUpload || userRole === 'admin';
     
     return (
       <TiltContainer className="h-full">
@@ -2647,6 +2338,34 @@ export default function App() {
                     }
                   }}
                 />
+              )}
+
+              {/* Edit/Delete Overlay for authorized users */}
+              {hasEditPermission && (
+                <div className="absolute bottom-3 right-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-50">
+                  <Button 
+                    variant="secondary" 
+                    size="icon" 
+                    className="h-8 w-8 rounded-full bg-white/90 backdrop-blur-sm text-zinc-900 hover:bg-white shadow-lg"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditContent(item);
+                    }}
+                  >
+                    <Pencil size={14} />
+                  </Button>
+                  <Button 
+                    variant="secondary" 
+                    size="icon" 
+                    className="h-8 w-8 rounded-full bg-red-500/90 backdrop-blur-sm text-white hover:bg-red-600 shadow-lg"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteContent(item.id);
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </Button>
+                </div>
               )}
 
               {/* Locked Overlay */}
@@ -2716,7 +2435,7 @@ export default function App() {
                       return;
                     }
                     if (item.category === 'YouTube Classes') setActiveVideo(getYouTubeId(item.url));
-                    else setActivePdf({ url: item.url, isRestricted: item.category === 'Practice Sheet' });
+                    else setActivePdf({ url: ensureFullUrl(item.url), isRestricted: item.category === 'Practice Sheet' });
                   }}
                 >
                   {isLocked ? 'Unlock Now' : (item.category === 'YouTube Classes' ? 'Watch' : (item.category === 'Books' ? 'Download PDF' : (item.category === 'Practice Sheet' ? 'Read' : 'View')))}
@@ -2738,7 +2457,8 @@ export default function App() {
   };
 
   const renderPlaylistCard = (playlist: Playlist) => {
-    const isLocked = playlist.isPremium && !firestoreUser?.hasPremiumAccess && userRole !== 'admin';
+    const isLocked = playlist.isPremium && !hasPremiumAccess;
+    const hasEditPermission = canUpload || userRole === 'admin';
     
     return (
       <TiltContainer className="h-full">
@@ -2748,7 +2468,7 @@ export default function App() {
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.9 }}
-          className="cursor-pointer relative overflow-visible"
+          className="cursor-pointer relative overflow-visible h-full"
           onClick={() => {
             if (isLocked) {
               setGlobalError("🔒 This Playlist is for Premium users only. Join parodorshhi PRO for access!");
@@ -2758,125 +2478,135 @@ export default function App() {
             setActivePlaylist(playlist);
           }}
         >
-      <Card className={`flex flex-col h-full group border-none bg-white dark:bg-zinc-900/40 backdrop-blur-md overflow-hidden relative ${isLocked ? 'filter grayscale-[0.2]' : ''}`}>
-        <div className="aspect-[16/10] overflow-hidden relative bg-zinc-100 dark:bg-zinc-800">
-          <img 
-            src={playlist.thumbnail ? getDirectImageUrl(playlist.thumbnail) : `https://img.youtube.com/vi/playlist/mqdefault.jpg`} 
-            alt={playlist.title} 
-            className={`absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out ${isLocked ? 'blur-sm opacity-50' : ''}`} 
-            referrerPolicy="no-referrer"
-            onError={(e) => {
-              console.warn(`[IMAGE] Failed to load playlist thumbnail: ${playlist.title}. URL: ${playlist.thumbnail}`);
-              if (e.currentTarget) {
-                e.currentTarget.style.opacity = '0.4';
-              }
-            }}
-          />
-          <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-colors duration-300" />
-          
-          {/* Locked Overlay */}
-          {isLocked && (
-            <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/40 backdrop-blur-md p-4 text-center">
-              <motion.div 
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center text-white shadow-xl shadow-amber-500/30 mb-2"
-              >
-                <Lock size={18} fill="currentColor" />
-              </motion.div>
-              <p className="text-white text-[9px] font-black uppercase tracking-widest leading-tight">Premium Playlist</p>
-            </div>
-          )}
-          
-          {/* Playlist Stack Effect */}
-          <div className="absolute right-0 top-0 bottom-0 w-1/4 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center text-white z-20">
-            <Youtube size={24} className="mb-1" />
-            <span className="text-xs font-black">
-              {playlist.type === 'youtube' ? 'YT' : (playlist.videoIds?.length || 0)}
-            </span>
-            <span className="text-[8px] font-bold uppercase tracking-tighter">VIDEOS</span>
-          </div>
+          <Card className={`flex flex-col h-full group border-none bg-white dark:bg-zinc-900/40 backdrop-blur-md overflow-hidden relative ${isLocked ? 'filter grayscale-[0.2]' : ''}`}>
+            <div className="aspect-[16/10] overflow-hidden relative bg-zinc-100 dark:bg-zinc-800">
+              <img 
+                src={playlist.thumbnail ? getDirectImageUrl(playlist.thumbnail) : `https://img.youtube.com/vi/playlist/mqdefault.jpg`} 
+                alt={playlist.title} 
+                className={`absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out ${isLocked ? 'blur-sm opacity-50' : ''}`} 
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  console.warn(`[IMAGE] Failed to load playlist thumbnail: ${playlist.title}. URL: ${playlist.thumbnail}`);
+                  e.currentTarget.style.opacity = '0.4';
+                }}
+              />
+              <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-colors duration-300" />
+              
+              {/* Locked Overlay */}
+              {isLocked && (
+                <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/40 backdrop-blur-md p-4 text-center">
+                  <motion.div 
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center text-white shadow-xl shadow-amber-500/30 mb-2"
+                  >
+                    <Lock size={18} fill="currentColor" />
+                  </motion.div>
+                  <p className="text-white text-[9px] font-black uppercase tracking-widest leading-tight">Premium Playlist</p>
+                </div>
+              )}
+              
+              {/* Playlist Stack Effect */}
+              <div className="absolute right-0 top-0 bottom-0 w-1/4 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center text-white z-20">
+                <Youtube size={24} className="mb-1" />
+                <span className="text-xs font-black">
+                  {playlist.type === 'youtube' ? 'YT' : (playlist.videoIds?.length || 0)}
+                </span>
+                <span className="text-[8px] font-bold uppercase tracking-tighter opacity-70">VIDEOS</span>
+              </div>
 
-          <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-30">
-            <Badge className="bg-red-600 text-white text-[9px] px-2 py-1 shadow-lg border-none w-fit uppercase font-black">
-              PLAYLIST
-            </Badge>
-            {playlist.isPremium && (
-              <Badge className="bg-amber-500 text-white text-[9px] px-2 py-1 shadow-lg backdrop-blur-md border-none flex items-center gap-1 w-fit animate-pulse">
-                <Lock size={10} fill="currentColor" /> PREMIUM
-              </Badge>
-            )}
-          </div>
-
-          {canUpload && (
-            <div className="absolute top-3 right-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-              <Button 
-                variant="secondary" 
-                size="icon" 
-                className="h-8 w-8 rounded-full bg-white/90 backdrop-blur-sm text-zinc-900 hover:bg-white shadow-lg"
+              <button 
                 onClick={(e) => {
                   e.stopPropagation();
-                  setNewPlaylist({
-                    title: playlist.title,
-                    description: playlist.description,
-                    type: playlist.type,
-                    youtubePlaylistId: playlist.youtubePlaylistId || '',
-                    videoIds: playlist.videoIds || [],
-                    academicClass: playlist.academicClass,
-                    subject: playlist.subject,
-                    thumbnail: playlist.thumbnail || ''
-                  });
-                  setEditingPlaylistId(playlist.id);
-                  setIsAddingPlaylist(true);
+                  toggleBookmark(playlist.id);
                 }}
+                className={`absolute top-3 right-3 z-30 w-8 h-8 rounded-full flex items-center justify-center transition-all ${bookmarks.includes(playlist.id) ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20' : 'bg-black/20 hover:bg-black/40 text-white backdrop-blur-md'}`}
               >
-                <Pencil size={14} />
-              </Button>
-              <Button 
-                variant="secondary" 
-                size="icon" 
-                className="h-8 w-8 rounded-full bg-red-500/90 backdrop-blur-sm text-white hover:bg-red-600 shadow-lg"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeletePlaylist(playlist.id);
-                }}
-              >
-                <Trash2 size={14} />
-              </Button>
-            </div>
-          )}
-        </div>
+                <Bookmark size={14} fill={bookmarks.includes(playlist.id) ? 'currentColor' : 'none'} />
+              </button>
 
-        <div className={`p-4 flex-1 flex flex-col ${isLocked ? 'opacity-60' : ''}`}>
-          <div className="flex items-center gap-2 mb-3">
-            <Badge className="bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20">
-              {playlist.academicClass}
-            </Badge>
-            <Badge className="bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400 border border-orange-100 dark:border-orange-500/20">
-              {playlist.subject}
-            </Badge>
-          </div>
-          <h4 className="text-lg font-black text-zinc-900 dark:text-white mb-2 line-clamp-2 leading-tight tracking-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-            {playlist.title}
-          </h4>
-          <p className="text-zinc-500 dark:text-zinc-400 text-xs line-clamp-2 leading-relaxed font-medium mb-4">
-            {playlist.description}
-          </p>
-          
-          <div className="flex items-center justify-between mt-auto pt-4 border-t border-zinc-100 dark:border-zinc-800">
-            <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">
-              {playlist.type === 'youtube' ? 'YouTube Playlist' : 'Custom Playlist'}
-            </span>
-            <div className="flex items-center gap-1 text-blue-600 font-black text-[10px] uppercase tracking-widest">
-              Play Now <ChevronRight size={12} />
+              <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-30">
+                <Badge className="bg-red-600 text-white text-[9px] px-2 py-1 shadow-lg border-none w-fit uppercase font-black">
+                  PLAYLIST
+                </Badge>
+                {playlist.isPremium && (
+                  <Badge className="bg-amber-500 text-white text-[9px] px-2 py-1 shadow-lg backdrop-blur-md border-none flex items-center gap-1 w-fit animate-pulse">
+                    <Lock size={10} fill="currentColor" /> PREMIUM
+                  </Badge>
+                )}
+              </div>
+
+              {hasEditPermission && (
+                <div className="absolute bottom-3 left-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                  <Button 
+                    variant="secondary" 
+                    size="icon" 
+                    className="h-8 w-8 rounded-full bg-white/90 backdrop-blur-sm text-zinc-900 hover:bg-white shadow-lg"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setNewPlaylist({
+                        title: playlist.title,
+                        description: playlist.description,
+                        type: playlist.type,
+                        youtubePlaylistId: playlist.youtubePlaylistId || '',
+                        videoIds: playlist.videoIds || [],
+                        academicClass: playlist.academicClass,
+                        subject: playlist.subject,
+                        thumbnail: playlist.thumbnail || ''
+                      });
+                      setEditingPlaylistId(playlist.id);
+                      setIsAddingPlaylist(true);
+                    }}
+                  >
+                    <Pencil size={14} />
+                  </Button>
+                  <Button 
+                    variant="secondary" 
+                    size="icon" 
+                    className="h-8 w-8 rounded-full bg-red-500/90 backdrop-blur-sm text-white hover:bg-red-600 shadow-lg"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeletePlaylist(playlist.id);
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </Button>
+                </div>
+              )}
             </div>
-          </div>
-        </div>
-      </Card>
-    </motion.div>
-  </TiltContainer>
-);
-};
+
+            <div className={`p-4 flex-1 flex flex-col ${isLocked ? 'opacity-60' : ''}`}>
+              <div className="flex items-center gap-2 mb-3">
+                <Badge className="bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20">
+                  {playlist.academicClass}
+                </Badge>
+                <Badge className="bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400 border border-orange-100 dark:border-orange-500/20">
+                  {playlist.subject}
+                </Badge>
+              </div>
+              <h4 className="text-lg font-black text-zinc-900 dark:text-white mb-2 line-clamp-2 leading-tight tracking-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                {playlist.title}
+              </h4>
+              <p className="text-zinc-500 dark:text-zinc-400 text-xs line-clamp-2 leading-relaxed font-medium mb-4">
+                {playlist.description}
+              </p>
+              
+              <div className="flex items-center justify-between mt-auto pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">
+                    {playlist.type === 'youtube' ? 'YouTube Playlist' : 'Custom Playlist'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 text-blue-600 font-black text-[10px] uppercase tracking-widest">
+                  Play Now <ChevronRight size={12} />
+                </div>
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+      </TiltContainer>
+    );
+  };
 
   const triggerHighlight = (id: string) => {
     setHighlightedSection(id);
@@ -2886,14 +2616,13 @@ export default function App() {
   const renderSection = (title: string, category: Category, icon: any, addLabel: string, id: string) => {
     const sectionContents = filteredContents.filter(c => c.category === category).slice(0, 12);
     const containerId = `scroll-${id}`;
-    
-    if (sectionContents.length === 0 && searchQuery) return null;
 
     return (
-    <ScrollSection 
-      id={id} 
-      className={`space-y-4 sm:space-y-8 p-3 sm:p-10 rounded-2xl sm:rounded-[48px] transition-all duration-700 relative group/section w-full max-w-full ${highlightedSection === id ? 'animate-section-flash ring-2 ring-blue-500/40 bg-blue-50/5' : ''}`}
-    >
+      <ScrollSection 
+        id={id} 
+        key={id}
+        className={`space-y-4 sm:space-y-8 p-3 sm:p-10 rounded-2xl sm:rounded-[48px] transition-all duration-700 relative group/section w-full max-w-full ${highlightedSection === id ? 'animate-section-flash ring-2 ring-blue-500/40 bg-blue-50/5' : ''}`}
+      >
       <div className="absolute top-4 right-20 sm:top-16 sm:right-12 pointer-events-none scale-100 origin-top-right z-30 opacity-100">
         <div className="pointer-events-auto">
           <MiniRobot />
@@ -2907,26 +2636,28 @@ export default function App() {
           <h3 className="text-lg sm:text-2xl font-bold text-zinc-900 dark:text-white truncate min-w-0">{title}</h3>
         </div>
         <div className="flex items-center gap-2 sm:gap-4">
-          <div className="hidden sm:flex items-center gap-1 mr-2">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
-              onClick={() => scrollContainer(containerId, 'left')}
-            >
-              <ChevronLeft size={16} />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
-              onClick={() => scrollContainer(containerId, 'right')}
-            >
-              <ChevronRight size={16} />
-            </Button>
-          </div>
+          {sectionContents.length > 0 && (
+            <div className="hidden sm:flex items-center gap-1 mr-2">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
+                onClick={() => scrollContainer(containerId, 'left')}
+              >
+                <ChevronLeft size={16} />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
+                onClick={() => scrollContainer(containerId, 'right')}
+              >
+                <ChevronRight size={16} />
+              </Button>
+            </div>
+          )}
           {canUpload && (
-            <Button variant="outline" size="sm" icon={Plus} className="hidden sm:inline-flex" onClick={() => {
+            <Button variant="outline" size="sm" icon={Plus} className="inline-flex" onClick={() => {
               setIsEditing(false);
               setEditingId(null);
               setNewItem({ ...newItem, category, title: '', description: '', url: '', thumbnail: '' });
@@ -2944,13 +2675,27 @@ export default function App() {
 
         <div 
           id={containerId}
-          className="flex overflow-x-auto pb-6 sm:pb-2 gap-4 sm:gap-6 no-scrollbar snap-x snap-mandatory scroll-smooth"
+          className="flex overflow-x-auto pb-6 sm:pb-2 gap-4 sm:gap-6 no-scrollbar snap-x snap-mandatory scroll-smooth min-w-full"
         >
-          {sectionContents.map((item, sIdx) => (
-            <div key={item.id || `content-${sIdx}`} className="min-w-[200px] sm:min-w-[320px] w-[200px] sm:w-[320px] snap-start">
-              {renderContentCard(item)}
+          {sectionContents.length > 0 ? (
+            sectionContents.map((item, sIdx) => (
+              <div key={item.id || `content-${sIdx}`} className="min-w-[200px] sm:min-w-[320px] w-[200px] sm:w-[320px] snap-start">
+                {renderContentCard(item)}
+              </div>
+            ))
+          ) : (
+            <div className="w-full flex items-center justify-center py-6">
+              <div className="bg-zinc-100/40 dark:bg-zinc-800/10 border border-zinc-200/50 dark:border-zinc-800/30 rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center space-y-3 w-full max-w-md shadow-sm">
+                <div className="p-3 bg-zinc-200/40 dark:bg-zinc-800/40 rounded-full text-zinc-500 shrink-0">
+                  {React.cloneElement(icon as React.ReactElement<any>, { size: 20 })}
+                </div>
+                <div>
+                  <h4 className="font-bold text-zinc-800 dark:text-zinc-200 text-sm">No {title} available yet</h4>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-xs leading-relaxed">Our content team is currently preparing study materials for this subject. New items will appear here soon.</p>
+                </div>
+              </div>
             </div>
-          ))}
+          )}
         </div>
       </ScrollSection>
     );
@@ -2959,19 +2704,24 @@ export default function App() {
   const renderPlaylistsSection = () => {
     const filteredPlaylists = playlists.filter(p => {
       const matchesClass = classFilter === 'All' || p.academicClass === classFilter;
+      const matchesGroup = !isGroupNeeded(p.academicClass as string) || 
+                          groupFilter === 'All' || 
+                          p.academicGroup === groupFilter || 
+                          (p as any).academic_group === groupFilter ||
+                          p.academicGroup === 'All' ||
+                          (p as any).academic_group === 'All';
       const matchesSubject = subjectFilter === 'All' || p.subject === subjectFilter;
+      const matchesChapter = chapterFilter === 'All' || p.chapter === chapterFilter;
+      const matchesTopic = topicFilter === 'All' || p.topicId === topicFilter || (p as any).topic_id === topicFilter;
       const matchesType = contentTypeFilter === 'free' ? !p.isPremium : p.isPremium;
-      return matchesClass && matchesSubject && matchesType;
+      return matchesClass && matchesGroup && matchesSubject && matchesChapter && matchesTopic && matchesType;
     });
 
     const displayPlaylists = filteredPlaylists.slice(0, 12);
     const containerId = "scroll-playlists";
 
-    if (filteredPlaylists.length === 0 && searchQuery) return null;
-    if (filteredPlaylists.length === 0 && !canUpload) return null;
-
     return (
-      <ScrollSection className="space-y-8 p-4 sm:p-10 rounded-2xl sm:rounded-[48px] transition-all duration-700 relative group/section w-full max-w-full">
+      <ScrollSection key="featured-playlists" className="space-y-8 p-4 sm:p-10 rounded-2xl sm:rounded-[48px] transition-all duration-700 relative group/section w-full max-w-full">
         <div className="absolute top-4 right-20 sm:top-16 sm:right-12 pointer-events-none scale-100 origin-top-right z-30 opacity-100">
           <div className="pointer-events-auto">
             <MiniRobot />
@@ -2985,24 +2735,26 @@ export default function App() {
             <h3 className="text-2xl font-bold text-zinc-900 dark:text-white">Featured Playlists</h3>
           </div>
           <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-1 mr-2">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
-                onClick={() => scrollContainer(containerId, 'left')}
-              >
-                <ChevronLeft size={16} />
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
-                onClick={() => scrollContainer(containerId, 'right')}
-              >
-                <ChevronRight size={16} />
-              </Button>
-            </div>
+            {displayPlaylists.length > 0 && (
+              <div className="hidden sm:flex items-center gap-1 mr-2">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
+                  onClick={() => scrollContainer(containerId, 'left')}
+                >
+                  <ChevronLeft size={16} />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
+                  onClick={() => scrollContainer(containerId, 'right')}
+                >
+                  <ChevronRight size={16} />
+                </Button>
+              </div>
+            )}
             {canUpload && (
               <Button variant="outline" size="sm" icon={Plus} onClick={() => {
                 setNewPlaylist({
@@ -3011,7 +2763,7 @@ export default function App() {
                   type: 'youtube',
                   youtubePlaylistId: '',
                   videoIds: [],
-                  academicClass: classFilter === 'All' ? 'Class 9' : classFilter as AcademicClass,
+                  academicClass: classFilter === 'All' ? (dynamicClasses[0]?.name || 'Class 9') : classFilter as AcademicClass,
                   subject: subjectFilter === 'All' ? '' : subjectFilter,
                   thumbnail: ''
                 });
@@ -3021,21 +2773,41 @@ export default function App() {
           </div>
         </div>
 
-        <div id={containerId} className="flex overflow-x-auto pb-6 sm:pb-2 gap-4 sm:gap-6 no-scrollbar snap-x snap-mandatory scroll-smooth">
-          {displayPlaylists.map((playlist, pIdx) => (
-            <div key={playlist.id || `playlist-${pIdx}`} className="min-w-[200px] sm:min-w-[320px] w-[200px] sm:w-[320px] snap-start">
-              {renderPlaylistCard(playlist)}
-            </div>
-          ))}
-          {displayPlaylists.length === 0 && canUpload && (
-            <div 
-              onClick={() => setIsAddingPlaylist(true)}
-              className="min-w-[200px] sm:min-w-[320px] w-[200px] sm:w-[320px] border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-[32px] flex flex-col items-center justify-center p-8 text-zinc-400 hover:border-blue-500 hover:text-blue-500 transition-all cursor-pointer group"
-            >
-              <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mb-4 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20">
-                <Plus size={24} />
+        <div id={containerId} className="flex overflow-x-auto pb-6 sm:pb-2 gap-4 sm:gap-6 no-scrollbar snap-x snap-mandatory scroll-smooth min-w-full">
+          {displayPlaylists.length > 0 ? (
+            displayPlaylists.map((playlist, pIdx) => (
+              <div key={playlist.id || `playlist-${pIdx}`} className="min-w-[200px] sm:min-w-[320px] w-[200px] sm:w-[320px] snap-start">
+                {renderPlaylistCard(playlist)}
               </div>
-              <p className="font-bold text-sm">Create First Playlist</p>
+            ))
+          ) : (
+            <div className="w-full flex items-center justify-center py-6">
+              <div className="bg-zinc-100/40 dark:bg-zinc-800/10 border border-zinc-200/50 dark:border-zinc-800/30 rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center space-y-3 w-full max-w-md shadow-sm">
+                <div className="p-3 bg-zinc-200/40 dark:bg-zinc-800/40 rounded-full text-red-500 shrink-0">
+                  <Youtube size={20} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-zinc-800 dark:text-zinc-200 text-sm">No Playlists available yet</h4>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-xs leading-relaxed">Our content team is curating high-quality YouTube lectures. Curated playlists will appear here very soon.</p>
+                </div>
+                {canUpload && (
+                  <Button variant="outline" size="sm" icon={Plus} className="mt-2" onClick={() => {
+                    setNewPlaylist({
+                      title: '',
+                      description: '',
+                      type: 'youtube',
+                      youtubePlaylistId: '',
+                      videoIds: [],
+                      academicClass: classFilter === 'All' ? (dynamicClasses[0]?.name || 'Class 9') : classFilter as AcademicClass,
+                      subject: subjectFilter === 'All' ? '' : subjectFilter,
+                      thumbnail: ''
+                    });
+                    setIsAddingPlaylist(true);
+                  }}>
+                    Create First Playlist
+                  </Button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -3044,11 +2816,19 @@ export default function App() {
   };
 
   const renderExternalResources = () => {
-    if (externalResources.length === 0 && userRole !== 'admin') return null;
+    const filteredExternal = externalResources.filter(r => {
+      const matchesClass = classFilter === 'All' || r.academicClass === classFilter;
+      const matchesSubject = subjectFilter === 'All' || r.subject === subjectFilter;
+      const matchesChapter = chapterFilter === 'All' || r.chapter === chapterFilter;
+      const matchesTopic = topicFilter === 'All' || r.topicId === topicFilter || (r as any).topic_id === topicFilter;
+      const matchesType = contentTypeFilter === 'free' ? !r.isPremium : r.isPremium;
+      return matchesClass && matchesSubject && matchesChapter && matchesTopic && matchesType;
+    });
+
     const containerId = "scroll-external";
 
     return (
-      <section className="space-y-6 relative group/section overflow-visible w-full max-w-full">
+      <section key="external-resources" className="space-y-6 relative group/section overflow-visible w-full max-w-full">
         <div className="absolute top-4 right-20 sm:top-16 sm:right-12 pointer-events-none scale-100 origin-top-right z-30 opacity-100">
           <div className="pointer-events-auto">
             <MiniRobot />
@@ -3062,76 +2842,101 @@ export default function App() {
             <h3 className="text-2xl font-bold text-zinc-900 dark:text-white">External Resources</h3>
           </div>
           <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-1 mr-2">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
-                onClick={() => scrollContainer(containerId, 'left')}
-              >
-                <ChevronLeft size={16} />
-              </Button>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
-                onClick={() => scrollContainer(containerId, 'right')}
-              >
-                <ChevronRight size={16} />
-              </Button>
-            </div>
+            {filteredExternal.length > 0 && (
+              <div className="hidden sm:flex items-center gap-1 mr-2">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
+                  onClick={() => scrollContainer(containerId, 'left')}
+                >
+                  <ChevronLeft size={16} />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
+                  onClick={() => scrollContainer(containerId, 'right')}
+                >
+                  <ChevronRight size={16} />
+                </Button>
+              </div>
+            )}
             {userRole === 'admin' && (
               <Button variant="outline" size="sm" icon={Plus} onClick={() => setIsAddingExternal(true)}>Add Link</Button>
             )}
           </div>
         </div>
 
-        <div id={containerId} className="flex overflow-x-auto pb-6 sm:pb-2 gap-6 no-scrollbar snap-x snap-mandatory scroll-smooth">
-          {externalResources.map((resource, erIdx) => (
-            <div key={resource.id || `ext-${erIdx}`} className="min-w-[180px] w-[180px] snap-start">
-              <Card className="p-4 flex flex-col h-full items-center text-center group relative border-zinc-200 dark:border-zinc-800 hover:border-blue-500/50 transition-all duration-300">
-                <div className="w-14 h-14 bg-zinc-50 dark:bg-zinc-800 rounded-2xl flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition-transform duration-300 overflow-hidden shrink-0 relative">
-                  {resource.thumbnail && (
-                    <img 
-                      src={getDirectImageUrl(resource.thumbnail)} 
-                      alt={resource.title} 
-                      title={resource.title}
-                      className="absolute inset-0 w-full h-full object-cover z-10 transition-opacity duration-300"
-                      referrerPolicy="no-referrer"
-                      onError={(e) => {
-                        console.warn(`[IMAGE] Failed to load external resource thumbnail: ${resource.title}. URL: ${resource.thumbnail}`);
-                        if (e.currentTarget) {
-                          e.currentTarget.style.opacity = '0';
-                        }
-                      }}
-                    />
-                  )}
-                  <span className="text-2xl z-0">{resource.icon}</span>
-                </div>
-                <h3 className="font-bold text-zinc-900 dark:text-white mb-2 line-clamp-1">{resource.title}</h3>
-                <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mb-6 line-clamp-2 leading-relaxed font-medium">{resource.description}</p>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="w-full mt-auto rounded-xl group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600 transition-all duration-300"
-                  onClick={() => window.open(resource.url, '_blank')}
-                >
-                  Visit →
-                </Button>
-                {userRole === 'admin' && (
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteExternal(resource.id);
+        <div id={containerId} className="flex overflow-x-auto pb-6 sm:pb-2 gap-6 no-scrollbar snap-x snap-mandatory scroll-smooth min-w-full">
+          {filteredExternal.length > 0 ? (
+            filteredExternal.map((resource, erIdx) => (
+              <div key={resource.id || `ext-${erIdx}`} className="min-w-[180px] w-[180px] snap-start border border-transparent">
+                <Card className="p-4 flex flex-col h-full items-center text-center group relative border-zinc-200 dark:border-zinc-800 hover:border-blue-500/50 transition-all duration-300">
+                  <div className="w-14 h-14 bg-zinc-50 dark:bg-zinc-800 rounded-2xl flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition-transform duration-300 overflow-hidden shrink-0 relative">
+                    {resource.thumbnail && (
+                      <img 
+                        src={getDirectImageUrl(resource.thumbnail)} 
+                        alt={resource.title} 
+                        title={resource.title}
+                        className="absolute inset-0 w-full h-full object-cover z-10 transition-opacity duration-300"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          console.warn(`[IMAGE] Failed to load external resource thumbnail: ${resource.title}. URL: ${resource.thumbnail}`);
+                          if (e.currentTarget) {
+                            e.currentTarget.style.opacity = '0';
+                          }
+                        }}
+                      />
+                    )}
+                    <span className="text-2xl z-0">{resource.icon}</span>
+                  </div>
+                  <h3 className="font-bold text-zinc-900 dark:text-white mb-2 line-clamp-1">{resource.title}</h3>
+                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mb-6 line-clamp-2 leading-relaxed font-medium">{resource.description}</p>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="w-full mt-auto rounded-xl group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600 transition-all duration-300"
+                    onClick={() => {
+                      if (resource.url.toLowerCase().endsWith('.pdf') || resource.url.includes('/storage/v1/object/public/')) {
+                        setActivePdf({ url: resource.url, isRestricted: false });
+                      } else {
+                        window.open(resource.url, '_blank');
+                      }
                     }}
-                    className="absolute top-3 right-3 p-2 text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
-                    <Trash2 size={14} />
-                  </button>
+                    Visit →
+                  </Button>
+                  {userRole === 'admin' && (
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteExternal(resource.id);
+                      }}
+                      className="absolute top-3 right-3 p-2 text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </Card>
+              </div>
+            ))
+          ) : (
+            <div className="w-full flex items-center justify-center py-6">
+              <div className="bg-zinc-100/40 dark:bg-zinc-800/10 border border-zinc-200/50 dark:border-zinc-800/30 rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center space-y-3 w-full max-w-md shadow-sm">
+                <div className="p-3 bg-zinc-200/40 dark:bg-zinc-800/40 rounded-full text-blue-500 shrink-0">
+                  <Globe size={20} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-zinc-800 dark:text-zinc-200 text-sm">No External Resources available yet</h4>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-xs leading-relaxed">Interactive simulation tools, external references, and websites will appear here shortly.</p>
+                </div>
+                {userRole === 'admin' && (
+                  <Button variant="outline" size="sm" icon={Plus} className="mt-2" onClick={() => setIsAddingExternal(true)}>Add Link</Button>
                 )}
-              </Card>
+              </div>
             </div>
-          ))}
+          )}
         </div>
       </section>
     );
@@ -3153,7 +2958,7 @@ export default function App() {
                 key={c}
                 whileHover={{ scale: 1.05, y: -1 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => setClassFilter(c)}
+                onClick={() => setClassFilter(c as any)}
                 className={`px-4 sm:px-8 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl text-[10px] sm:text-sm font-bold transition-all duration-300 shadow-sm border shrink-0 ${
                   classFilter === c 
                   ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-xl shadow-zinc-900/10 dark:shadow-white/10' 
@@ -3165,6 +2970,35 @@ export default function App() {
             ))}
           </div>
         </div>
+
+        {isGroupNeeded(classFilter) && (
+          <div className="flex flex-col items-center justify-center gap-4 w-full animate-in fade-in slide-in-from-top-2">
+            <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
+              Academic Group / Stream
+            </Badge>
+            <div className="flex sm:flex-wrap gap-2 justify-start sm:justify-center w-full max-w-4xl mx-auto px-2 overflow-x-auto no-scrollbar pb-2 sm:pb-0">
+              {['All', ...academicGroups.map(g => g.name)].map(g => (
+                <motion.button 
+                  key={g}
+                  whileHover={{ scale: 1.05, y: -1 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => {
+                    setGroupFilter(g);
+                    setSubjectFilter('All');
+                    setChapterFilter('All');
+                  }}
+                  className={`px-4 sm:px-8 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl text-[10px] sm:text-sm font-bold transition-all duration-300 shadow-sm border shrink-0 ${
+                    groupFilter === g 
+                    ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-xl shadow-zinc-900/10 dark:shadow-white/10' 
+                    : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
+                  }`}
+                >
+                  <span className="whitespace-nowrap">{g}</span>
+                </motion.button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col items-center justify-center gap-4 w-full">
           <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
@@ -3178,7 +3012,10 @@ export default function App() {
                   key={s}
                   whileHover={{ scale: 1.05, y: -1 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => setSubjectFilter(s)}
+                  onClick={() => {
+                    setSubjectFilter(s);
+                    setChapterFilter('All');
+                  }}
                   className={`flex items-center gap-2 sm:gap-3 px-4 sm:px-8 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl text-[10px] sm:text-sm font-bold transition-all duration-300 shadow-sm border shrink-0 ${
                     subjectFilter === s 
                     ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-xl shadow-zinc-900/10 dark:shadow-white/10' 
@@ -3193,7 +3030,70 @@ export default function App() {
           </div>
         </div>
 
-        {(user && (firestoreUser?.hasPremiumAccess === true || userRole === 'admin')) && (
+        {subjectFilter !== 'All' && (
+          <div className="flex flex-col items-center justify-center gap-4 w-full animate-in fade-in slide-in-from-top-2">
+            <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
+              Chapter selection
+            </Badge>
+            <div className="flex sm:flex-wrap gap-2 justify-start sm:justify-center w-full max-w-4xl mx-auto px-2 overflow-x-auto no-scrollbar pb-2 sm:pb-0">
+               {['All', ...Array.from(new Set(dynamicChapters.filter(ch => {
+                 const matchedSubject = dynamicSubjects.find(s => s.name === subjectFilter);
+                 const matchedClass = dynamicClasses.find(c => c.name === classFilter);
+                 let matches = true;
+                 if (matchedSubject) matches = matches && ch.subjectId === matchedSubject.id;
+                 if (matchedClass) matches = matches && ch.classId === matchedClass.id;
+                 return matches;
+               }).map(ch => ch.name)))].map(ch => (
+                <motion.button 
+                  key={ch}
+                  whileHover={{ scale: 1.05, y: -1 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => {
+                    setChapterFilter(ch);
+                    setTopicFilter('All');
+                  }}
+                  className={`px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold transition-all duration-300 shadow-sm border shrink-0 ${
+                    chapterFilter === ch 
+                    ? 'bg-blue-600 text-white border-transparent shadow-lg shadow-blue-500/20' 
+                    : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
+                  }`}
+                >
+                  <span className="whitespace-nowrap">{ch}</span>
+                </motion.button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {chapterFilter !== 'All' && (
+          <div className="flex flex-col items-center justify-center gap-4 w-full animate-in fade-in slide-in-from-top-2">
+            <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
+              Topic selection
+            </Badge>
+            <div className="flex sm:flex-wrap gap-2 justify-start sm:justify-center w-full max-w-4xl mx-auto px-2 overflow-x-auto no-scrollbar pb-2 sm:pb-0">
+               {['All', ...dynamicTopics.filter(t => {
+                 const matchedChapter = dynamicChapters.find(ch => ch.name === chapterFilter);
+                 return matchedChapter && t.chapterId === matchedChapter.id;
+               }).map(t => ({ id: t.id, name: t.name }))].map(t => (
+                <motion.button 
+                  key={typeof t === 'string' ? t : t.id}
+                  whileHover={{ scale: 1.05, y: -1 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setTopicFilter(typeof t === 'string' ? t : t.id)}
+                  className={`px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold transition-all duration-300 shadow-sm border shrink-0 ${
+                    (topicFilter === (typeof t === 'string' ? t : t.id)) 
+                    ? 'bg-indigo-600 text-white border-transparent shadow-lg shadow-indigo-500/20' 
+                    : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
+                  }`}
+                >
+                  <span className="whitespace-nowrap">{typeof t === 'string' ? t : t.name}</span>
+                </motion.button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {(user && hasPremiumAccess) && (
           <div className="flex flex-col items-center justify-center gap-6 w-full pt-4">
             <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-black">
               Content Access
@@ -3244,14 +3144,73 @@ export default function App() {
     </div>
   );
 
-  const renderAdminPortal = () => (
-    <div className="space-y-8">
+  const [isCleaning, setIsCleaning] = useState(false);
+
+  const handleCleanupLegacyData = async () => {
+    if (userRole !== 'admin') return;
+    if (!window.confirm("ARE YOU SURE? This will permanently delete ALL exams and questions records to clean legacy data.")) return;
+
+    setIsCleaning(true);
+    try {
+      // 1. Delete all questions first (foreign key constraints)
+      const { error: qErr } = await supabase.from('questions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (qErr) console.warn("Delete questions error:", qErr);
+
+      // 2. Delete all exams
+      const { error: eErr } = await supabase.from('exams').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (eErr) console.warn("Delete exams error:", eErr);
+
+      // 3. Delete all attempts
+      const { error: aErr } = await supabase.from('attempts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (aErr) console.warn("Delete attempts error:", aErr);
+
+      alert("Cleanup complete! Legacy exams and questions have been removed.");
+      window.location.reload();
+    } catch (error: any) {
+      alert("Cleanup failed: " + error.message);
+    } finally {
+      setIsCleaning(false);
+    }
+  };
+
+  const renderAdminPortal = () => {
+    if (!hasAdminAccess) {
+      return (
+        <div className="flex flex-col items-center justify-center p-12 text-center bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[32px] shadow-sm max-w-xl mx-auto my-12">
+          <div className="bg-red-500/10 p-4 rounded-full text-red-500 mb-4">
+            <Lock size={40} className="animate-pulse" />
+          </div>
+          <h2 className="text-2xl font-black text-zinc-900 dark:text-white">Access Restricted</h2>
+          <p className="text-zinc-500 mt-2 text-sm sm:text-base">You do not have administrative or editor permissions to access this dashboard. Please log in with an authorized account or contact support.</p>
+          <Button onClick={() => setView('home')} className="mt-6 bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 border-none px-6 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl hover:opacity-90">Go back home</Button>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Admin Portal</h2>
-          <p className="text-sm sm:text-base text-zinc-500 font-medium">Manage all resources and user permissions.</p>
+        <div className="flex items-center gap-4">
+          <div className="bg-zinc-950 p-2 rounded-xl border border-white/10 shadow-lg">
+            <Logo className="h-10 w-auto" />
+          </div>
+          <div>
+            <h2 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Admin Portal</h2>
+            <p className="text-sm sm:text-base text-zinc-500 font-medium">Manage all resources and user permissions.</p>
+          </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-4">
+          <Button 
+            onClick={handleCleanupLegacyData}
+            disabled={isCleaning}
+            className="group relative overflow-hidden bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-none px-6 py-2.5 text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 shadow-xl hover:shadow-red-500/20 transition-all duration-500 active:scale-95"
+          >
+            <div className="absolute inset-0 bg-red-600 translate-y-full group-hover:translate-y-0 transition-transform duration-500" />
+            <span className="relative z-10 flex items-center gap-2 group-hover:text-white transition-colors">
+              {isCleaning ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} className="group-hover:rotate-12 transition-transform" />}
+              {isCleaning ? 'Cleaning...' : 'Cleanup System Data'}
+            </span>
+          </Button>
           <Badge className="bg-blue-500/10 text-blue-500 border-none px-3 sm:px-4 py-1.5 sm:py-2 text-[10px] sm:text-xs font-black uppercase tracking-widest">
             {allContents.length} Total
           </Badge>
@@ -3313,7 +3272,7 @@ export default function App() {
       </div>
 
       {adminTab === 'academics' ? (
-        <AcademicManagement db={db} />
+        <AcademicManagement />
       ) : adminTab === 'resources' ? (
         <div className="grid grid-cols-1 gap-4">
           {allContents.map((item, idx) => (
@@ -3350,10 +3309,10 @@ export default function App() {
                 <Button variant="ghost" size="icon" className="text-zinc-400 hover:text-blue-500" onClick={() => handleEditContent(item)}><Pencil size={20} /></Button>
                 <Button variant="ghost" size="icon" className="text-zinc-400 hover:text-red-500" onClick={() => handleDeleteContent(item.id)}><Trash2 size={20} /></Button>
                 {item.status !== 'approved' && (
-                  <Button variant="primary" size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApproveContent(item.id)}>Approve</Button>
+                  <Button variant="primary" size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApproveContent(item.id, item.category)}>Approve</Button>
                 )}
                 {item.status !== 'rejected' && (
-                  <Button variant="outline" size="sm" className="border-red-500/20 text-red-500 hover:bg-red-500/10" onClick={() => handleRejectContent(item.id)}>Reject</Button>
+                  <Button variant="outline" size="sm" className="border-red-500/20 text-red-500 hover:bg-red-500/10" onClick={() => handleRejectContent(item.id, item.category)}>Reject</Button>
                 )}
               </div>
             </div>
@@ -3424,24 +3383,24 @@ export default function App() {
           {allUsers.map((u, uIdx) => (
             <div key={`all-u-${u.id || uIdx}`} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 flex items-center gap-6 shadow-sm hover:shadow-md transition-all">
               <div className="w-14 h-14 rounded-full overflow-hidden bg-zinc-100 dark:bg-zinc-800 shrink-0">
-                <img src={u.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.uid}`} alt={u.displayName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                <img src={u.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.id}`} alt={u.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <h4 className="text-lg font-black text-zinc-900 dark:text-white truncate">{u.displayName || 'Anonymous User'}</h4>
+                  <h4 className="text-lg font-black text-zinc-900 dark:text-white truncate">{u.name || 'Anonymous User'}</h4>
                   {u.role === 'admin' && <Badge className="bg-blue-500 text-white border-none text-[8px] uppercase font-black px-2">Admin</Badge>}
                 </div>
                 <p className="text-sm text-zinc-500 truncate">{u.email}</p>
-                <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">ID: {u.uid}</p>
+                <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">ID: {u.id}</p>
               </div>
-              <div className="flex items-center gap-6 shrink-0">
+              <div className="flex flex-wrap items-center gap-6 shrink-0 md:justify-end">
                 <div className="flex flex-col items-end gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Premium Access</span>
                   <button 
-                    onClick={() => handleTogglePremiumAccess(u.id, u.hasPremiumAccess)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.hasPremiumAccess ? 'bg-amber-500' : 'bg-zinc-200 dark:bg-zinc-700'} cursor-pointer`}
+                    onClick={() => handleTogglePremiumAccess(u.id, u.hasPremiumAccess || u.isPremium)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.hasPremiumAccess || u.isPremium ? 'bg-amber-500' : 'bg-zinc-200 dark:bg-zinc-700'} cursor-pointer`}
                   >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.hasPremiumAccess ? 'translate-x-6' : 'translate-x-1'}`} />
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.hasPremiumAccess || u.isPremium ? 'translate-x-6' : 'translate-x-1'}`} />
                   </button>
                 </div>
                 <div className="flex flex-col items-end gap-1">
@@ -3452,6 +3411,36 @@ export default function App() {
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canUpload ? 'bg-blue-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                   >
                     <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canUpload ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Resources Admin</span>
+                  <button 
+                    onClick={() => handleToggleManageResources(u.id, u.canManageResources)}
+                    disabled={u.role === 'admin'}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canManageResources ? 'bg-indigo-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canManageResources ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Exams Admin</span>
+                  <button 
+                    onClick={() => handleToggleManageExams(u.id, u.canManageExams)}
+                    disabled={u.role === 'admin'}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canManageExams ? 'bg-violet-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canManageExams ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Questions Admin</span>
+                  <button 
+                    onClick={() => handleToggleManageQuestions(u.id, u.canManageQuestions)}
+                    disabled={u.role === 'admin'}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canManageQuestions ? 'bg-purple-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canManageQuestions ? 'translate-x-6' : 'translate-x-1'}`} />
                   </button>
                 </div>
               </div>
@@ -3474,9 +3463,8 @@ export default function App() {
                   timeLimit: 30,
                   mcqCount: 25,
                   writtenCount: 1,
-                  class: 'Class 9',
+                  class: dynamicClasses[0]?.name || 'Class 9',
                   subject: 'General',
-                  difficulty: 'Medium',
                   status: 'approved'
                 });
                 setIsAddingExam(true);
@@ -3514,8 +3502,7 @@ export default function App() {
                             setIsDeletingExam(true);
                             console.log(`Starting deletion of exam: ${exam.id}`);
                             try {
-                              const examRef = doc(db, 'exams', exam.id);
-                              await deleteDoc(examRef);
+                              await supabase.from('exams').delete().eq('id', exam.id);
                               console.log('Deletion successful');
                               setExamToDelete(null);
                             } catch (err: any) {
@@ -3628,10 +3615,11 @@ export default function App() {
                   if (!confirm('This will scan all questions and fix common typos (like "mtah" to "Math") in the database. Continue?')) return;
                   setIsGeneratingExam(true);
                   try {
-                    const qDocs = await getDocs(collection(db, 'questions'));
+                    const { data: questions, error } = await supabase.from('questions').select('*');
+                    if (error) throw error;
+                    
                     let fixedCount = 0;
-                    for (const d of qDocs.docs) {
-                      const data = d.data();
+                    for (const data of questions) {
                       let updated = false;
                       const updateObj: any = {};
                       
@@ -3641,7 +3629,7 @@ export default function App() {
                       }
                       
                       if (updated) {
-                        await setDoc(doc(db, 'questions', d.id), updateObj, { merge: true });
+                        await supabase.from('questions').update(updateObj).eq('id', data.id);
                         fixedCount++;
                       }
                     }
@@ -3690,8 +3678,15 @@ export default function App() {
                       { type: 'mcq', questionText: 'Calculation of work done by a variable force involves:', options: ['Multiplication', 'Division', 'Integration', 'Addition'], correctAnswer: 2, points: 1, class: 'Engineering Admission-science', subject: 'Physics', chapter: 'Mechanics', createdAt: Date.now() }
                     ];
 
-                    for (const q of sampleQuestions) {
-                      await addDoc(collection(db, 'questions'), q);
+                    const mappedQuestions = sampleQuestions.map(q => ({
+                      ...q,
+                      academic_class: (q as any).class,
+                      created_at: new Date().toISOString()
+                    }));
+                    
+                    for (const q of mappedQuestions) {
+                      delete (q as any).class;
+                      await supabase.from('questions').insert([q]);
                     }
                     alert('Questions seeded successfully!');
                   } catch (err: any) {
@@ -3713,7 +3708,7 @@ export default function App() {
                     options: ['', '', '', ''],
                     correctAnswer: 0,
                     points: 1,
-                    class: 'Class 9',
+                    class: dynamicClasses[0]?.name || 'Class 9',
                     subject: 'Math',
                     chapter: ''
                   });
@@ -3750,6 +3745,33 @@ export default function App() {
               </div>
             </div>
 
+            {isGroupNeeded(questionClassFilter) && (
+              <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50 animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">Filter by Group</label>
+                  <Badge className="bg-amber-500/10 text-amber-600 border-none">{questionGroupFilter}</Badge>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {['All', ...academicGroups.map(g => g.name)].map(g => (
+                    <button
+                      key={g}
+                      onClick={() => {
+                        setQuestionGroupFilter(g);
+                        setQuestionSubjectFilter('All');
+                      }}
+                      className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
+                        questionGroupFilter === g 
+                        ? 'bg-amber-600 text-white shadow-[0_10px_20px_-5px_rgba(217,119,6,0.4)] scale-105' 
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                      }`}
+                    >
+                      {g}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">Filter by Subject</label>
@@ -3775,7 +3797,7 @@ export default function App() {
             <div className="pt-6 flex items-center justify-between border-t border-zinc-100 dark:border-zinc-800/50">
               <div className="flex items-center gap-2 text-zinc-500 font-bold text-xs">
                 <Database size={16} />
-                <span>Showing {allQuestions.filter(q => (questionClassFilter === 'All' || q.class === questionClassFilter) && (questionSubjectFilter === 'All' || q.subject === questionSubjectFilter)).length} Questions</span>
+                <span>Showing {allQuestions.filter(q => (questionClassFilter === 'All' || q.class === questionClassFilter) && (questionGroupFilter === 'All' || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter || q.academicGroup === 'All' || (q as any).academic_group === 'All') && (questionSubjectFilter === 'All' || q.subject === questionSubjectFilter)).length} Questions</span>
               </div>
               <Button 
                 variant="ghost" 
@@ -3792,7 +3814,7 @@ export default function App() {
             </div>
           </div>
 
-          {allQuestions.filter(q => (questionClassFilter === 'All' || q.class === questionClassFilter) && (questionSubjectFilter === 'All' || q.subject === questionSubjectFilter)).length === 0 && (
+          {allQuestions.filter(q => (questionClassFilter === 'All' || q.class === questionClassFilter) && (questionGroupFilter === 'All' || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter || q.academicGroup === 'All' || (q as any).academic_group === 'All') && (questionSubjectFilter === 'All' || q.subject === questionSubjectFilter)).length === 0 && (
             <div className="bg-blue-500/5 border border-blue-500/20 rounded-3xl p-8 text-center space-y-4">
               <div className="w-16 h-16 bg-blue-500/10 text-blue-600 rounded-2xl flex items-center justify-center mx-auto">
                 <Database size={32} />
@@ -3806,7 +3828,7 @@ export default function App() {
 
           <div className="grid grid-cols-1 gap-4">
             {allQuestions
-              .filter(q => (questionClassFilter === 'All' || q.class === questionClassFilter) && (questionSubjectFilter === 'All' || q.subject === questionSubjectFilter))
+              .filter(q => (questionClassFilter === 'All' || q.class === questionClassFilter) && (questionGroupFilter === 'All' || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter || q.academicGroup === 'All' || (q as any).academic_group === 'All') && (questionSubjectFilter === 'All' || q.subject === questionSubjectFilter))
               .map((q, qIdx) => (
               <div key={`${q.id || 'q'}-${qIdx}`} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 flex flex-col md:flex-row items-center gap-6 shadow-sm hover:shadow-md transition-all group">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${q.type === 'mcq' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'bg-purple-100 dark:bg-purple-900/30 text-purple-600'}`}>
@@ -3833,9 +3855,7 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                   <Button variant="ghost" size="icon" className="h-10 w-10 text-zinc-400 hover:text-blue-500" onClick={() => {
-                    setNewQuestion(q);
-                    setEditingQuestionId(q.id);
-                    setIsAddingQuestion(true);
+                    handleTriggerEditQuestion(q);
                   }}><Pencil size={18} /></Button>
                   <Button variant="ghost" size="icon" className="h-10 w-10 text-zinc-400 hover:text-red-500" onClick={() => {
                     handleDeleteQuestion(q.id);
@@ -3856,10 +3876,10 @@ export default function App() {
       ) : adminTab === 'leaderboards' ? (
         <div className="space-y-6">
           <div className="flex items-center gap-4 p-4 bg-white dark:bg-zinc-900 rounded-[32px] border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-x-auto no-scrollbar">
-            {['Class 6', 'Class 7', 'Class 8', 'Class 9-10', 'Class 11-12'].map(group => (
+            {dynamicClasses.map(c => c.name).map(group => (
               <button
                 key={group}
-                onClick={() => setLeaderboardClassFilter(group as any)}
+                onClick={() => setLeaderboardClassFilter(group)}
                 className={`px-6 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest whitespace-nowrap transition-all ${leaderboardClassFilter === group ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
               >
                 {group}
@@ -3898,7 +3918,7 @@ export default function App() {
                     .sort((a, b) => {
                       if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
                       if (a.timeTaken !== b.timeTaken) return a.timeTaken - b.timeTaken;
-                      return a.firstSubmissionAt - b.firstSubmissionAt;
+                      return new Date(a.firstSubmissionAt).getTime() - new Date(b.firstSubmissionAt).getTime();
                     })
                     .map((entry, idx) => (
                       <tr key={`${entry.id}-${idx}`} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors group">
@@ -3933,7 +3953,7 @@ export default function App() {
                            <button 
                             onClick={async () => {
                               if (confirm('Delete this leaderboard entry?')) {
-                                await deleteDoc(doc(db, 'leaderboards', entry.id));
+                                await supabase.from('leaderboards').delete().eq('id', entry.id);
                               }
                             }}
                             className="p-2 text-zinc-400 hover:text-red-500 transition-colors"
@@ -3989,6 +4009,7 @@ export default function App() {
       )}
     </div>
   );
+};
 
   const renderLeaderboard = () => (
     <ScrollSection className="space-y-6">
@@ -3998,7 +4019,7 @@ export default function App() {
           <p className="text-sm sm:text-base text-zinc-500 font-medium">Global rankings across all subjects and exams.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 border border-zinc-200/50 dark:border-zinc-800/50 rounded-2xl p-1 bg-white/50 dark:bg-zinc-900/50 max-w-full overflow-x-auto no-scrollbar">
-          {['Class 6', 'Class 7', 'Class 8', 'Class 9-10', 'Class 11-12'].map(group => (
+          {classes.filter(c => c !== 'All').map(group => (
             <button
               key={group}
               onClick={() => setLeaderboardClassFilter(group as any)}
@@ -4041,12 +4062,12 @@ export default function App() {
                 .sort((a, b) => {
                   if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
                   if (a.timeTaken !== b.timeTaken) return a.timeTaken - b.timeTaken;
-                  return a.firstSubmissionAt - b.firstSubmissionAt;
+                  return new Date(a.firstSubmissionAt).getTime() - new Date(b.firstSubmissionAt).getTime();
                 })
                 .map((entry, idx) => (
-                  <tr key={`${entry.id}-${idx}`} className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors group ${entry.userId === auth.currentUser?.uid ? 'bg-blue-50/30 dark:bg-blue-500/5' : ''}`}>
+                  <tr key={`${entry.id}-${idx}`} className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors group ${entry.userId === user?.id ? 'bg-blue-50/30 dark:bg-blue-500/5' : ''}`}>
                     <td className="px-8 py-5">
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${idx === 0 ? 'bg-yellow-400 text-yellow-900' : idx === 1 ? 'bg-zinc-300 text-zinc-700' : idx === 2 ? 'bg-orange-300 text-orange-900' : (entry.userId === auth.currentUser?.uid ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500')}`}>
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${idx === 0 ? 'bg-yellow-400 text-yellow-900' : idx === 1 ? 'bg-zinc-300 text-zinc-700' : idx === 2 ? 'bg-orange-300 text-orange-900' : (entry.userId === user?.id ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500')}`}>
                         {idx + 1}
                       </div>
                     </td>
@@ -4056,7 +4077,7 @@ export default function App() {
                           <img src={entry.userPhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${entry.userName}`} alt="" className="w-full h-full object-cover" />
                         </div>
                         <div>
-                          <p className={`text-sm font-bold ${entry.userId === auth.currentUser?.uid ? 'text-blue-600' : 'text-zinc-900 dark:text-white'} capitalize`}>{entry.userId === auth.currentUser?.uid ? (firestoreUser?.displayName || auth.currentUser?.displayName || entry.userName) : entry.userName} {entry.userId === auth.currentUser?.uid && '(You)'}</p>
+                          <p className={`text-sm font-bold ${entry.userId === user?.id ? 'text-blue-600' : 'text-zinc-900 dark:text-white'} capitalize`}>{entry.userId === user?.id ? (firestoreUser?.display_name || user?.user_metadata?.full_name || entry.userName) : entry.userName} {entry.userId === user?.id && '(You)'}</p>
                           <p className="text-[10px] text-zinc-400 font-medium">Attempts: {entry.totalAttempts}</p>
                         </div>
                       </div>
@@ -4103,7 +4124,7 @@ export default function App() {
           <div className="flex items-center gap-6">
             <div className="w-20 h-20 rounded-[24px] bg-zinc-100 dark:bg-zinc-800 overflow-hidden border-2 border-blue-500/20 relative group">
               <img 
-                src={auth.currentUser?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firestoreUser?.displayName || auth.currentUser?.displayName || 'User'}`} 
+                src={user?.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firestoreUser?.display_name || user?.user_metadata?.full_name || 'User'}`} 
                 alt="" 
                 className="w-full h-full object-cover" 
               />
@@ -4113,18 +4134,18 @@ export default function App() {
             </div>
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <h3 className="text-2xl font-black text-zinc-900 dark:text-white">{firestoreUser?.displayName || auth.currentUser?.displayName || 'Student'}</h3>
+                <h3 className="text-2xl font-black text-zinc-900 dark:text-white">{firestoreUser?.name || user?.user_metadata?.full_name || 'Student'}</h3>
                 {userRole === 'admin' && <Badge className="bg-blue-500/10 text-blue-600 border-none scale-75 origin-left">Admin</Badge>}
               </div>
-              <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">{auth.currentUser?.email}</p>
+              <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">{user?.email}</p>
               <div className="flex items-center gap-3 mt-3">
                 <div className="flex items-center gap-2 bg-blue-500/10 text-blue-600 px-3 py-1 rounded-full">
                   <GraduationCap size={14} />
-                  <span className="text-[10px] font-black uppercase tracking-widest">{firestoreUser?.class || 'Class 9'}</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest">{firestoreUser?.academicClass || (dynamicClasses[0]?.name || 'Student')}</span>
                 </div>
                 <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-3 py-1 rounded-full border border-zinc-200/50 dark:border-zinc-700/50">
                   <Calendar size={14} />
-                  <span className="text-[10px] font-black uppercase tracking-widest">{formatDate(firestoreUser?.createdAt || Date.now())}</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest">{formatDate(firestoreUser?.createdAt || new Date().toISOString())}</span>
                 </div>
               </div>
             </div>
@@ -4135,8 +4156,9 @@ export default function App() {
             className="rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-100 dark:border-zinc-700/30"
             onClick={() => {
               setProfileFormData({ 
-                displayName: firestoreUser?.displayName || auth.currentUser?.displayName || '', 
-                academicClass: firestoreUser?.class || 'Class 9' 
+                displayName: firestoreUser?.name || user?.user_metadata?.full_name || '', 
+                academicClass: firestoreUser?.academicClass || (dynamicClasses[0]?.name || '') as any,
+                academicGroup: firestoreUser?.academicGroup || 'All'
               });
               setIsEditingProfile(true);
             }}
@@ -4181,8 +4203,8 @@ export default function App() {
                       value={profileFormData.academicClass}
                       onChange={e => setProfileFormData(prev => ({ ...prev, academicClass: e.target.value as AcademicClass }))}
                     >
-                      {classes.filter(c => c !== 'All').map(c => (
-                        <option key={c} value={c}>{c}</option>
+                      {dynamicClasses.map(c => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
                       ))}
                     </select>
                     <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400">
@@ -4190,6 +4212,27 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
+                {isGroupNeeded(profileFormData.academicClass) && (
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">Academic Group</label>
+                    <div className="relative">
+                      <select
+                        className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-2xl px-6 py-4 text-sm font-bold text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all shadow-sm appearance-none cursor-pointer"
+                        value={profileFormData.academicGroup}
+                        onChange={e => setProfileFormData(prev => ({ ...prev, academicGroup: e.target.value }))}
+                      >
+                        <option value="All">All / Common</option>
+                        {academicGroups.map(g => (
+                          <option key={g.id} value={g.name}>{g.name}</option>
+                        ))}
+                      </select>
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-400">
+                        <Sparkles size={16} />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="pt-4 flex gap-3">
                   <Button
@@ -4225,7 +4268,7 @@ export default function App() {
           <Button variant="primary" icon={Plus} className="w-full sm:w-auto" onClick={() => {
             setIsEditing(false);
             setEditingId(null);
-            setNewItem({ category: 'Notes', academicClass: 'Class 9', subject: '', title: '', description: '', url: '', thumbnail: '' });
+            setNewItem({ category: 'Notes', academicClass: dynamicClasses[0]?.name || 'Class 9', subject: '', title: '', description: '', url: '', thumbnail: '' });
             setIsAdding(true);
           }}>Upload New</Button>
         )}
@@ -4236,7 +4279,7 @@ export default function App() {
           <div key={`uc-${item.id || ucIdx}`} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[32px] overflow-hidden shadow-sm hover:shadow-xl transition-all group">
             <div className="h-48 relative overflow-hidden">
               <img 
-                src={item.thumbnail ? getDirectImageUrl(item.thumbnail) : 'https://picsum.photos/seed/edu/400/250'} 
+                src={item.thumbnail_url ? getDirectImageUrl(item.thumbnail_url) : 'https://picsum.photos/seed/edu/400/250'} 
                 alt={item.title} 
                 className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
                 referrerPolicy="no-referrer" 
@@ -4262,14 +4305,14 @@ export default function App() {
                 <h4 className="text-lg font-black text-zinc-900 dark:text-white leading-tight line-clamp-2">{item.title}</h4>
               </div>
               <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{formatDate(item.createdAt)}</span>
+                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{formatDate(item.created_at)}</span>
                 <div className="flex items-center gap-2">
                   <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-zinc-400 hover:text-blue-500" onClick={() => handleEditContent(item)}><Pencil size={16} /></Button>
                   <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-zinc-400 hover:text-blue-500" onClick={() => {
                     if (item.category === 'YouTube Classes') {
-                      setActiveVideo(item.url);
+                      setActiveVideo(getYouTubeId(item.url));
                     } else {
-                      setActivePdf({ url: item.url, isRestricted: item.category === 'Practice Sheet' });
+                      setActivePdf({ url: ensureFullUrl(item.url), isRestricted: item.category === 'Practice Sheet' });
                     }
                   }}><Eye size={16} /></Button>
                 </div>
@@ -4287,7 +4330,7 @@ export default function App() {
               <div key={`up-${playlist.id || upIdx}`} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[32px] overflow-hidden shadow-sm hover:shadow-xl transition-all group">
                 <div className="h-48 relative overflow-hidden">
                   <img 
-                    src={playlist.thumbnail ? getDirectImageUrl(playlist.thumbnail) : 'https://img.youtube.com/vi/playlist/mqdefault.jpg'} 
+                    src={playlist.thumbnail_url ? getDirectImageUrl(playlist.thumbnail_url) : 'https://img.youtube.com/vi/playlist/mqdefault.jpg'} 
                     alt={playlist.title} 
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
                     referrerPolicy="no-referrer" 
@@ -4313,15 +4356,11 @@ export default function App() {
                     <h4 className="text-lg font-black text-zinc-900 dark:text-white leading-tight line-clamp-2">{playlist.title}</h4>
                   </div>
                   <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                    <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{formatDate(playlist.createdAt)}</span>
+                    <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{formatDate(playlist.created_at)}</span>
                     <div className="flex items-center gap-2">
                       <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-zinc-400 hover:text-blue-500" onClick={() => {
-                        if (playlist.type === 'youtube') {
-                          setActiveVideo(`https://www.youtube.com/playlist?list=${playlist.youtubePlaylistId}`);
-                        } else if (playlist.videoIds && playlist.videoIds.length > 0) {
-                          const firstVideo = contents.find(c => c.id === playlist.videoIds![0]);
-                          if (firstVideo) setActiveVideo(firstVideo.url);
-                        }
+                        setActiveVideo(null);
+                        setActivePlaylist(playlist);
                       }}><Eye size={16} /></Button>
                     </div>
                   </div>
@@ -4352,7 +4391,7 @@ export default function App() {
   const renderExamResults = () => {
     if (!examResults || !activeExam) return null;
     
-    const percentage = (examResults.score / examResults.maxScore) * 100;
+    const percentage = (examResults.score / (examResults as any).totalMarks) * 100;
     let feedback = "আরও উন্নতি প্রয়োজন";
     let colorClass = "text-red-500";
     let bgClass = "bg-red-500/10";
@@ -4384,7 +4423,7 @@ export default function App() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card className="p-8 text-center space-y-2">
             <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">স্কোর</p>
-            <h4 className="text-4xl font-black text-zinc-900 dark:text-white">{examResults.score} / {examResults.maxScore}</h4>
+            <h4 className="text-4xl font-black text-zinc-900 dark:text-white">{examResults.score} / {examResults.totalMarks}</h4>
           </Card>
           <Card className="p-8 text-center space-y-2">
             <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">শতকরা হার</p>
@@ -4410,7 +4449,7 @@ export default function App() {
                       <Badge className="bg-blue-100 dark:bg-blue-900/30 text-blue-600 border-none px-2 py-0.5 text-[8px] uppercase font-black">{q.subject}</Badge>
                       <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{q.chapter}</span>
                     </div>
-                    <p className="text-lg font-bold text-zinc-800 dark:text-zinc-200">{q.questionText}</p>
+                    <MathQuestionContent questionText={q.questionText || q.question_text || ""} questionImage={q.question_image} />
                   </div>
                   <div className="text-right shrink-0">
                     <Badge className={examResults.answers[idx] === q.correctAnswer ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}>
@@ -4424,22 +4463,19 @@ export default function App() {
                     {q.options.map((opt, oIdx) => {
                       const isUserSelected = examResults.answers[idx] === oIdx;
                       const isCorrect = q.correctAnswer === oIdx;
-                      let borderClass = "border-zinc-200 dark:border-zinc-800";
-                      let bgClassOption = "";
-                      
-                      if (isCorrect) {
-                        borderClass = "border-green-500";
-                        bgClassOption = "bg-green-500/5";
-                      } else if (isUserSelected && !isCorrect) {
-                        borderClass = "border-red-500";
-                        bgClassOption = "bg-red-500/5";
-                      }
+                      let status: 'correct' | 'incorrect' | 'neutral' = 'neutral';
+                      if (isCorrect) status = 'correct';
+                      else if (isUserSelected) status = 'incorrect';
 
                       return (
-                        <div key={oIdx} className={`p-4 rounded-2xl border ${borderClass} ${bgClassOption} flex items-center justify-between`}>
-                          <span className="text-sm font-medium">{opt}</span>
-                          {isCorrect && <CheckCircle2 size={16} className="text-green-500" />}
-                        </div>
+                        <MathOptionContent
+                          key={oIdx}
+                          optionText={opt}
+                          idx={oIdx}
+                          isSelected={isUserSelected}
+                          onClick={() => {}}
+                          correctAnswerStatus={status}
+                        />
                       );
                     })}
                   </div>
@@ -4475,9 +4511,11 @@ export default function App() {
       const filteredExams = allExams.filter(exam => {
         const matchesSubject = examSubjectFilter === 'All' || exam.subject === examSubjectFilter;
         const matchesClass = examClassFilter === 'All' || exam.class === examClassFilter;
-        const matchesChapter = !examChapterFilter || examChapterFilter === 'All' || (exam.chapter || '').toLowerCase() === examChapterFilter.toLowerCase();
+        const matchesGroup = examGroupFilter === 'All' || exam.academicGroup === examGroupFilter || (exam as any).academic_group === examGroupFilter || exam.academicGroup === 'All' || (exam as any).academic_group === 'All';
+        const matchesChapter = !examChapterFilter || examChapterFilter === 'All' || !exam.chapter || (exam.chapter || '').toLowerCase() === examChapterFilter.toLowerCase();
+        const matchesTopic = !examTopicFilter || examTopicFilter === 'All' || (exam as any).topic_id === examTopicFilter || (exam.topicIds && exam.topicIds.includes(examTopicFilter));
         const matchesType = contentTypeFilter === 'free' ? !exam.isPremium : exam.isPremium;
-        return matchesSubject && matchesClass && matchesChapter && matchesType;
+        return matchesSubject && matchesClass && matchesGroup && matchesChapter && matchesTopic && matchesType;
       });
 
       return (
@@ -4543,6 +4581,36 @@ export default function App() {
               </div>
             </div>
 
+            {isGroupNeeded(examClassFilter) && (
+              <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50 animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">গ্রুপ/স্ট্রিম নির্বাচন করুন</label>
+                  <Badge className="bg-amber-500/10 text-amber-600 border-none">{examGroupFilter}</Badge>
+                </div>
+                <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+                  {['All', ...academicGroups.map(g => g.name)].map(g => (
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      key={g}
+                      onClick={() => {
+                        setExamGroupFilter(g);
+                        setExamSubjectFilter('All');
+                        setExamChapterFilter('All');
+                      }}
+                      className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
+                        examGroupFilter === g 
+                        ? 'bg-amber-600 text-white shadow-[0_10px_20px_-5px_rgba(217,119,6,0.4)] scale-105' 
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                      }`}
+                    >
+                      {g}
+                    </motion.button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">উপলব্ধ অধ্যায়সমূহ</label>
@@ -4555,7 +4623,10 @@ export default function App() {
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
                       key={ch}
-                      onClick={() => setExamChapterFilter(ch)}
+                      onClick={() => {
+                        setExamChapterFilter(ch);
+                        setExamTopicFilter('All');
+                      }}
                       className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
                         (examChapterFilter === ch || (ch === 'All' && !examChapterFilter))
                         ? 'bg-emerald-600 text-white shadow-[0_10px_20px_-5px_rgba(5,150,105,0.4)] scale-105' 
@@ -4570,6 +4641,35 @@ export default function App() {
                 <p className="text-xs text-zinc-400 italic ml-2">এই নির্বাচনের জন্য কোনো নির্দিষ্ট অধ্যায় পাওয়া যায়নি।</p>
               )}
             </div>
+
+            {examChapterFilter && examChapterFilter !== 'All' && (
+              <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">টপিক নির্বাচন করুন</label>
+                  <Badge className="bg-purple-500/10 text-purple-600 border-none">{examTopicFilter || 'সব টপিক'}</Badge>
+                </div>
+                <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+                  {['All', ...dynamicTopics.filter(t => {
+                    const matchedChapter = dynamicChapters.find(ch => ch.name === examChapterFilter);
+                    return matchedChapter && t.chapterId === matchedChapter.id;
+                  }).map(t => ({ id: t.id, name: t.name }))].map(t => (
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      key={typeof t === 'string' ? t : t.id}
+                      onClick={() => setExamTopicFilter(typeof t === 'string' ? t : t.id)}
+                      className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
+                        examTopicFilter === (typeof t === 'string' ? t : t.id)
+                        ? 'bg-purple-600 text-white shadow-[0_10px_20px_-5px_rgba(147,51,234,0.4)] scale-105' 
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                      }`}
+                    >
+                      {typeof t === 'string' ? t : t.name}
+                    </motion.button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="pt-6 flex items-center justify-between border-t border-zinc-100 dark:border-zinc-800/50">
                <div className="flex items-center gap-2 text-blue-600 font-bold text-sm">
@@ -4604,7 +4704,7 @@ export default function App() {
                           <ClipboardList size={24} />
                         </div>
                         <div className="flex flex-col items-end gap-2">
-                          <Badge>{exam.timeLimit} মি.</Badge>
+                          <Badge>{exam.time_limit} মি.</Badge>
                         </div>
                       </div>
                       <div className="space-y-2">
@@ -4621,7 +4721,7 @@ export default function App() {
                         )}
                       </div>
                     <div className="flex items-center gap-2">
-                      {exam.isPremium && !firestoreUser?.hasPremiumAccess && userRole !== 'admin' ? (
+                      {exam.isPremium && !hasPremiumAccess ? (
                         <Button 
                           className="rounded-2xl flex-1 h-12 bg-amber-600 hover:bg-amber-700 shadow-lg shadow-amber-500/20" 
                           onClick={() => setGlobalError("🔒 This Exam requires a Premium subscription. Unlock Parodorshhi PRO to continue!")} 
@@ -4719,34 +4819,24 @@ export default function App() {
                       <Badge className="bg-green-500/10 text-green-600 border-none">Answered</Badge>
                     )}
                   </div>
-                  <h3 className="text-xl sm:text-2xl font-bold text-zinc-900 dark:text-white leading-tight">{q.questionText}</h3>
+                  <MathQuestionContent questionText={q.question_text || q.questionText || ""} questionImage={q.question_image} />
                 </div>
 
                 <div className="space-y-3">
                   {q.type === 'mcq' && q.options ? (
                     <div className="grid grid-cols-1 gap-3">
-                      {q.options.map((option: string, optIdx: number) => (
-                        <button
-                          key={optIdx}
-                          onClick={() => handleExamAnswer(q.id, optIdx)}
-                          className={`p-4 rounded-[20px] border-2 text-left transition-all duration-300 flex items-center gap-4 group ${
-                            examAnswers[q.id] === optIdx
-                            ? 'border-blue-600 bg-blue-50/50 dark:bg-blue-600/10 shadow-lg shadow-blue-500/5 scale-[1.01]'
-                            : 'border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-blue-200 dark:hover:border-blue-800'
-                          }`}
-                        >
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black transition-colors ${
-                            examAnswers[q.id] === optIdx ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30'
-                          }`}>
-                            {String.fromCharCode(65 + optIdx)}
-                          </div>
-                          <span className={`text-base font-bold transition-colors ${
-                            examAnswers[q.id] === optIdx ? 'text-blue-600' : 'text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-800 dark:group-hover:text-zinc-200'
-                          }`}>
-                            {option}
-                          </span>
-                        </button>
-                      ))}
+                      {q.options.map((option: any, optIdx: number) => {
+                        const isSelected = examAnswers[q.id] !== undefined && (examAnswers[q.id] === optIdx || String(examAnswers[q.id]) === String(optIdx));
+                        return (
+                          <MathOptionContent
+                            key={optIdx}
+                            optionText={option}
+                            idx={optIdx}
+                            isSelected={isSelected}
+                            onClick={() => handleExamAnswer(q.id, optIdx)}
+                          />
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -4828,32 +4918,14 @@ export default function App() {
       {/* Hero Section */}
       {!selectedCategory && (
         <ScrollSection 
-          className="relative py-12 sm:py-24 overflow-hidden rounded-2xl sm:rounded-[40px] shadow-2xl perspective-1000 w-full"
+          className="relative py-12 sm:py-24 overflow-hidden rounded-2xl sm:rounded-[40px] shadow-2xl w-full"
           style={{ background: 'linear-gradient(95deg, #5de0e6, #004aad)' }}
         >
-          {/* 3D Floating Objects */}
-          <motion.div 
-            animate={{ y: [0, -15, 0], rotate: [0, 5, 0] }}
-            transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute top-10 right-[15%] text-5xl opacity-40 select-none hidden md:block z-30"
-            style={{ transform: "translateZ(80px)" }}
-          >
-            🎓
-          </motion.div>
-          <motion.div 
-            animate={{ y: [15, 0, 15], rotate: [0, -5, 0] }}
-            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 1 }}
-            className="absolute bottom-20 left-[10%] text-5xl opacity-40 select-none hidden md:block z-30"
-            style={{ transform: "translateZ(80px)" }}
-          >
-            📚
-          </motion.div>
+          {/* Subtle Background Elements */}
+          <div className="absolute top-[-20%] left-[-10%] w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] bg-white/20 rounded-full blur-2xl sm:blur-3xl z-0 pointer-events-none"></div>
+          <div className="absolute bottom-[-20%] right-[-10%] w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] bg-white/10 rounded-full blur-2xl sm:blur-3xl z-0 pointer-events-none"></div>
           
-          {/* Animated Background Elements */}
-          <div className="absolute top-[-20%] left-[-10%] w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] bg-primary-palette/30 rounded-full blur-[80px] sm:blur-[120px] animate-pulse z-0 pointer-events-none"></div>
-          <div className="absolute bottom-[-20%] right-[-10%] w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] bg-secondary-palette/20 rounded-full blur-[80px] sm:blur-[120px] animate-pulse z-0 pointer-events-none" style={{ animationDelay: '1s' }}></div>
-          
-          <div className="max-w-3xl mx-auto px-4 sm:px-8 relative z-20 text-center" style={{ transform: "translateZ(50px)" }}>
+          <div className="max-w-3xl mx-auto px-4 sm:px-8 relative z-20 text-center">
             <motion.div
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
@@ -4872,13 +4944,13 @@ export default function App() {
 
               <motion.div 
                 whileHover={{ scale: 1.01 }}
-                className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-[32px] sm:rounded-[40px] p-6 sm:p-10 max-w-2xl mx-auto shadow-2xl transform-gpu"
+                className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-[32px] sm:rounded-[40px] p-6 sm:p-10 max-w-2xl mx-auto shadow-2xl"
               >
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-10">
                   {[
-                    { label: 'Resources', value: '18' },
-                    { label: 'Classes', value: '2' },
-                    { label: 'Subjects', value: '6' },
+                    { label: 'Resources', value: (contents.length + externalResources.length + playlists.length).toString() },
+                    { label: 'Classes', value: dynamicClasses.length.toString() },
+                    { label: 'Subjects', value: dynamicSubjects.length.toString() },
                   ].map((stat) => (
                     <div key={stat.label} className="text-center py-2 sm:py-0 border-b last:border-b-0 sm:border-b-0 border-white/10">
                       <div className="text-3xl sm:text-4xl font-bold text-white mb-2 tracking-tight">{stat.value}</div>
@@ -4892,10 +4964,10 @@ export default function App() {
         </ScrollSection>
       )}
 
-      <div className="w-full max-w-full px-3 sm:px-6 space-y-10 sm:space-y-16 pb-20 overflow-x-hidden">
+      <div className="w-full max-w-full px-3 sm:px-6 space-y-6 sm:space-y-10 pb-20 overflow-x-hidden">
         {renderFilters()}
 
-        {contentTypeFilter === 'premium' && (user && (firestoreUser?.hasPremiumAccess === true || userRole === 'admin')) && (
+        {contentTypeFilter === 'premium' && user && hasPremiumAccess && (
           <ScrollSection className="w-full max-w-6xl mx-auto px-4 py-8">
             <div className="relative group cursor-pointer" onClick={handlePremiumExamClick}>
               {/* Premium Glow Effect */}
@@ -4946,8 +5018,8 @@ export default function App() {
                   
                   <div className="relative hidden lg:block">
                     <motion.div 
-                      animate={{ y: [0, -20, 0] }}
-                      transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+                      animate={{ y: [0, -6, 0] }}
+                      transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
                       className="relative z-10 w-[340px] h-[340px] bg-gradient-to-br from-zinc-800 to-zinc-900 rounded-[60px] border-4 border-white/5 shadow-2xl p-8 flex flex-col justify-between"
                     >
                       <div className="space-y-4">
@@ -4976,17 +5048,9 @@ export default function App() {
                       </div>
                     </motion.div>
                     
-                    {/* Floating Decorative Orbs */}
-                    <motion.div 
-                      animate={{ scale: [1, 1.2, 1], rotate: 360 }}
-                      transition={{ duration: 15, repeat: Infinity }}
-                      className="absolute -top-10 -right-10 w-24 h-24 bg-gradient-to-br from-purple-500 to-indigo-500 rounded-full blur-2xl opacity-50" 
-                    />
-                    <motion.div 
-                      animate={{ y: [0, 30, 0] }}
-                      transition={{ duration: 8, repeat: Infinity }}
-                      className="absolute -bottom-12 -left-12 w-32 h-32 bg-blue-500/20 rounded-full blur-3xl" 
-                    />
+                    {/* Fixed Decorative Orbs */}
+                    <div className="absolute -top-10 -right-10 w-24 h-24 bg-gradient-to-br from-purple-500 to-indigo-500 rounded-full blur-xl opacity-35 z-0" />
+                    <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl z-0" />
                   </div>
                 </div>
               </Card>
@@ -4994,7 +5058,6 @@ export default function App() {
           </ScrollSection>
         )}
 
-        <WaveDivider />
         {/* Featured Exams Section */}
         <ScrollSection id="exams-section" className="space-y-6 sm:space-y-8 group/section relative w-full max-w-full">
           <div className="absolute top-4 right-20 sm:top-16 sm:right-12 pointer-events-none scale-100 origin-top-right z-30 opacity-100">
@@ -5010,68 +5073,77 @@ export default function App() {
               <h3 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">Featured Mock Exams</h3>
             </div>
             <div className="flex items-center gap-4">
-              <div className="hidden sm:flex items-center gap-1 mr-2">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
-                  onClick={() => scrollContainer("scroll-exams", 'left')}
-                >
-                  <ChevronLeft size={16} />
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
-                  onClick={() => scrollContainer("scroll-exams", 'right')}
-                >
-                  <ChevronRight size={16} />
-                </Button>
-              </div>
+              {allExams.filter(e => contentTypeFilter === 'free' ? !e.isPremium : e.isPremium).length > 0 && (
+                <div className="hidden sm:flex items-center gap-1 mr-2">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
+                    onClick={() => scrollContainer("scroll-exams", 'left')}
+                  >
+                    <ChevronLeft size={16} />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
+                    onClick={() => scrollContainer("scroll-exams", 'right')}
+                  >
+                    <ChevronRight size={16} />
+                  </Button>
+                </div>
+              )}
               <Button variant="ghost" className="text-blue-600 hover:bg-blue-50" onClick={() => setView('exam')}>View All <ChevronRight size={16} className="ml-1" /></Button>
             </div>
           </div>
-          <div id="scroll-exams" className="flex overflow-x-auto pb-6 sm:pb-2 gap-4 sm:gap-6 no-scrollbar snap-x snap-mandatory scroll-smooth">
-            {allExams
-              .filter(e => contentTypeFilter === 'free' ? !e.isPremium : e.isPremium)
-              .slice(0, 10)
-              .map((exam, aeIdx) => (
-              <div key={`home-exam-${exam.id || aeIdx}`} className="min-w-[200px] sm:min-w-[300px] w-[200px] sm:w-[300px] snap-start">
-                <TiltContainer className="h-full">
-                  <Card className={`p-5 sm:p-8 h-full flex flex-col space-y-3 sm:space-y-4 hover:shadow-xl transition-all group ${exam.isPremium && !firestoreUser?.hasPremiumAccess && userRole !== 'admin' ? 'border-amber-500/30' : ''}`}>
-                    <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-                      <Badge className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[9px] sm:text-xs">{exam.subject}</Badge>
-                      <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-400 text-[9px] sm:text-xs">{exam.class}</Badge>
-                      <span className="text-[9px] sm:text-xs font-bold text-zinc-400 group-hover:text-indigo-400 transition-colors uppercase tracking-widest">{exam.timeLimit} Min</span>
-                    </div>
-                    <h4 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white line-clamp-1 group-hover:text-indigo-600 transition-colors">{exam.title}</h4>
-                    <p className="text-xs sm:text-sm text-zinc-500 line-clamp-2">{exam.description}</p>
-                    <div className="flex justify-end pt-2 mt-auto">
-                      {exam.isPremium && !firestoreUser?.hasPremiumAccess && userRole !== 'admin' ? (
-                        <Button size="sm" onClick={() => setGlobalError("🔒 This is a Premium Exam. Join parodorshhi PRO for access!")} className="rounded-xl px-4 sm:px-6 bg-amber-600 shadow-lg shadow-amber-500/20 text-xs" icon={Lock}>Upgrade</Button>
-                      ) : (
-                        <Button size="sm" onClick={() => setExamPrep(exam)} className="rounded-xl px-4 sm:px-6 bg-indigo-600 shadow-lg shadow-indigo-500/20 text-xs">Take Test</Button>
-                      )}
-                    </div>
-                  </Card>
-                </TiltContainer>
+          <div id="scroll-exams" className="flex overflow-x-auto pb-6 sm:pb-2 gap-4 sm:gap-6 no-scrollbar snap-x snap-mandatory scroll-smooth min-w-full">
+            {allExams.filter(e => contentTypeFilter === 'free' ? !e.isPremium : e.isPremium).length > 0 ? (
+              allExams
+                .filter(e => contentTypeFilter === 'free' ? !e.isPremium : e.isPremium)
+                .slice(0, 10)
+                .map((exam, aeIdx) => (
+                <div key={`home-exam-${exam.id || aeIdx}`} className="min-w-[200px] sm:min-w-[300px] w-[200px] sm:w-[300px] snap-start">
+                  <TiltContainer className="h-full">
+                    <Card className={`p-5 sm:p-8 h-full flex flex-col space-y-3 sm:space-y-4 hover:shadow-xl transition-all group ${exam.isPremium && !hasPremiumAccess ? 'border-amber-500/30' : ''}`}>
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+                        <Badge className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[9px] sm:text-xs">{exam.subject}</Badge>
+                        <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-400 text-[9px] sm:text-xs">{exam.class}</Badge>
+                        <span className="text-[9px] sm:text-xs font-bold text-zinc-400 group-hover:text-indigo-400 transition-colors uppercase tracking-widest">{exam.time_limit} Min</span>
+                      </div>
+                      <h4 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white line-clamp-1 group-hover:text-indigo-600 transition-colors">{exam.title}</h4>
+                      <p className="text-xs sm:text-sm text-zinc-500 line-clamp-2">{exam.description}</p>
+                      <div className="flex justify-end pt-2 mt-auto">
+                        {exam.isPremium && !hasPremiumAccess ? (
+                          <Button size="sm" onClick={() => setGlobalError("🔒 This is a Premium Exam. Join parodorshhi PRO for access!")} className="rounded-xl px-4 sm:px-6 bg-amber-600 shadow-lg shadow-amber-500/20 text-xs" icon={Lock}>Upgrade</Button>
+                        ) : (
+                          <Button size="sm" onClick={() => setExamPrep(exam)} className="rounded-xl px-4 sm:px-6 bg-indigo-600 shadow-lg shadow-indigo-500/20 text-xs">Take Test</Button>
+                        )}
+                      </div>
+                    </Card>
+                  </TiltContainer>
+                </div>
+              ))
+            ) : (
+              <div className="w-full flex items-center justify-center py-6">
+                <div className="bg-zinc-100/40 dark:bg-zinc-800/10 border border-zinc-200/50 dark:border-zinc-800/30 rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center space-y-3 w-full max-w-md shadow-sm">
+                  <div className="p-3 bg-indigo-50 text-indigo-500/10 dark:text-indigo-400/10 rounded-full text-indigo-500 shrink-0">
+                    <ClipboardList size={20} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-zinc-800 dark:text-zinc-200 text-sm">No Mock Exams available yet</h4>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-xs leading-relaxed">Our subject-matter experts are preparing mock tests. They will be added soon.</p>
+                  </div>
+                </div>
               </div>
-            ))}
+            )}
           </div>
         </ScrollSection>
-        <WaveDivider />
         {renderSection('Notes', 'Notes', <FileText className="text-blue-600" size={24} />, 'Add Note', 'notes-section')}
-        <WaveDivider />
         {renderSection('Practice Sheets', 'Practice Sheet', <FileText className="text-orange-600" size={24} />, 'Add Practice Sheet', 'practice-section')}
-        <WaveDivider />
         {renderSection('Books PDF', 'Books', <BookOpen className="text-green-600" size={24} />, 'Add Book', 'books-section')}
-        <WaveDivider />
         {renderSection('Recent Question Papers', 'Question Papers', <History className="text-purple-600" size={24} />, 'Add Paper', 'papers-section')}
-        <WaveDivider />
         {renderPlaylistsSection()}
-        <WaveDivider />
         {renderSection('YouTube Classes', 'YouTube Classes', <Youtube className="text-red-600" size={24} />, 'Add Video', 'video-section')}
-        <WaveDivider />
         {renderExternalResources()}
       </div>
     </div>
@@ -5126,35 +5198,42 @@ export default function App() {
     if (!newsletterEmail) return;
     
     try {
-      await addDoc(collection(db, 'newsletter_subscribers'), {
-        email: newsletterEmail,
-        subscribedAt: serverTimestamp()
-      });
+      const { error } = await supabase.from('newsletter_subscribers').insert([{
+        email: newsletterEmail.trim().toLowerCase(),
+        created_at: new Date().toISOString()
+      }]);
+      if (error) throw error;
       setIsSubscribed(true);
       setNewsletterEmail('');
       setTimeout(() => setIsSubscribed(false), 5000);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'newsletter_subscribers', setGlobalError);
+    } catch (error: any) {
+      if (error?.code === '23505' || error?.message?.includes('duplicate key') || error?.message?.includes('already exists')) {
+        setIsSubscribed(true); // Treat duplicate as subscribed to avoid annoying errors
+        setNewsletterEmail('');
+        setTimeout(() => setIsSubscribed(false), 5000);
+      } else {
+        setGlobalError("Failed to subscribe: " + error.message);
+      }
     }
   };
 
   const handleSendFeedback = async () => {
-    if (!feedbackText.trim() || !user) return;
+    if (!feedbackText.trim()) return;
     setIsSendingFeedback(true);
     try {
-      await addDoc(collection(db, 'feedback'), {
-        userId: user.uid,
-        userEmail: user.email,
-        userName: user.displayName || 'Anonymous',
-        text: feedbackText.trim(),
-        createdAt: Date.now()
+      await supabaseService.submitFeedback({
+        user_id: user?.id || null,
+        user_email: user?.email || 'guest@educationalportal.org',
+        user_name: user?.user_metadata?.full_name || firestoreUser?.displayName || 'Guest Student',
+        content: feedbackText.trim(),
       });
       setIsFeedbackOpen(false);
       setFeedbackText('');
-      setGlobalError('Thank you for your feedback!');
+      setGlobalError('🏆 Thank you so much for your feedback!');
       setTimeout(() => setGlobalError(null), 5000);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'feedback');
+    } catch (error: any) {
+      console.error("Feedback submit error:", error);
+      setGlobalError(error.message || 'Failed to submit feedback. Please try again.');
     } finally {
       setIsSendingFeedback(false);
     }
@@ -5317,7 +5396,7 @@ export default function App() {
           <div className="space-y-6">
             <div className="flex items-center gap-3">
               <div className="bg-black p-3 rounded-2xl border border-white/10 shadow-lg group">
-                <img src="/api/v1/files/input_file_0.png" alt="Parodorshhi Logo" className="h-20 w-auto object-contain brightness-150 contrast-125 drop-shadow-[0_0_10px_rgba(255,255,255,0.2)]" referrerPolicy="no-referrer" />
+                <Logo className="h-20 w-auto" />
               </div>
             </div>
             <p className="text-sm leading-relaxed">
@@ -5502,13 +5581,19 @@ export default function App() {
       const matchesCategory = selectedCategory ? item.category === selectedCategory : true;
       const matchesClass = classFilter === 'All' ? true : item.academicClass === classFilter;
       const matchesSubject = subjectFilter === 'All' ? true : item.subject === subjectFilter;
+      const matchesGroup = groupFilter === 'All' ? true : (item.academicGroup === groupFilter || (item as any).academic_group === groupFilter || item.academicGroup === 'All' || (item as any).academic_group === 'All');
+      const matchesChapter = chapterFilter === 'All' ? true : (!item.chapter || item.chapter === 'All Chapters' || item.chapter === chapterFilter);
+      const matchesTopic = topicFilter === 'All' ? true : (item.topicId === topicFilter || (item as any).topic_id === topicFilter);
       const matchesYear = yearFilter === 'All Years' ? true : item.year === yearFilter;
       const matchesType = contentTypeFilter === 'free' ? !item.isPremium : item.isPremium;
       
-      if (view === 'saved') return bookmarks.includes(item.id) && matchesSearch;
-      return matchesSearch && matchesClass && matchesSubject && matchesCategory && matchesYear && matchesType;
+      // Also show pending items to their authors or admins
+      const isVisibleStatus = item.status === 'approved' || item.authorId === user?.id || userRole === 'admin';
+      
+      if (view === 'saved') return bookmarks.includes(item.id) && matchesSearch && isVisibleStatus;
+      return matchesSearch && matchesClass && matchesGroup && matchesSubject && matchesChapter && matchesTopic && matchesCategory && matchesYear && matchesType && isVisibleStatus;
     });
-  }, [contents, searchQuery, selectedCategory, classFilter, subjectFilter, yearFilter, view, bookmarks, contentTypeFilter]);
+  }, [contents, searchQuery, selectedCategory, classFilter, groupFilter, subjectFilter, chapterFilter, topicFilter, yearFilter, view, bookmarks, contentTypeFilter, userRole, user]);
 
   const suggestions = useMemo(() => {
     if (!searchQuery.trim()) return [];
@@ -5522,26 +5607,99 @@ export default function App() {
 
   const toggleBookmark = async (id: string) => {
     if (!user) {
+      setGlobalError("Please login to save resources!");
       handleLogin();
       return;
     }
-    const bookmarkId = `${user.uid}_${id}`;
-    const path = `users/${user.uid}/bookmarks/${bookmarkId}`;
-    const bookmarkRef = doc(db, `users/${user.uid}/bookmarks`, bookmarkId);
     
-    try {
-      if (bookmarks.includes(id)) {
-        await deleteDoc(bookmarkRef);
-      } else {
-        await setDoc(bookmarkRef, {
-          userId: user.uid,
-          contentId: id,
-          createdAt: Date.now()
-        });
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+    // Optimistic update
+    const isBookmarked = bookmarks.includes(id);
+    const originalBookmarks = [...bookmarks];
+    
+    if (isBookmarked) {
+      setBookmarks(prev => prev.filter(bId => bId !== id));
+      setGlobalError("Removed from saved items.");
+    } else {
+      setBookmarks(prev => [...prev, id]);
+      setGlobalError("Saved to your collection!");
+      setTimeout(() => setGlobalError(null), 3000);
     }
+
+    try {
+      if (isBookmarked) {
+        const { error } = await supabase
+          .from('bookmarks')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('content_id', id);
+        
+        if (error) {
+          setBookmarks(originalBookmarks);
+          if (error.message.includes('column') || error.message.includes('does not exist')) {
+            setGlobalError("Save feature requires a database update. Please contact admin.");
+          } else {
+            setGlobalError("Failed to remove bookmark: " + error.message);
+          }
+        }
+      } else {
+        const { error } = await supabase
+          .from('bookmarks')
+          .insert([{ user_id: user.id, content_id: id }]);
+
+        if (error) {
+          setBookmarks(originalBookmarks);
+          if (error.message.includes('column') || error.message.includes('does not exist')) {
+            setGlobalError("Save feature requires a database update. Please contact admin.");
+          } else {
+            setGlobalError("Failed to save: " + error.message);
+          }
+        }
+      }
+    } catch (error: any) {
+      setBookmarks(originalBookmarks);
+      console.error("Bookmark toggle error:", error);
+      setGlobalError("An unexpected error occurred while saving.");
+    }
+  };
+
+  const ensureFullUrl = (url: string) => {
+    if (!url) return '';
+    
+    // If it's a Supabase storage URL (either a full URL or just a path)
+    const isSupabase = url.includes('.supabase.co/storage/v1/object/public/') || !url.startsWith('http');
+    
+    if (isSupabase) {
+      let filePath = url;
+      
+      // If it's a full URL, extract the part after 'public/'
+      if (url.startsWith('http')) {
+        const parts = url.split('/storage/v1/object/public/');
+        if (parts.length > 1) {
+          const bucketAndPath = parts[1];
+          const firstSlash = bucketAndPath.indexOf('/');
+          if (firstSlash !== -1) {
+            // This is the actual path inside the bucket
+            filePath = bucketAndPath.substring(firstSlash + 1);
+          }
+        }
+      }
+      
+      // Clean path: remove any leading 'resources/' or '/resources/' strings that might cause doubling
+      let cleanPath = filePath.replace(/^\/?resources\//, '');
+      
+      // Generate the fresh public URL using the Supabase client
+      // This ensures we use the correct project reference and bucket name
+      try {
+        const { data: { publicUrl } } = supabase.storage
+          .from('resources')
+          .getPublicUrl(cleanPath);
+        return publicUrl;
+      } catch (err) {
+        return url;
+      }
+    }
+    
+    return url;
   };
 
   const handleEditContent = (item: ContentItem) => {
@@ -5554,6 +5712,8 @@ export default function App() {
       url: item.url,
       thumbnail: item.thumbnail,
       year: item.year,
+      chapterId: item.chapterId || (item as any).chapter_id,
+      topicId: item.topicId || (item as any).topic_id,
       isPremium: item.isPremium || false,
     });
     setEditingId(item.id);
@@ -5562,30 +5722,50 @@ export default function App() {
   };
 
   const uploadFile = async (file: File, folder: string): Promise<string> => {
-    console.log(`[STORAGE] Using STABLE mode for ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`);
+    console.log(`[STORAGE] Using Supabase for ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`);
     
-    if (!auth.currentUser) throw new Error("Authentication required for upload.");
+    if (!user) throw new Error("Authentication required for upload.");
 
-    // Sanitization
-    const cleanName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
-    const storageRef = ref(storage, `${folder}/${Date.now()}_${cleanName}`);
+    // Sanitization: Supabase Storage keys work best with ASCII. Replace all non-alphanumeric characters with underscores.
+    const extension = file.name.split('.').pop()?.toLowerCase() || '';
+    const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf('.'));
+    const safeName = nameWithoutExt.replace(/[^a-zA-Z0-9]/g, '_');
+    const filePath = (folder && folder !== 'resources') ? `${folder}/${Date.now()}_${safeName}.${extension}` : `${Date.now()}_${safeName}.${extension}`;
     
-    setUploadProgress(5); // Show connection started
+    setUploadProgress(5);
+    
+    const contentType = file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : undefined);
     
     try {
-      // Using uploadBytes (POST) instead of uploadBytesResumable (PUT/Conversational)
-      // This is often more reliable in restrictive proxy environments
-      const snapshot = await uploadBytes(storageRef, file);
-      setUploadProgress(95); 
-      console.log(`[STORAGE] Upload success, finalizing...`);
-      const url = await getDownloadURL(snapshot.ref);
+      const { data, error } = await supabase.storage
+        .from('resources')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: contentType
+        });
+
+      if (error) {
+        console.error(`[STORAGE] Supabase Error Details:`, error);
+        if (error.message.includes('Bucket not found') || (error as any).status === 404 || (error as any).statusCode === 404) {
+          const msg = "Storage bucket 'resources' not found. This is a critical configuration error.";
+          console.error(`[STORAGE] ${msg} Please run the SQL in STORAGE_SETUP.sql or create a public bucket named 'resources' in your Supabase dashboard.`);
+          throw new Error(`${msg} Please run the STORAGE_SETUP.sql in your Supabase SQL editor.`);
+        }
+        throw error;
+      }
+      
+      setUploadProgress(95);
+      
+      const { data: { publicUrl } } = supabase.storage
+        .from('resources')
+        .getPublicUrl(filePath);
+
       setUploadProgress(100);
-      return url;
+      return publicUrl;
     } catch (error: any) {
-      console.error(`[STORAGE] Upload failed:`, error.code, error.message);
-      let msg = error.message;
-      if (error.code === 'storage/unauthorized') msg = "Storage permission denied. Please try logging out and in again.";
-      throw new Error(msg);
+      console.error(`[STORAGE] Upload failed:`, error.message);
+      throw new Error(error.message || "Failed to upload file to Supabase Storage.");
     }
   };
 
@@ -5619,51 +5799,42 @@ export default function App() {
 
       // Upload Resource File if exists
       if (selectedFiles.resource) {
-        finalUrl = await uploadFile(selectedFiles.resource, 'resources');
+        // Upload directly to root of resources bucket as requested by user
+        finalUrl = await uploadFile(selectedFiles.resource, '');
       } else if (newItem.category === 'YouTube Classes' && finalUrl) {
         finalUrl = getYouTubeId(finalUrl);
       }
 
       // Upload Thumbnail if exists
       if (selectedFiles.thumbnail) {
-        finalThumbnail = await uploadFile(selectedFiles.thumbnail, 'thumbnails');
+        // Upload thumbnails to root of resources bucket as well for flat structure
+        finalThumbnail = await uploadFile(selectedFiles.thumbnail, '');
       }
 
+      const itemData: any = {
+        category: newItem.category,
+        academic_class: newItem.academicClass,
+        academic_group: newItem.academicGroup || 'All',
+        subject: newItem.subject,
+        title: newItem.title,
+        description: newItem.description || '',
+        url: finalUrl,
+        thumbnail: finalThumbnail,
+        chapter: (newItem.chapter === 'All Chapters' || !newItem.chapter) ? null : newItem.chapter,
+        chapter_id: newItem.chapterId || (newItem as any).chapter_id,
+        topic_id: newItem.topicId || (newItem as any).topic_id,
+        tags: typeof newItem.tags === 'string' ? (newItem.tags as string).split(',').map(t => t.trim()).filter(Boolean) : (newItem.tags || []),
+        is_premium: newItem.isPremium || false,
+        author_id: user.id
+      };
+
       if (isEditing && editingId) {
-        const docRef = doc(db, 'contents', editingId);
-        const updateData: any = {
-          category: newItem.category,
-          academicClass: newItem.academicClass,
-          subject: newItem.subject,
-          title: newItem.title,
-          description: newItem.description || '',
-          url: finalUrl,
-          thumbnail: finalThumbnail,
-          year: newItem.year || '',
-          chapter: newItem.chapter || '',
-          tags: typeof newItem.tags === 'string' ? (newItem.tags as string).split(',').map(t => t.trim()).filter(Boolean) : (newItem.tags || []),
-          isPremium: newItem.isPremium || false,
-          updatedAt: Date.now()
-        };
-        await setDoc(docRef, updateData, { merge: true });
+        await supabaseService.updateContent(editingId, itemData);
       } else {
-        const itemData = {
-          category: newItem.category,
-          academicClass: newItem.academicClass,
-          subject: newItem.subject,
-          title: newItem.title,
-          description: newItem.description || '',
-          url: finalUrl,
-          thumbnail: finalThumbnail,
-          chapter: newItem.chapter || '',
-          tags: typeof newItem.tags === 'string' ? (newItem.tags as string).split(',').map(t => t.trim()).filter(Boolean) : (newItem.tags || []),
-          authorId: user.uid,
-          authorEmail: user.email,
-          isPremium: newItem.isPremium || false,
-          status: userRole === 'admin' ? 'approved' : 'pending',
-          createdAt: Date.now(),
-        };
-        await addDoc(collection(db, 'contents'), itemData);
+        // If the user is the hardcoded admin or has permission, auto-approve
+        const isAdmin = userRole === 'admin' || user.email === 'mdsohanali636@gmail.com';
+        itemData.status = (canUpload || isAdmin) ? 'approved' : 'pending';
+        await supabaseService.createContent(itemData);
       }
 
       setIsAdding(false);
@@ -5671,29 +5842,23 @@ export default function App() {
       setEditingId(null);
       setNewItem({ 
         category: 'Notes', 
-        academicClass: 'Class 9', 
+        academicClass: dynamicClasses[0]?.name || 'Class 9', 
         subject: '', 
         title: '', 
         description: '', 
         url: '', 
         thumbnail: '', 
+        chapterId: '',
+        topicId: '',
         isPremium: false,
         tags: [] 
       });
       setSelectedFiles({});
       setUploadProgress(0);
-      
-      // Show success message or trigger notification if you had one
       setGlobalError(null); 
     } catch (error: any) {
-      console.error("Full upload error object:", error);
-      let errorMessage = error.message || "Failed to save content.";
-      if (error.code === 'storage/unauthorized') {
-        errorMessage = "Permission denied: Firebase Storage rules are blocking this upload. Please check your storage rules.";
-      } else if (error.code === 'storage/quota-exceeded') {
-        errorMessage = "Storage quota exceeded. Please try again later.";
-      }
-      setUploadError(errorMessage);
+      console.error("Content upload error:", error);
+      setUploadError(error.message || "Failed to save content.");
     } finally {
       setIsUploading(false);
     }
@@ -5705,7 +5870,8 @@ export default function App() {
       return;
     }
 
-    if (!newPlaylist.title) {
+    // Title is required, unless it is a YouTube playlist and we will auto-fetch it using Gemini
+    if (!newPlaylist.title && newPlaylist.type !== 'youtube') {
       setUploadError("Please enter a title.");
       return;
     }
@@ -5721,6 +5887,7 @@ export default function App() {
     }
 
     setIsUploading(true);
+    setUploadError(null);
     try {
       let finalThumbnail = getDirectImageUrl(newPlaylist.thumbnail || '');
       let youtubePlaylistId = '';
@@ -5729,7 +5896,7 @@ export default function App() {
       if (selectedFiles.thumbnail) {
         setIsUploading(true);
         setUploadProgress(0);
-        finalThumbnail = await uploadFile(selectedFiles.thumbnail, 'thumbnails');
+        finalThumbnail = await uploadFile(selectedFiles.thumbnail, '');
       }
 
       if (newPlaylist.type === 'youtube' && newPlaylist.youtubePlaylistId) {
@@ -5738,12 +5905,17 @@ export default function App() {
         // Fetch Playlist Metadata (Title & Thumbnail) if not provided
         if (!newPlaylist.title || !finalThumbnail || !newPlaylist.description) {
           try {
-            const metaResponse = await ai.models.generateContent({
-              model: "gemini-3.1-pro-preview",
-              contents: `Find the official title, description, and a high-quality thumbnail URL for the YouTube playlist with ID: ${youtubePlaylistId}. 
-              Search for the official page: https://www.youtube.com/playlist?list=${youtubePlaylistId}
-              Return as JSON with 'title', 'description', and 'thumbnail' fields.`,
-              tools: [{ googleSearch: {} }],
+            const apiKey = process.env.GEMINI_API_KEY || "";
+            if (!apiKey) {
+              throw new Error("Gemini API key is not configured inside environment.");
+            }
+            const genAI = ai || new GoogleGenAI({ apiKey });
+            const metaResponse = await genAI.models.generateContent({
+              model: "gemini-3.5-flash",
+              contents: `Find the official title, description, and high-quality thumbnail URL for the YouTube playlist with ID: ${youtubePlaylistId}. 
+              Search the web for the official playlist page: https://www.youtube.com/playlist?list=${youtubePlaylistId}
+              Ensure to retrieve the actual list/page info.
+              Return a JSON object containing the 'title', 'description', and 'thumbnail' properties of the playlist. Do not include any block markdown formatting, just plain JSON.`,
               config: {
                 responseMimeType: "application/json",
                 responseSchema: {
@@ -5754,45 +5926,66 @@ export default function App() {
                     thumbnail: { type: Type.STRING }
                   },
                   required: ["title", "description", "thumbnail"]
-                }
+                },
+                tools: [{ googleSearch: {} }]
               }
             });
-            const meta = JSON.parse(metaResponse.text || "{}");
-            if (!newPlaylist.title) newPlaylist.title = meta.title;
-            if (!newPlaylist.description) newPlaylist.description = meta.description;
-            if (!finalThumbnail) finalThumbnail = meta.thumbnail;
-          } catch (e) {
-            console.error("Error fetching playlist meta:", e);
+            const metaResponseText = metaResponse.text || "";
+            const meta = JSON.parse(metaResponseText || "{}");
+            if (!newPlaylist.title) newPlaylist.title = meta.title || "";
+            if (!newPlaylist.description) newPlaylist.description = meta.description || "";
+            if (!finalThumbnail) finalThumbnail = meta.thumbnail || "";
+          } catch (e: any) {
+            console.error("Error fetching playlist meta from Gemini:", e);
+            // Default thumbnail fallback in case search or image extraction failed
             if (!finalThumbnail) {
               finalThumbnail = `https://img.youtube.com/vi/playlist/mqdefault.jpg`;
+            }
+            // If the user did not enter a title manually and AI fetching failed, we need them to type it manually.
+            if (!newPlaylist.title) {
+              setUploadError("Could not fetch playlist metadata automatically (Gemini error or unconfigured API key). Please enter a Title and optional Thumbnail manually above.");
+              setIsUploading(false);
+              return;
             }
           }
         }
       }
 
-      const playlistData = {
+      const playlistData: any = {
         title: newPlaylist.title,
         description: newPlaylist.description || '',
         type: newPlaylist.type,
-        youtubePlaylistId: youtubePlaylistId,
-        videoIds: newPlaylist.videoIds || [],
-        academicClass: newPlaylist.academicClass,
+        youtube_playlist_id: youtubePlaylistId,
+        video_ids: newPlaylist.videoIds || [],
+        academic_class: newPlaylist.academicClass,
+        academic_group: newPlaylist.academicGroup || 'All',
         subject: newPlaylist.subject,
-        chapter: newPlaylist.chapter || '',
+        chapter: (newPlaylist.chapter === 'All Chapters' || !newPlaylist.chapter) ? null : newPlaylist.chapter,
         thumbnail: finalThumbnail,
-        authorId: user.uid,
-        isPremium: newPlaylist.isPremium || false,
-        status: userRole === 'admin' ? 'approved' : 'pending',
-        createdAt: Date.now(),
+        author_id: user.id,
+        is_premium: newPlaylist.isPremium || false,
+        status: (canUpload || userRole === 'admin') ? 'approved' : 'pending',
+        created_at: new Date().toISOString(),
       };
 
       if (editingPlaylistId) {
-        await setDoc(doc(db, 'playlists', editingPlaylistId), {
-          ...playlistData,
-          updatedAt: Date.now()
-        }, { merge: true });
+        const { error } = await supabase.from('playlists').update(playlistData).eq('id', editingPlaylistId);
+        if (error) {
+          console.error("Supabase playlist update failed:", error);
+          throw new Error(error.message || "Failed to update playlist in Supabase database.");
+        }
       } else {
-        await addDoc(collection(db, 'playlists'), playlistData);
+        const { error } = await supabase.from('playlists').insert([playlistData]);
+        if (error) {
+          console.error("Supabase playlist insert failed:", error);
+          throw new Error(error.message || "Failed to save playlist to Supabase database.");
+        }
+      }
+
+      // Proactively refresh playlist data instantly
+      fetchPlaylists();
+      if (userRole === 'admin') {
+        fetchAllPlaylists();
       }
 
       setIsAddingPlaylist(false);
@@ -5803,7 +5996,7 @@ export default function App() {
         type: 'youtube',
         youtubePlaylistId: '',
         videoIds: [],
-        academicClass: 'Class 9',
+        academicClass: dynamicClasses[0]?.name || 'Class 9',
         subject: '',
         thumbnail: '',
         isPremium: false
@@ -5815,39 +6008,43 @@ export default function App() {
     }
   };
 
-  const handleApproveContent = async (id: string) => {
+  const handleApproveContent = async (id: string, category: Category) => {
     if (userRole !== 'admin') return;
     try {
-      await setDoc(doc(db, 'contents', id), { status: 'approved' }, { merge: true });
+      await supabaseService.updateContent(id, { category, status: 'approved' });
+      // Refresh admin view
+      setAllContents(prev => prev.map(c => c.id === id ? { ...c, status: 'approved' } : c));
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `contents/${id}`);
+      console.error(error);
     }
   };
 
-  const handleRejectContent = async (id: string) => {
+  const handleRejectContent = async (id: string, category: Category) => {
     if (userRole !== 'admin') return;
     try {
-      await setDoc(doc(db, 'contents', id), { status: 'rejected' }, { merge: true });
+      await supabaseService.updateContent(id, { category, status: 'rejected' });
+      // Refresh admin view
+      setAllContents(prev => prev.map(c => c.id === id ? { ...c, status: 'rejected' } : c));
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `contents/${id}`);
+      console.error(error);
     }
   };
 
   const handleApprovePlaylist = async (id: string) => {
     if (userRole !== 'admin') return;
     try {
-      await setDoc(doc(db, 'playlists', id), { status: 'approved' }, { merge: true });
+      await supabase.from('playlists').update({ status: 'approved' }).eq('id', id);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `playlists/${id}`);
+      console.error(error);
     }
   };
 
   const handleRejectPlaylist = async (id: string) => {
     if (userRole !== 'admin') return;
     try {
-      await setDoc(doc(db, 'playlists', id), { status: 'rejected' }, { merge: true });
+      await supabase.from('playlists').update({ status: 'rejected' }).eq('id', id);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `playlists/${id}`);
+      console.error(error);
     }
   };
 
@@ -5855,8 +6052,8 @@ export default function App() {
     const playlist = allPlaylists.find(p => p.id === id) || userPlaylists.find(p => p.id === id);
     if (!playlist) return;
     
-    // Check if admin or owner
-    if (userRole !== 'admin' && playlist.authorId !== user?.uid) return;
+    // Check if admin, has upload permission, or owner
+    if (!canUpload && userRole !== 'admin' && playlist.authorId !== user?.id) return;
     
     setDeletingId(id);
   };
@@ -5866,10 +6063,16 @@ export default function App() {
     setIsDeleting(true);
     setUploadError(null);
     try {
-      await deleteDoc(doc(db, 'playlists', deletingId));
+      const { error } = await supabase.from('playlists').delete().eq('id', deletingId);
+      if (error) throw error;
+      
+      // Manually update states for instant UI feedback
+      setPlaylists(prev => prev.filter(p => p.id !== deletingId));
+      setAllPlaylists(prev => prev.filter(p => p.id !== deletingId));
+      setUserPlaylists(prev => prev.filter(p => p.id !== deletingId));
+      
       setDeletingId(null);
     } catch (error: any) {
-      handleFirestoreError(error, OperationType.DELETE, `playlists/${deletingId}`, setGlobalError);
       setUploadError("Failed to delete playlist. " + (error.message || "Please try again."));
     } finally {
       setIsDeleting(false);
@@ -5890,15 +6093,12 @@ export default function App() {
       if (deleteBankId === 'temp') {
         setTemporaryQuestions(prev => prev.filter(q => q.id !== deletingId));
       } else {
-        const path = deleteBankId === 'global' 
-          ? doc(db, 'questions', deletingId) 
-          : doc(db, 'exams', deleteBankId, 'questions', deletingId);
-        await deleteDoc(path);
+        await supabase.from('questions').delete().eq('id', deletingId);
       }
       setDeletingId(null);
       setDeleteBankId(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `questions/${deletingId}`, setGlobalError);
+    } catch (error: any) {
+      setGlobalError("Failed to delete question: " + error.message);
     } finally {
       setIsDeleting(false);
     }
@@ -5907,44 +6107,140 @@ export default function App() {
   const handleToggleUpload = async (userId: string, currentStatus: boolean) => {
     if (userRole !== 'admin') return;
     try {
-      await setDoc(doc(db, 'users', userId), { canUpload: !currentStatus }, { merge: true });
+      await supabase.from('profiles').update({ can_upload: !currentStatus }).eq('id', userId);
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
+      if (!error && data) {
+        await supabase.from('user_roles').update({ can_upload: !currentStatus }).eq('user_id', userId);
+      } else {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
+        if (!errorById && dataById) {
+          await supabase.from('user_roles').update({ can_upload: !currentStatus }).eq('id', userId);
+        } else {
+          await supabase.from('user_roles').insert([{ user_id: userId, can_upload: !currentStatus }]);
+        }
+      }
+      fetchUsersInfo();
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+      console.error(error);
     }
   };
 
   const handleTogglePremiumAccess = async (userId: string, currentStatus: boolean) => {
     if (userRole !== 'admin') return;
     try {
-      await setDoc(doc(db, 'users', userId), { 
-        hasPremiumAccess: !currentStatus,
-        premiumExpiry: !currentStatus ? Date.now() + (365 * 24 * 60 * 60 * 1000) : null
-      }, { merge: true });
+      await supabase.from('profiles').update({ 
+        has_premium_access: !currentStatus,
+        premium_expiry: !currentStatus ? new Date(Date.now() + (365 * 24 * 60 * 60 * 1000)).toISOString() : null
+      }).eq('id', userId);
+
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
+      if (!error && data) {
+        await supabase.from('user_roles').update({ is_premium: !currentStatus }).eq('user_id', userId);
+      } else {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
+        if (!errorById && dataById) {
+          await supabase.from('user_roles').update({ is_premium: !currentStatus }).eq('id', userId);
+        } else {
+          await supabase.from('user_roles').insert([{ user_id: userId, is_premium: !currentStatus }]);
+        }
+      }
+      fetchUsersInfo();
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `users/${userId}`);
+      console.error(error);
+    }
+  };
+
+  const handleToggleManageExams = async (userId: string, currentStatus: boolean) => {
+    if (userRole !== 'admin') return;
+    try {
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
+      if (!error && data) {
+        await supabase.from('user_roles').update({ can_manage_exams: !currentStatus }).eq('user_id', userId);
+      } else {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
+        if (!errorById && dataById) {
+          await supabase.from('user_roles').update({ can_manage_exams: !currentStatus }).eq('id', userId);
+        } else {
+          await supabase.from('user_roles').insert([{ user_id: userId, can_manage_exams: !currentStatus }]);
+        }
+      }
+      fetchUsersInfo();
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleToggleManageQuestions = async (userId: string, currentStatus: boolean) => {
+    if (userRole !== 'admin') return;
+    try {
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
+      if (!error && data) {
+        await supabase.from('user_roles').update({ can_manage_questions: !currentStatus }).eq('user_id', userId);
+      } else {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
+        if (!errorById && dataById) {
+          await supabase.from('user_roles').update({ can_manage_questions: !currentStatus }).eq('id', userId);
+        } else {
+          await supabase.from('user_roles').insert([{ user_id: userId, can_manage_questions: !currentStatus }]);
+        }
+      }
+      fetchUsersInfo();
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleToggleManageResources = async (userId: string, currentStatus: boolean) => {
+    if (userRole !== 'admin') return;
+    try {
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
+      if (!error && data) {
+        await supabase.from('user_roles').update({ can_manage_resources: !currentStatus }).eq('user_id', userId);
+      } else {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
+        if (!errorById && dataById) {
+          await supabase.from('user_roles').update({ can_manage_resources: !currentStatus }).eq('id', userId);
+        } else {
+          await supabase.from('user_roles').insert([{ user_id: userId, can_manage_resources: !currentStatus }]);
+        }
+      }
+      fetchUsersInfo();
+    } catch (error) {
+      console.error(error);
     }
   };
 
   const handleDeleteContent = async (id: string) => {
-    const content = allContents.find(c => c.id === id) || userContents.find(c => c.id === id);
+    const content = allContents.find(c => c.id === id) || userContents.find(c => c.id === id) || contents.find(c => c.id === id);
     if (!content) return;
     
-    // Check if admin or owner
-    if (userRole !== 'admin' && content.authorId !== user?.uid) return;
+    // Check if admin, has upload permission, or owner
+    if (!canUpload && userRole !== 'admin' && content.authorId !== user?.id) return;
     
     setDeletingId(id);
+    setDeletingCategory(content.category);
     setUploadError(null);
   };
 
   const confirmDeleteContent = async (id: string) => {
-    console.log("Attempting to delete post with ID:", id);
+    console.log("Attempting to delete post with ID:", id, "Category:", deletingCategory);
+    if (!deletingCategory) {
+      setUploadError("Category unknown. Cannot delete.");
+      return;
+    }
     setIsDeleting(true);
     setUploadError(null);
     try {
-      await deleteDoc(doc(db, 'contents', id));
+      await supabaseService.deleteContent(id, deletingCategory);
+      
+      // Manually update states for instant UI feedback
+      setContents(prev => prev.filter(c => c.id !== id));
+      setAllContents(prev => prev.filter(c => c.id !== id));
+      setUserContents(prev => prev.filter(c => c.id !== id));
+      
       setDeletingId(null);
+      setDeletingCategory(null);
     } catch (error: any) {
-      handleFirestoreError(error, OperationType.DELETE, `contents/${id}`);
       setUploadError("Failed to delete post. " + (error.message || "Please try again."));
     } finally {
       setIsDeleting(false);
@@ -5973,11 +6269,69 @@ export default function App() {
     }
   };
 
+  // Autoplay next video in playlist when current YouTube video ends
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (!event.origin.includes("youtube.com")) return;
+      try {
+        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        if (data && data.event === "onStateChange" && data.info === 0) {
+          console.log("YouTube Player API detected video end. Playing next video in playlist!");
+          handleNextVideo();
+        }
+      } catch (e) {
+        // Safe to ignore non-JSON post messages
+      }
+    };
+    
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [activePlaylist, activeVideo, fetchedPlaylistVideos, contents]);
+
+  // Smooth scroll active video element in the playlist sidebar into view
+  useEffect(() => {
+    if (activeVideo) {
+      setTimeout(() => {
+        const activeElement = document.getElementById(`yt-sidebar-item-${activeVideo}`);
+        if (activeElement) {
+          activeElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }, 300);
+    }
+  }, [activeVideo]);
+
   const getDirectImageUrl = (url: string) => {
     if (!url) return '';
-    
-    // If it's already a data URL, return as is
     if (url.startsWith('data:')) return url;
+    
+    // Check if it's a Supabase storage URL
+    const isSupabase = url.includes('.supabase.co/storage/v1/object/public/') || !url.startsWith('http');
+
+    if (isSupabase) {
+      let filePath = url;
+      if (url.startsWith('http')) {
+        const parts = url.split('/storage/v1/object/public/');
+        if (parts.length > 1) {
+          const bucketAndPath = parts[1];
+          const firstSlash = bucketAndPath.indexOf('/');
+          if (firstSlash !== -1) {
+            filePath = bucketAndPath.substring(firstSlash + 1);
+          }
+        }
+      }
+      
+      const cleanPath = filePath.replace(/^\/?resources\//, '');
+      const bucket = 'resources';
+
+      try {
+        const { data: { publicUrl } } = supabase.storage
+          .from(bucket)
+          .getPublicUrl(cleanPath);
+        return publicUrl;
+      } catch (e) {
+        return url;
+      }
+    }
 
     try {
       const urlObj = new URL(url);
@@ -6019,7 +6373,7 @@ export default function App() {
   };
 
   const handleAddExam = async () => {
-    if (userRole !== 'admin') return;
+    if (userRole !== 'admin' && !canUpload) return;
     if (!newExam.title || !newExam.subject) {
       setGlobalError("Title and Subject are required.");
       return;
@@ -6029,43 +6383,77 @@ export default function App() {
     try {
       const examData = {
         title: newExam.title,
-        class: newExam.class,
+        academic_class: newExam.class,
+        academic_group: newExam.academicGroup || 'All',
         subject: newExam.subject,
-        chapter: newExam.chapter || '',
-        chapterNameCustom: newExam.chapterNameCustom || '',
-        examType: newExam.examType || 'mcq',
-        timeLimit: newExam.timeLimit || 30,
-        totalQuestionsToShow: newExam.totalQuestionsToShow || 30,
-        negativeMarking: newExam.negativeMarking || false,
-        negativeValue: newExam.negativeValue || 0.25,
-        createdBy: user?.uid || 'system',
-        isPremium: newExam.isPremium || false,
-        status: newExam.status || 'approved',
-        createdAt: Date.now(),
-        updatedAt: Date.now()
+        chapter: (newExam.chapter === 'All Chapters' || !newExam.chapter) ? null : newExam.chapter,
+        chapter_name_custom: newExam.chapterNameCustom || '',
+        exam_type: newExam.examType || 'mcq',
+        time_limit: newExam.timeLimit || 30,
+        total_questions_to_show: newExam.totalQuestionsToShow || 30,
+        negative_marking: newExam.negativeMarking || false,
+        negative_value: newExam.negativeValue || 0.25,
+        created_by: user?.id,
+        is_premium: newExam.isPremium || false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        status: (canUpload || userRole === 'admin') ? 'approved' : 'pending'
       };
 
       let examId = editingExamId;
 
       if (editingExamId) {
-        await setDoc(doc(db, 'exams', editingExamId), {
-          ...examData,
-          updatedAt: Date.now()
-        }, { merge: true });
+        await supabase
+          .from('exams')
+          .update(examData)
+          .eq('id', editingExamId);
       } else {
-        const docRef = await addDoc(collection(db, 'exams'), examData);
-        examId = docRef.id;
-        await setDoc(docRef, { id: docRef.id }, { merge: true });
+        const { data: createdExam, error: examError } = await supabase
+          .from('exams')
+          .insert([examData])
+          .select()
+          .single();
         
-        // Save temporary questions to the new exam's subcollection
-        for (const q of temporaryQuestions) {
-          const { id, ...qNoId } = q; // don't save the temp random id
-          const qRef = await addDoc(collection(db, 'exams', examId, 'questions'), {
-            ...qNoId,
-            examId: examId,
-            createdAt: Date.now()
-          });
-          await setDoc(qRef, { id: qRef.id }, { merge: true });
+        if (examError) throw examError;
+        examId = createdExam.id;
+        
+        // Save temporary questions
+        if (temporaryQuestions.length > 0) {
+          const questionsData = temporaryQuestions.map((q: any) => ({
+            exam_id: examId,
+            question_text: q.question_text || q.questionText || serializeQuestionText(q.questionText || '', q.question_image),
+            options: q.options,
+            correct_answer: q.correctAnswer !== undefined ? q.correctAnswer : q.correct_answer,
+            explanation: q.explanation,
+            points: q.points || 1,
+            type: q.type || 'mcq',
+            academic_class: newExam.class,
+            academic_group: newExam.academicGroup || 'All',
+            subject: newExam.subject,
+            chapter: (newExam.chapter === 'All Chapters' || !newExam.chapter) ? null : newExam.chapter,
+            question_image: q.question_image || null,
+            option_a_image: q.option_a_image || null,
+            option_b_image: q.option_b_image || null,
+            option_c_image: q.option_c_image || null,
+            option_d_image: q.option_d_image || null
+          }));
+          
+          try {
+            const { error: insertErr } = await supabase.from('questions').insert(questionsData);
+            if (insertErr) throw insertErr;
+          } catch (insertErr) {
+            console.warn("[DB SAVE FALLBACK] Temporary questions column insert failed. Retrying without image columns...", insertErr);
+            const fallbackQuestions = questionsData.map((qData: any) => {
+              const fallbackQ = { ...qData };
+              delete fallbackQ.question_image;
+              delete fallbackQ.option_a_image;
+              delete fallbackQ.option_b_image;
+              delete fallbackQ.option_c_image;
+              delete fallbackQ.option_d_image;
+              return fallbackQ;
+            });
+            await supabase.from('questions').insert(fallbackQuestions);
+          }
         }
       }
 
@@ -6074,11 +6462,10 @@ export default function App() {
       setTemporaryQuestions([]);
       setNewExam({
         title: '',
-        class: 'Class 9',
+        class: dynamicClasses[0]?.name || 'Class 9',
         subject: 'Math',
         chapter: '',
         chapterNameCustom: '',
-        topic: '',
         examType: 'mcq',
         timeLimit: 30,
         totalQuestionsToShow: 30,
@@ -6102,44 +6489,118 @@ export default function App() {
 
     setIsUploading(true);
     try {
-      const qData = {
-        ...newQuestion,
-        createdAt: Date.now()
+      // 1. Process/compress and upload question image
+      let finalQuestionImage = questionImagePreview || '';
+      if (questionImageFile) {
+        const compressed = await compressImage(questionImageFile);
+        finalQuestionImage = await uploadFile(compressed, 'questions');
+      }
+
+      // 2. Process/compress and upload option images
+      const finalOptionImages = [...optionImagePreviews];
+      for (let i = 0; i < 4; i++) {
+        const file = optionImageFiles[i];
+        if (file) {
+          const compressed = await compressImage(file);
+          const url = await uploadFile(compressed, 'questions');
+          finalOptionImages[i] = url;
+        }
+      }
+
+      // 3. Formulate options text/object representation
+      const rawOptionsVal = newQuestion.options || ['', '', '', ''];
+      const serializedOptions = rawOptionsVal.map((optTxt, idx) => {
+        const imgUrl = finalOptionImages[idx];
+        if (imgUrl) {
+          return { text: optTxt, image: imgUrl };
+        }
+        return optTxt;
+      });
+
+      // 4. Formulate serialized question text
+      const serializedQuestionText = serializeQuestionText(newQuestion.questionText, finalQuestionImage || undefined);
+
+      const qData: any = {
+        question_text: serializedQuestionText,
+        type: newQuestion.type || 'mcq',
+        options: serializedOptions,
+        correct_answer: newQuestion.correctAnswer,
+        points: newQuestion.points || 1,
+        academic_class: newQuestion.class,
+        academic_group: newQuestion.academicGroup || 'All',
+        subject: newQuestion.subject,
+        chapter: (newQuestion.chapter === 'All Chapters' || !newQuestion.chapter) ? null : newQuestion.chapter,
+        topic_id: newQuestion.topicId,
+        created_at: new Date().toISOString()
       };
 
-      if (editingExamId) {
-        // Saving directly to exam subcollection
-        if (editingQuestionId) {
-          await setDoc(doc(db, 'exams', editingExamId, 'questions', editingQuestionId), {
-            ...qData,
-            examId: editingExamId,
-            updatedAt: Date.now()
-          }, { merge: true });
+      // Also attach the raw columns to be 100% compliant with schema update
+      qData.question_image = finalQuestionImage || null;
+      qData.option_a_image = finalOptionImages[0] || null;
+      qData.option_b_image = finalOptionImages[1] || null;
+      qData.option_c_image = finalOptionImages[2] || null;
+      qData.option_d_image = finalOptionImages[3] || null;
+
+      try {
+        if (editingExamId) {
+          qData.exam_id = editingExamId;
+          if (editingQuestionId) {
+            const { error } = await supabase.from('questions').update(qData).eq('id', editingQuestionId);
+            if (error) throw error;
+          } else {
+            const { error } = await supabase.from('questions').insert([qData]);
+            if (error) throw error;
+          }
+        } else if (isAddingExam) {
+          const mockWithClientMeta = {
+            ...newQuestion,
+            questionText: newQuestion.questionText,
+            question_image: finalQuestionImage || undefined,
+            option_a_image: finalOptionImages[0] || undefined,
+            option_b_image: finalOptionImages[1] || undefined,
+            option_c_image: finalOptionImages[2] || undefined,
+            option_d_image: finalOptionImages[3] || undefined,
+            options: serializedOptions,
+          };
+          if (editingQuestionId) {
+            setTemporaryQuestions(prev => prev.map(q => q.id === editingQuestionId ? { ...q, ...mockWithClientMeta } as any : q));
+          } else {
+            const tempId = Math.random().toString(36).substring(7);
+            setTemporaryQuestions(prev => [...prev, { ...mockWithClientMeta, id: tempId } as any]);
+          }
         } else {
-          const docRef = await addDoc(collection(db, 'exams', editingExamId, 'questions'), {
-            ...qData,
-            examId: editingExamId
-          });
-          await setDoc(docRef, { id: docRef.id }, { merge: true });
+          // Global bank
+          if (editingQuestionId) {
+            const { error } = await supabase.from('questions').update(qData).eq('id', editingQuestionId);
+            if (error) throw error;
+          } else {
+            const { error } = await supabase.from('questions').insert([qData]);
+            if (error) throw error;
+          }
         }
-      } else if (isAddingExam) {
-        // Adding to temporary list while creating a new exam
-        if (editingQuestionId) {
-          setTemporaryQuestions(prev => prev.map(q => q.id === editingQuestionId ? { ...q, ...qData } as any : q));
+      } catch (dbError: any) {
+        console.warn("[DB SAVE FALLBACK] Direct column save failed. Retrying with parsed fallback...", dbError);
+        
+        const fallbackData = { ...qData };
+        delete fallbackData.question_image;
+        delete fallbackData.option_a_image;
+        delete fallbackData.option_b_image;
+        delete fallbackData.option_c_image;
+        delete fallbackData.option_d_image;
+
+        if (editingExamId) {
+          fallbackData.exam_id = editingExamId;
+          if (editingQuestionId) {
+            await supabase.from('questions').update(fallbackData).eq('id', editingQuestionId);
+          } else {
+            await supabase.from('questions').insert([fallbackData]);
+          }
         } else {
-          const tempId = Math.random().toString(36).substring(7);
-          setTemporaryQuestions(prev => [...prev, { ...qData, id: tempId } as any]);
-        }
-      } else {
-        // Global bank (from the main Questions tab)
-        if (editingQuestionId) {
-          await setDoc(doc(db, 'questions', editingQuestionId), {
-            ...qData,
-            updatedAt: Date.now()
-          }, { merge: true });
-        } else {
-          const docRef = await addDoc(collection(db, 'questions'), qData);
-          await setDoc(docRef, { id: docRef.id }, { merge: true });
+          if (editingQuestionId) {
+            await supabase.from('questions').update(fallbackData).eq('id', editingQuestionId);
+          } else {
+            await supabase.from('questions').insert([fallbackData]);
+          }
         }
       }
 
@@ -6155,58 +6616,76 @@ export default function App() {
         subject: newExam.subject,
         chapter: newExam.chapter
       });
+
+      setQuestionImageFile(null);
+      setQuestionImagePreview(null);
+      setOptionImageFiles([null, null, null, null]);
+      setOptionImagePreviews([null, null, null, null]);
     } catch (error: any) {
       console.error(error);
-      setGlobalError("Failed to save question.");
+      setGlobalError("Failed to save question: " + error.message);
     } finally {
       setIsUploading(false);
     }
   };
   const handleAddExternal = async () => {
-    if (userRole !== 'admin') return;
+    if (userRole !== 'admin' && !canUpload) return;
     if (!newExternal.title || !newExternal.url) {
       setGlobalError("Title and URL are required.");
       return;
     }
 
     setIsUploadingExternal(true);
-    setUploadProgress(0);
     try {
       let finalThumbnail = getDirectImageUrl(newExternal.thumbnail || '');
 
       if (externalThumbnailFile) {
-        finalThumbnail = await uploadFile(externalThumbnailFile, 'external_thumbnails');
+        finalThumbnail = await uploadFile(externalThumbnailFile, '');
       }
 
-      await addDoc(collection(db, 'external_resources'), {
-        ...newExternal,
+      const externalData: any = {
+        title: newExternal.title,
+        description: newExternal.description || '',
+        url: newExternal.url,
+        icon: newExternal.icon || '🌐',
         thumbnail: finalThumbnail,
-        createdAt: Date.now()
-      });
+        chapter: (newExternal.chapter === 'All Chapters' || !newExternal.chapter || (newExternal.chapter as string).toLowerCase() === 'all') ? null : newExternal.chapter,
+        created_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase.from('external_links').insert([externalData]).select().single();
+      if (error) throw error;
+      
+      if (data) {
+        setExternalResources(prev => [data as ExternalResource, ...prev]);
+      }
+      
       setIsAddingExternal(false);
-      setNewExternal({ title: '', description: '', url: '', icon: '🌐', thumbnail: '' });
+      setNewExternal({ title: '', description: '', url: '', icon: '🌐', thumbnail: '', chapter: '' });
       setExternalThumbnailFile(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'external_resources', setGlobalError);
+      setExternalThumbnailPreview(null);
+    } catch (error: any) {
+      setGlobalError(error.message);
     } finally {
       setIsUploadingExternal(false);
     }
   };
-
   const handleDeleteExternal = async (id: string) => {
-    if (userRole !== 'admin') return;
+    if (userRole !== 'admin' && !canUpload) return;
     setDeletingId(id);
-    setUploadError(null);
+    setGlobalError(null);
   };
 
   const confirmDeleteExternal = async () => {
     if (!deletingId) return;
     setIsDeleting(true);
     try {
-      await deleteDoc(doc(db, 'external_resources', deletingId));
+      const { error } = await supabase.from('external_links').delete().eq('id', deletingId);
+      if (error) throw error;
+      setExternalResources(prev => prev.filter(r => r.id !== deletingId));
       setDeletingId(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `external_resources/${deletingId}`, setGlobalError);
+    } catch (error: any) {
+      setGlobalError(error.message);
     } finally {
       setIsDeleting(false);
     }
@@ -6217,7 +6696,7 @@ export default function App() {
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
         <div className="flex flex-col items-center gap-10">
           <div className="bg-black p-10 rounded-[48px] shadow-[0_0_80px_rgba(37,99,235,0.15)] border border-blue-500/10">
-            <img src="/api/v1/files/input_file_0.png" alt="Parodorshhi Logo" className="h-40 sm:h-72 w-auto animate-pulse object-contain brightness-150 contrast-125 drop-shadow-[0_0_30px_rgba(255,255,255,0.4)]" referrerPolicy="no-referrer" />
+            <Logo className="h-40 sm:h-72 w-auto animate-pulse" />
           </div>
           <div className="flex flex-col items-center gap-4">
             <div className="w-48 h-1 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
@@ -6237,20 +6716,17 @@ export default function App() {
 
   if (!user) {
     return (
-      <>
-        {/* Visible reCAPTCHA Container - placed high enough to be seen */}
-        <div id="recaptcha-container" className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[9999] shadow-2xl"></div>
-        <LandingPage 
-          onGoogleLogin={handleLogin} 
-          onEmailLogin={handleEmailLogin} 
-          onEmailSignUp={handleEmailSignUp} 
-          onForgotPassword={handleForgotPassword} 
-          onPhoneSignIn={handlePhoneSignIn}
-          onVerifyOtp={handleVerifyOtp}
-          error={authError} 
-          isLoading={isAuthLoading} 
-        />
-      </>
+      <LandingPage 
+        onGoogleLogin={handleLogin} 
+        onEmailLogin={handleEmailLogin} 
+        onEmailSignUp={handleEmailSignUp as any} 
+        onForgotPassword={handleForgotPassword} 
+        onPhoneSignIn={handlePhoneSignIn}
+        onVerifyOtp={handleVerifyOtp}
+        error={authError} 
+        isLoading={isAuthLoading} 
+        dynamicClasses={dynamicClasses}
+      />
     );
   }
 
@@ -6323,13 +6799,7 @@ export default function App() {
               aria-label="Website Logo - Home"
             >
               <div className="absolute -inset-2 bg-blue-500/20 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
-              <img 
-                src="/api/v1/files/input_file_0.png" 
-                alt="Parodorshhi Logo - Home" 
-                className="h-10 sm:h-16 w-auto block object-contain brightness-150 contrast-125 relative z-10 drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]"
-                referrerPolicy="no-referrer"
-                loading="eager"
-              />
+              <Logo className="h-10 sm:h-16 w-auto block relative z-10" alt="Parodorshhi Logo - Home" />
             </motion.button>
           </div>
 
@@ -6406,13 +6876,13 @@ export default function App() {
                 className={`flex items-center gap-2 p-1 pr-3 rounded-full transition-all duration-300 ${isUserMenuOpen ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/40 ring-4 ring-blue-500/10' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
               >
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm overflow-hidden border-2 shadow-inner transition-transform group-active/user:scale-95 ${isUserMenuOpen ? 'border-white/50 bg-white/20' : 'border-blue-500/20 bg-blue-100 dark:bg-blue-900/30 text-blue-600'}`}>
-                  {user.photoURL ? (
-                    <img src={user.photoURL} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  {user.user_metadata?.avatar_url ? (
+                    <img src={user.user_metadata?.avatar_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
-                    user.displayName?.charAt(0) || user.email?.charAt(0)
+                    user.user_metadata?.full_name?.charAt(0) || user.email?.charAt(0)
                   )}
                 </div>
-                <span className="hidden sm:inline text-xs font-black uppercase tracking-widest">{user.displayName?.split(' ')[0]}</span>
+                <span className="hidden sm:inline text-xs font-black uppercase tracking-widest">{user.user_metadata?.full_name?.split(' ')[0]}</span>
                 <ChevronDown size={14} className={`transition-transform duration-300 ${isUserMenuOpen ? 'rotate-180' : ''}`} />
               </button>
 
@@ -6421,18 +6891,20 @@ export default function App() {
                   <>
                     <div className="fixed inset-0 z-[-1]" onClick={() => setIsUserMenuOpen(false)} />
                     <motion.div 
-                      initial={{ opacity: 0, y: 15, scale: 0.9, filter: 'blur(10px)' }}
-                      animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
-                      exit={{ opacity: 0, y: 15, scale: 0.9, filter: 'blur(10px)' }}
+                      initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 6, scale: 0.97 }}
+                      transition={{ duration: 0.12, ease: "easeOut" }}
                       className="absolute right-0 top-full mt-3 z-50 min-w-[240px]"
                     >
                       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] p-2 relative overflow-hidden backdrop-blur-xl">
                         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 to-purple-600" />
                         <div className="px-4 py-4 border-b border-zinc-100 dark:border-zinc-800 mb-2">
-                          <p className="text-sm font-black text-zinc-900 dark:text-white leading-none mb-1.5">{user.displayName}</p>
+                          <p className="text-sm font-black text-zinc-900 dark:text-white leading-none mb-1.5">{user.user_metadata?.full_name}</p>
                           <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest truncate mb-3">{user.email}</p>
                           <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full text-[9px] font-black uppercase tracking-widest">{userRole}</span>
+                            {userRole === 'admin' && <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full text-[9px] font-black uppercase tracking-widest">Admin</span>}
+                            {canUpload && userRole !== 'admin' && <span className="px-2 py-0.5 bg-green-500/10 text-green-500 border border-green-500/20 rounded-full text-[9px] font-black uppercase tracking-widest">Editor</span>}
                             <span className="px-2 py-0.5 bg-green-500/10 text-green-500 border border-green-500/20 rounded-full text-[9px] font-black uppercase tracking-widest">Verified</span>
                           </div>
                         </div>
@@ -6456,7 +6928,7 @@ export default function App() {
                             </div>
                             Leaderboard
                           </button>
-                          {userRole === 'admin' && (
+                          {hasAdminAccess && (
                             <button 
                               onClick={() => { setView('admin'); setIsUserMenuOpen(false); }}
                               className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 rounded-xl transition-all"
@@ -6520,12 +6992,7 @@ export default function App() {
                   aria-label="Website Logo - Home"
                 >
                   <div className="absolute -inset-2 bg-blue-500/10 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
-                  <img 
-                    src="/api/v1/files/input_file_0.png" 
-                    alt="Parodorshhi Logo" 
-                    className="h-12 w-auto object-contain brightness-150 contrast-125 relative z-10"
-                    referrerPolicy="no-referrer"
-                  />
+                  <Logo className="h-12 w-auto relative z-10" />
                 </motion.button>
                 <button 
                   onClick={() => setIsMobileMenuOpen(false)}
@@ -6552,25 +7019,25 @@ export default function App() {
                   <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest pl-4 mb-4">Quick Navigation</p>
                   <button 
                     onClick={() => { setView('home'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all font-bold ${view === 'home' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all font-bold ${view === 'home' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-zinc-700 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                   >
                     <Home size={20} /> Home
                   </button>
                   <button 
                     onClick={() => { setView('dashboard'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all font-bold ${view === 'dashboard' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all font-bold ${view === 'dashboard' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-zinc-700 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                   >
                     <Monitor size={20} /> Dashboard
                   </button>
                   <button 
                     onClick={() => { setView('exam'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all font-bold ${view === 'exam' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all font-bold ${view === 'exam' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-zinc-700 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                   >
                     <ClipboardList size={20} /> Exam Center
                   </button>
                   <button 
                     onClick={() => { handlePremiumExamClick(); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all font-bold ${view === 'premium-exam' ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/20' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                    className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all font-bold ${view === 'premium-exam' ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/20' : 'text-zinc-700 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                   >
                     <Crown size={20} className="text-amber-500" /> Customize Exam
                   </button>
@@ -6584,9 +7051,9 @@ export default function App() {
 
                 <div className="pt-8 border-t border-zinc-200 dark:border-zinc-800">
                   <div className="flex items-center gap-4 px-4 py-2">
-                    <img src={user.photoURL || ''} className="w-12 h-12 rounded-xl border-2 border-blue-500/20" alt="" />
+                    <img src={user.user_metadata?.avatar_url || ''} className="w-12 h-12 rounded-xl border-2 border-blue-500/20" alt="" />
                     <div className="min-w-0">
-                      <p className="text-sm font-black text-zinc-900 dark:text-white truncate">{user.displayName}</p>
+                      <p className="text-sm font-black text-zinc-900 dark:text-white truncate">{user.user_metadata?.full_name}</p>
                       <p className="text-xs text-zinc-500 truncate">{user.email}</p>
                     </div>
                   </div>
@@ -6646,7 +7113,7 @@ export default function App() {
             >
               Saved
             </Button>
-            {userRole === 'admin' && (
+            {hasAdminAccess && (
               <Button 
                 variant="outline" 
                 size="sm" 
@@ -6768,7 +7235,7 @@ export default function App() {
                 setEditingId(null);
                 setNewItem({ 
                   category: 'Notes', 
-                  academicClass: 'Class 9', 
+                  academicClass: dynamicClasses[0]?.name || 'Class 9', 
                   subject: '', 
                   title: '', 
                   description: '', 
@@ -6790,7 +7257,7 @@ export default function App() {
          view === 'admin' ? renderAdminPortal() :
          view === 'dashboard' ? renderUserDashboard() :
          view === 'exam' ? renderExamMode() : 
-         view === 'premium-exam' ? <PremiumExamSection user={user} db={db} dynamicClasses={dynamicClasses} dynamicSubjects={dynamicSubjects} dynamicChapters={dynamicChapters} dynamicTopics={dynamicTopics} /> :
+         view === 'premium-exam' ? <PremiumExamSection user={user} dynamicClasses={dynamicClasses} dynamicSubjects={dynamicSubjects} dynamicChapters={dynamicChapters} dynamicTopics={dynamicTopics} /> :
          view === 'privacy' ? renderPrivacyPolicy() : 
          view === 'terms' ? renderTermsOfService() : 
          view === 'cookies' ? renderCookiePolicy() : (
@@ -6807,7 +7274,7 @@ export default function App() {
             onClick={() => {
               setIsEditing(false);
               setEditingId(null);
-              setNewItem({ category: 'Notes', academicClass: 'Class 9', subject: '', title: '', description: '', url: '', thumbnail: '' });
+              setNewItem({ category: 'Notes', academicClass: dynamicClasses[0]?.name || 'Class 9', subject: '', title: '', description: '', url: '', thumbnail: '' });
               setIsAdding(true);
             }}
             className="fixed bottom-24 lg:bottom-8 right-6 lg:right-8 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-500/40 flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-50 animate-bounce-slow"
@@ -6837,7 +7304,7 @@ export default function App() {
                   setUploadError(null); 
                   setNewItem({ 
                     category: 'Notes', 
-                    academicClass: 'Class 9', 
+                    academicClass: dynamicClasses[0]?.name || 'Class 9', 
                     subject: '', 
                     title: '', 
                     description: '', 
@@ -6856,31 +7323,105 @@ export default function App() {
                 </div>
               )}
               
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest">Category</label>
-                  <select 
-                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white"
-                    value={newItem.category}
-                    onChange={e => setNewItem({...newItem, category: e.target.value as Category})}
-                  >
-                    <option value="Notes">Notes</option>
-                    <option value="Practice Sheet">Practice Sheet</option>
-                    <option value="Books">Books</option>
-                    <option value="Question Papers">Question Papers</option>
-                    <option value="YouTube Classes">YouTube Classes</option>
-                  </select>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest">Category</label>
+                    <select 
+                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white"
+                      value={newItem.category}
+                      onChange={e => setNewItem({...newItem, category: e.target.value as Category})}
+                    >
+                      <option value="Notes">Notes</option>
+                      <option value="Practice Sheet">Practice Sheet</option>
+                      <option value="Books">Books</option>
+                      <option value="Question Papers">Question Papers</option>
+                      <option value="YouTube Classes">YouTube Classes</option>
+                      <option value="External Resources">External Resource</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest">Class</label>
+                    <select 
+                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white font-bold"
+                      value={newItem.academicClass}
+                      onChange={e => {
+                        const newClass = e.target.value as AcademicClass;
+                        setNewItem({
+                          ...newItem, 
+                          academicClass: newClass, 
+                          subject: '', 
+                          chapter: '',
+                          academicGroup: isGroupNeeded(newClass) ? (newItem.academicGroup === 'All' ? 'Science' : newItem.academicGroup) : 'All'
+                        });
+                      }}
+                    >
+                      <option value="">Select Class</option>
+                      {classes.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest">Class</label>
-                  <select 
-                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white font-bold"
-                    value={newItem.academicClass}
-                    onChange={e => setNewItem({...newItem, academicClass: e.target.value as AcademicClass, subject: '', chapter: ''})}
-                  >
-                    <option value="">Select Class</option>
-                    {classes.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+
+                {/* Academic Group Selection (Dynamic) */}
+                {newItem.academicClass && isGroupNeeded(newItem.academicClass as string) && (
+                  <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                    <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest">Academic Group / Stream</label>
+                    <div className="flex flex-wrap gap-2">
+                      {academicGroups.map(g => (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => setNewItem({ ...newItem, academicGroup: g.name })}
+                          className={`flex-1 min-w-[100px] py-3 rounded-xl text-xs font-bold border-2 transition-all ${
+                            newItem.academicGroup === g.name
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-lg'
+                            : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-blue-400'
+                          }`}
+                        >
+                          {g.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Conditional Fields Based on Category */}
+                <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2">
+                  {newItem.category === 'Books' && (
+                    <div className="space-y-2 col-span-2 sm:col-span-1">
+                      <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest">Year</label>
+                      <input 
+                        className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white"
+                        placeholder="e.g. 2024"
+                        value={newItem.year || ''}
+                        onChange={e => setNewItem({...newItem, year: e.target.value})}
+                      />
+                    </div>
+                  )}
+
+                  {newItem.category === 'YouTube Classes' && (
+                    <div className="space-y-2 col-span-2">
+                      <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest">Channel Name</label>
+                      <input 
+                        className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white font-medium"
+                        placeholder="e.g. 10 Minute School"
+                        value={newItem.channelName || ''}
+                        onChange={e => setNewItem({...newItem, channelName: e.target.value})}
+                      />
+                    </div>
+                  )}
+
+                  {newItem.category === 'External Resources' && (
+                    <div className="space-y-2 col-span-2 sm:col-span-1">
+                      <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest">Icon (Emoji/Text)</label>
+                      <input 
+                        className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white"
+                        placeholder="e.g. 📚 or SVG/URL"
+                        value={newItem.icon || ''}
+                        onChange={e => setNewItem({...newItem, icon: e.target.value})}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -6913,14 +7454,36 @@ export default function App() {
                   <select 
                     className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white font-bold"
                     value={newItem.chapter || ''}
-                    onChange={e => setNewItem({...newItem, chapter: e.target.value})}
+                    onChange={e => {
+                      const chapterName = e.target.value;
+                      const matchedChapter = dynamicChapters.find(ch => ch.name === chapterName);
+                      setNewItem({...newItem, chapter: chapterName, chapterId: matchedChapter?.id || '', topicId: ''});
+                    }}
                     disabled={!newItem.subject}
                   >
                     <option value="">Select Chapter</option>
+                    <option value="All Chapters">All Chapters</option>
                     {getChaptersForSubject(newItem.subject as string, newItem.academicClass as string).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                     {!newItem.subject && <option disabled>Choose subject first</option>}
                   </select>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Topic</label>
+                <select 
+                  className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white font-bold"
+                  value={newItem.topicId || ''}
+                  onChange={e => setNewItem({...newItem, topicId: e.target.value})}
+                  disabled={!newItem.chapter || newItem.chapter === 'All Chapters'}
+                >
+                  <option value="">Select Topic</option>
+                  {getTopicsForChapter(newItem.chapter || '', newItem.subject || '', newItem.academicClass as string).map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                  {(!newItem.chapter || newItem.chapter === 'All Chapters') && <option disabled>Select chapter first</option>}
+                  {newItem.chapter && newItem.chapter !== 'All Chapters' && getTopicsForChapter(newItem.chapter || '', newItem.subject || '', newItem.academicClass as string).length === 0 && <option disabled>No topics found</option>}
+                </select>
               </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Content Type</label>
@@ -7160,12 +7723,44 @@ export default function App() {
                   <select 
                     className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white font-bold"
                     value={newPlaylist.academicClass}
-                    onChange={e => setNewPlaylist({...newPlaylist, academicClass: e.target.value as AcademicClass, subject: '', chapter: ''})}
+                    onChange={e => {
+                      const newClass = e.target.value as AcademicClass;
+                      setNewPlaylist({
+                        ...newPlaylist, 
+                        academicClass: newClass, 
+                        subject: '', 
+                        chapter: '',
+                        academicGroup: isGroupNeeded(newClass) ? (newPlaylist.academicGroup === 'All' ? 'Science' : newPlaylist.academicGroup) : 'All'
+                      });
+                    }}
                   >
                     <option value="">Select Class</option>
                     {classes.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
+
+                {/* Academic Group Selection (Playlist) */}
+                {newPlaylist.academicClass && isGroupNeeded(newPlaylist.academicClass as string) && (
+                  <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                    <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest">Academic Group / Stream</label>
+                    <div className="flex flex-wrap gap-2">
+                      {academicGroups.map(g => (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => setNewPlaylist({ ...newPlaylist, academicGroup: g.name })}
+                          className={`flex-1 min-w-[100px] py-3 rounded-xl text-xs font-bold border-2 transition-all ${
+                            newPlaylist.academicGroup === g.name
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-lg'
+                            : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-blue-400'
+                          }`}
+                        >
+                          {g.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -7201,6 +7796,7 @@ export default function App() {
                     disabled={!newPlaylist.subject}
                   >
                     <option value="">Select Chapter</option>
+                    <option value="All Chapters">All Chapters</option>
                     {getChaptersForSubject(newPlaylist.subject as string, newPlaylist.academicClass as string).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                     {!newPlaylist.subject && <option disabled>Choose subject first</option>}
                   </select>
@@ -7360,12 +7956,43 @@ export default function App() {
                   <select 
                     className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white font-bold"
                     value={newQuestion.class}
-                    onChange={e => setNewQuestion({...newQuestion, class: e.target.value as AcademicClass, subject: '', chapter: ''})}
+                    onChange={e => {
+                      const newClass = e.target.value as AcademicClass;
+                      setNewQuestion({
+                        ...newQuestion, 
+                        class: newClass, 
+                        subject: '', 
+                        chapter: '',
+                        academicGroup: isGroupNeeded(newClass) ? (newQuestion.academicGroup === 'All' ? 'Science' : newQuestion.academicGroup) : 'All'
+                      });
+                    }}
                   >
                     <option value="">Select Class</option>
                     {classes.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
+
+                {newQuestion.class && isGroupNeeded(newQuestion.class as string) && (
+                  <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                    <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Academic Group / Stream</label>
+                    <div className="flex flex-wrap gap-2">
+                      {academicGroups.map(g => (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => setNewQuestion({ ...newQuestion, academicGroup: g.name })}
+                          className={`flex-1 min-w-[100px] py-3 rounded-xl text-xs font-bold border-2 transition-all ${
+                            newQuestion.academicGroup === g.name
+                            ? 'bg-blue-600 border-blue-600 text-white shadow-lg'
+                            : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-blue-400'
+                          }`}
+                        >
+                          {g.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Subject</label>
                   <select 
@@ -7391,6 +8018,7 @@ export default function App() {
                     disabled={!newQuestion.subject}
                   >
                     <option value="">Select Chapter</option>
+                    <option value="All Chapters">All Chapters</option>
                     {getChaptersForSubject(newQuestion.subject || '', newQuestion.class as string).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                     {!newQuestion.subject && <option disabled>Choose subject first</option>}
                   </select>
@@ -7442,20 +8070,84 @@ export default function App() {
                 />
               </div>
 
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Question Image (Optional)</label>
+                {questionImagePreview ? (
+                  <div className="relative group border border-zinc-200 dark:border-zinc-700/80 rounded-2xl bg-zinc-50 dark:bg-zinc-950/20 p-4 flex items-center gap-4">
+                    <img 
+                      src={questionImagePreview} 
+                      alt="Question preview" 
+                      className="w-20 h-20 object-contain rounded-xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-90 w-20"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 truncate">Question Attachment</p>
+                      <p className="text-[10px] text-zinc-400 font-bold uppercase">Ready to save</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 hover:text-blue-600 text-xs px-3 py-2 rounded-xl font-bold transition-all">
+                        Replace
+                        <input 
+                          type="file" 
+                          accept="image/png, image/jpeg, image/jpg, image/webp" 
+                          className="hidden" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setQuestionImageFile(file);
+                              setQuestionImagePreview(URL.createObjectURL(file));
+                            }
+                          }}
+                        />
+                      </label>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          setQuestionImageFile(null);
+                          setQuestionImagePreview(null);
+                        }}
+                        className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-blue-500/50 dark:hover:border-blue-500/30 rounded-2xl p-6 bg-zinc-50/50 dark:bg-zinc-950/10 cursor-pointer transition-all hover:bg-blue-50/5 dark:hover:bg-blue-950/5 group text-center">
+                    <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-400 group-hover:text-blue-600 transition-colors shadow-sm mb-2">
+                      <ImageIcon size={20} />
+                    </div>
+                    <span className="text-sm font-bold text-zinc-600 dark:text-zinc-300">Upload diagram / math equation image</span>
+                    <span className="text-[9px] text-zinc-400 mt-1 uppercase tracking-wider">Supports PNG, JPG, WEBP • Auto-compressed</span>
+                    <input 
+                      type="file" 
+                      accept="image/png, image/jpeg, image/jpg, image/webp" 
+                      className="hidden" 
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setQuestionImageFile(file);
+                          setQuestionImagePreview(URL.createObjectURL(file));
+                        }
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+
               {newQuestion.type === 'mcq' && (
                 <div className="space-y-4">
                   <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Options & Correct Answer</label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {newQuestion.options?.map((opt, idx) => (
-                      <div key={idx} className="flex flex-col gap-1">
+                      <div key={idx} className="flex flex-col gap-2 p-4 bg-zinc-50 dark:bg-zinc-950/20 border border-zinc-100 dark:border-zinc-800/80 rounded-[22px]">
                         <div className="flex items-center gap-2">
-                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${newQuestion.correctAnswer === idx ? 'bg-green-600 text-white' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500'}`}>
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${newQuestion.correctAnswer === idx ? 'bg-green-600 text-white' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500'}`}>
                             {String.fromCharCode(65 + idx)}
                           </div>
                           <input 
-                            className={`flex-1 bg-zinc-50 dark:bg-zinc-800 border p-3 rounded-xl outline-none dark:text-white text-sm ${newQuestion.correctAnswer === idx ? 'border-green-500/50 ring-1 ring-green-500/20' : 'border-zinc-200 dark:border-zinc-700'}`}
+                            className={`flex-1 bg-white dark:bg-zinc-900 border p-3 rounded-xl outline-none dark:text-white text-sm ${newQuestion.correctAnswer === idx ? 'border-green-500/50 ring-1 ring-green-500/20' : 'border-zinc-200 dark:border-zinc-700'}`}
                             value={opt}
-                            placeholder={`Option ${String.fromCharCode(65 + idx)}`}
+                            placeholder={`Option ${String.fromCharCode(65 + idx)} text`}
                             onChange={e => {
                               const opts = [...(newQuestion.options || [])];
                               opts[idx] = e.target.value;
@@ -7465,10 +8157,86 @@ export default function App() {
                           <button 
                             type="button"
                             onClick={() => setNewQuestion({...newQuestion, correctAnswer: idx})}
-                            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${newQuestion.correctAnswer === idx ? 'bg-green-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 hover:text-green-500'}`}
+                            className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center transition-all ${newQuestion.correctAnswer === idx ? 'bg-green-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 hover:text-green-500'}`}
                           >
                             <Check size={18} />
                           </button>
+                        </div>
+                        
+                        {/* Option Image Attachment Section */}
+                        <div className="pl-10">
+                          {optionImagePreviews[idx] ? (
+                            <div className="relative group border border-zinc-200/80 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900 p-2.5 flex items-center gap-3">
+                              <img 
+                                src={optionImagePreviews[idx] || undefined} 
+                                alt={`Option ${String.fromCharCode(65 + idx)} preview`} 
+                                className="w-12 h-12 object-contain rounded-lg border border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/40"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[10px] font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wide">Option {String.fromCharCode(65 + idx)} Image</p>
+                                <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-wider">Ready</p>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <label className="cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 hover:text-blue-600 text-[10px] px-2.5 py-1.5 rounded-lg font-bold transition-all">
+                                  Replace
+                                  <input 
+                                    type="file" 
+                                    accept="image/png, image/jpeg, image/jpg, image/webp" 
+                                    className="hidden" 
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        const nextFiles = [...optionImageFiles];
+                                        nextFiles[idx] = file;
+                                        setOptionImageFiles(nextFiles);
+
+                                        const nextPreviews = [...optionImagePreviews];
+                                        nextPreviews[idx] = URL.createObjectURL(file);
+                                        setOptionImagePreviews(nextPreviews);
+                                      }
+                                    }}
+                                  />
+                                </label>
+                                <button 
+                                  type="button" 
+                                  onClick={() => {
+                                    const nextFiles = [...optionImageFiles];
+                                    nextFiles[idx] = null;
+                                    setOptionImageFiles(nextFiles);
+
+                                    const nextPreviews = [...optionImagePreviews];
+                                    nextPreviews[idx] = null;
+                                    setOptionImagePreviews(nextPreviews);
+                                  }}
+                                  className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <label className="flex items-center justify-center gap-2 border border-dashed border-zinc-200 dark:border-zinc-800 hover:border-blue-500/40 rounded-xl py-2 px-3 bg-white dark:bg-zinc-900 cursor-pointer transition-all text-center group">
+                              <ImageIcon size={14} className="text-zinc-400 group-hover:text-blue-500" />
+                              <span className="text-[10px] font-bold text-zinc-500 group-hover:text-zinc-700 dark:group-hover:text-zinc-300">Add Option Image (Optional)</span>
+                              <input 
+                                type="file" 
+                                accept="image/png, image/jpeg, image/jpg, image/webp" 
+                                className="hidden" 
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const nextFiles = [...optionImageFiles];
+                                    nextFiles[idx] = file;
+                                    setOptionImageFiles(nextFiles);
+
+                                    const nextPreviews = [...optionImagePreviews];
+                                    nextPreviews[idx] = URL.createObjectURL(file);
+                                    setOptionImagePreviews(nextPreviews);
+                                  }
+                                }}
+                              />
+                            </label>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -7505,7 +8273,7 @@ export default function App() {
                    </div>
                    <div>
                      <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Exam Leaderboard</h3>
-                     <p className="text-xs text-zinc-500">Class {getClassGroup(firestoreUser?.class || 'Class 9')} Group • Top Performers</p>
+                     <p className="text-xs text-zinc-500">Class {getClassGroup(firestoreUser?.class || dynamicClasses[0]?.name || 'Class 9')} Group • Top Performers</p>
                    </div>
                  </div>
                  <Button variant="ghost" size="icon" onClick={() => setLeaderboardExamId(null)} className="rounded-xl"><X size={20} /></Button>
@@ -7514,19 +8282,19 @@ export default function App() {
                <div className="max-h-[60vh] overflow-y-auto no-scrollbar">
                  <div className="p-6 space-y-3">
                    {allLeaderboards
-                    .filter(e => e.examId === leaderboardExamId && getClassGroup(e.class) === getClassGroup(firestoreUser?.class || 'Class 9'))
+                    .filter(e => e.examId === leaderboardExamId && getClassGroup(e.class) === getClassGroup(firestoreUser?.academicClass || dynamicClasses[0]?.name || 'Class 9'))
                     .sort((a, b) => {
                       if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
                       if (a.timeTaken !== b.timeTaken) return a.timeTaken - b.timeTaken;
-                      return a.firstSubmissionAt - b.firstSubmissionAt;
+                      return new Date(a.firstSubmissionAt).getTime() - new Date(b.firstSubmissionAt).getTime();
                     })
                     .slice(0, 50)
                     .map((entry, idx) => (
                       <div 
                         key={`${entry.id}-${idx}`} 
-                        className={`flex items-center gap-4 p-4 rounded-3xl transition-all border ${entry.userId === auth.currentUser?.uid ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg' : 'bg-zinc-50 dark:bg-zinc-800/50 border-transparent hover:border-zinc-200 dark:hover:border-zinc-700'}`}
+                        className={`flex items-center gap-4 p-4 rounded-3xl transition-all border ${entry.userId === user?.id ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg' : 'bg-zinc-50 dark:bg-zinc-800/50 border-transparent hover:border-zinc-200 dark:hover:border-zinc-700'}`}
                       >
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${idx === 0 ? 'bg-yellow-400 text-yellow-900' : idx === 1 ? 'bg-zinc-300 text-zinc-700' : idx === 2 ? 'bg-orange-300 text-orange-900' : (entry.userId === auth.currentUser?.uid ? 'bg-white/20 text-white' : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-500')}`}>
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${idx === 0 ? 'bg-yellow-400 text-yellow-900' : idx === 1 ? 'bg-zinc-300 text-zinc-700' : idx === 2 ? 'bg-orange-300 text-orange-900' : (entry.userId === user?.id ? 'bg-white/20 text-white' : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-500')}`}>
                           {idx + 1}
                         </div>
                         <img 
@@ -7536,20 +8304,20 @@ export default function App() {
                         />
                         <div className="flex-1 min-w-0">
                           <p className="font-bold truncate text-sm">{entry.userName}</p>
-                          <p className={`text-[10px] ${entry.userId === auth.currentUser?.uid ? 'text-indigo-100' : 'text-zinc-400'}`}>
+                          <p className={`text-[10px] ${entry.userId === user?.id ? 'text-indigo-100' : 'text-zinc-400'}`}>
                             {entry.totalAttempts} Attempts • Class {entry.class}
                           </p>
                         </div>
                         <div className="text-right">
                           <p className="font-black text-sm">{entry.bestScore}</p>
-                          <p className={`text-[10px] tabular-nums ${entry.userId === auth.currentUser?.uid ? 'text-indigo-100' : 'text-zinc-400'}`}>
+                          <p className={`text-[10px] tabular-nums ${entry.userId === user?.id ? 'text-indigo-100' : 'text-zinc-400'}`}>
                             {Math.floor(entry.timeTaken / 60)}:{(entry.timeTaken % 60).toString().padStart(2, '0')}
                           </p>
                         </div>
                       </div>
                     ))}
                     
-                    {allLeaderboards.filter(e => e.examId === leaderboardExamId && getClassGroup(e.class) === getClassGroup(firestoreUser?.class || 'Class 9')).length === 0 && (
+                    {allLeaderboards.filter(e => e.examId === leaderboardExamId && getClassGroup(e.class) === getClassGroup(firestoreUser?.academicClass || dynamicClasses[0]?.name || 'Class 9')).length === 0 && (
                       <div className="py-20 text-center space-y-4">
                         <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
                           <Trophy size={32} />
@@ -7616,12 +8384,43 @@ export default function App() {
                         <select 
                           className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl outline-none dark:text-white text-sm font-bold"
                           value={newExam.class}
-                          onChange={e => setNewExam({...newExam, class: e.target.value as AcademicClass, subject: '', chapter: ''})}
+                          onChange={e => {
+                            const newClass = e.target.value as AcademicClass;
+                            setNewExam({
+                              ...newExam, 
+                              class: newClass, 
+                              subject: '', 
+                              chapter: '',
+                              academicGroup: isGroupNeeded(newClass) ? (newExam.academicGroup === 'All' ? 'Science' : newExam.academicGroup) : 'All'
+                            });
+                          }}
                         >
                           <option value="">Select Class</option>
                           {classes.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </div>
+
+                      {newExam.class && isGroupNeeded(newExam.class as string) && (
+                        <div className="space-y-2 col-span-2 animate-in fade-in slide-in-from-top-2">
+                          <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Academic Group / Stream</label>
+                          <div className="flex flex-wrap gap-2">
+                            {academicGroups.map(g => (
+                              <button
+                                key={g.id}
+                                type="button"
+                                onClick={() => setNewExam({ ...newExam, academicGroup: g.name })}
+                                className={`flex-1 min-w-[100px] py-3 rounded-xl text-xs font-bold border-2 transition-all ${
+                                  newExam.academicGroup === g.name
+                                  ? 'bg-blue-600 border-blue-600 text-white shadow-lg'
+                                  : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-blue-400'
+                                }`}
+                              >
+                                {g.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <div className="space-y-2">
                         <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Subject</label>
                         <select 
@@ -7830,9 +8629,7 @@ export default function App() {
                                 </div>
                                 <div className="flex items-center gap-1">
                                   <button onClick={() => {
-                                    setNewQuestion(q);
-                                    setEditingQuestionId(q.id);
-                                    setIsAddingQuestion(true);
+                                    handleTriggerEditQuestion(q);
                                   }} className="p-2 text-zinc-400 hover:text-blue-500"><Pencil size={14} /></button>
                                   <button onClick={() => {
                                     handleDeleteQuestion(q.id, editingExamId || 'temp');
@@ -7877,87 +8674,11 @@ export default function App() {
         )}
 
         {activePdf && (
-          <div className={`fixed inset-0 z-[100] flex items-center justify-center ${isPdfFullScreen ? 'p-0' : 'p-4'} bg-black/80 backdrop-blur-sm transition-all duration-300`}>
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className={`bg-white dark:bg-zinc-900 ${isPdfFullScreen ? 'w-full h-full rounded-none' : 'rounded-3xl w-full max-w-5xl h-[90vh]'} flex flex-col overflow-hidden relative transition-all duration-300 shadow-2xl`}
-            >
-              <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-900 z-30">
-                <div className="flex items-center gap-3">
-                  <h3 className="font-bold dark:text-white truncate max-w-[150px] sm:max-w-md">
-                    {activePdf.isRestricted ? 'Practice Sheet (Read Only)' : 'PDF Preview'}
-                  </h3>
-                  {activePdf.isRestricted && (
-                    <Badge className="bg-red-500/10 text-red-500 border border-red-500/20 text-[9px] py-1 shrink-0">No Downloads</Badge>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    onClick={() => setIsPdfFullScreen(!isPdfFullScreen)}
-                    className="rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                  >
-                    {isPdfFullScreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    onClick={() => {
-                      setActivePdf(null);
-                      setIsPdfFullScreen(false);
-                    }}
-                    className="rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 text-zinc-500 hover:text-red-500"
-                  >
-                    <X size={20} />
-                  </Button>
-                </div>
-              </div>
-              <div className="flex-1 relative bg-zinc-100 dark:bg-zinc-800/50 flex flex-col overflow-hidden">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center space-y-3">
-                    <RefreshCcw className="animate-spin text-zinc-300 dark:text-zinc-700 mx-auto" size={48} />
-                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-[0.2em]">Loading Document...</p>
-                  </div>
-                </div>
-                <div className={`flex-1 w-full relative z-10 transition-all duration-500 ${activePdf.isRestricted ? 'overflow-hidden' : ''}`}>
-                  <iframe 
-                    src={activePdf.isRestricted 
-                      ? (activePdf.url.includes('drive.google.com') ? getEmbedUrl(activePdf.url) : `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(activePdf.url)}`)
-                      : getEmbedUrl(activePdf.url)} 
-                    className={`w-full h-full border-none transition-transform duration-500 ${activePdf.isRestricted ? 'h-[calc(100%+60px)] -mt-[60px]' : ''}`}
-                    allow="autoplay; fullscreen"
-                    allowFullScreen
-                    onContextMenu={(e) => activePdf.isRestricted && e.preventDefault()}
-                  />
-                </div>
-                
-                {activePdf.isRestricted && (
-                   <>
-                     {/* Interaction Shields: Prevents clicking in sensitive areas */}
-                     <div className="absolute top-0 left-0 right-0 h-20 z-20 cursor-default bg-transparent" />
-                     <div className="absolute bottom-0 right-0 w-32 h-20 z-20 cursor-default bg-transparent" />
-
-                     <div className="absolute top-4 right-4 z-30 pointer-events-none">
-                        <div className="bg-zinc-900/95 text-white text-[9px] sm:text-[10px] px-2 sm:px-3 py-1 sm:py-1.5 rounded-full font-black uppercase tracking-widest backdrop-blur-md border border-white/10 shadow-2xl flex items-center gap-1 sm:gap-2">
-                          <div className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-red-500 rounded-full animate-pulse" />
-                          Secure Read Mode
-                        </div>
-                     </div>
-                   </>
-                )}
-              </div>
-              {activePdf.isRestricted && (
-                <div className="p-3 bg-red-50 dark:bg-red-900/20 border-t border-red-100 dark:border-red-900/40 text-center">
-                  <p className="text-[10px] sm:text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-widest">
-                    Downloads are disabled for practice sheets. You can read, study, and take screenshots for reference.
-                  </p>
-                </div>
-              )}
-            </motion.div>
-          </div>
+          <PdfViewer 
+            url={activePdf.url}
+            isRestricted={activePdf.isRestricted}
+            onClose={() => setActivePdf(null)}
+          />
         )}
 
         {(activeVideo || activePlaylist) && (
@@ -8000,13 +8721,10 @@ export default function App() {
                   {(activeVideo || (activePlaylist && activePlaylist.type === 'youtube')) ? (
                     <iframe 
                       src={(() => {
-                        const videoId = activeVideo || '';
-                        const playlistId = activePlaylist?.youtubePlaylistId;
-                        let baseUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1`;
+                        const videoId = getYouTubeId(activeVideo || '');
+                        let baseUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1`;
                         if (activePlaylist) {
-                          if (activePlaylist.type === 'youtube' && playlistId) {
-                            baseUrl += `&listType=playlist&list=${playlistId}`;
-                          } else if (activePlaylist.type === 'custom' && activePlaylist.videoIds) {
+                          if (activePlaylist.type === 'custom' && activePlaylist.videoIds) {
                             const ids = contents
                               .filter(c => activePlaylist.videoIds?.includes(c.id))
                               .map(c => getYouTubeId(c.url))
@@ -8055,7 +8773,7 @@ export default function App() {
                                 {currentVideo.subject || activePlaylist?.subject}
                               </Badge>
                               <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none text-[10px] font-black uppercase">
-                                {currentVideo.academicClass || activePlaylist?.academicClass}
+                                {currentVideo.academic_class || activePlaylist?.academic_class}
                               </Badge>
                             </div>
                           </div>
@@ -8163,6 +8881,7 @@ export default function App() {
                             return (
                               <button
                                 key={index}
+                                id={`yt-sidebar-item-${ytId}`}
                                 onClick={() => setActiveVideo(ytId)}
                                 className={`w-full flex items-center gap-3 p-2.5 rounded-2xl transition-all text-left group relative overflow-hidden ${
                                   isActive 
@@ -8195,10 +8914,15 @@ export default function App() {
                                   <p className={`text-[11px] font-black leading-tight mb-1 line-clamp-2 ${isActive ? 'text-white' : 'text-zinc-900 dark:text-zinc-100'}`}>
                                     {video.title}
                                   </p>
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     <Badge className={`px-1.5 py-0 border-none text-[8px] font-black uppercase tracking-tighter ${isActive ? 'bg-white/20 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}`}>
                                       YouTube
                                     </Badge>
+                                    {video.duration && (
+                                      <Badge className={`px-1.5 py-0 border-none text-[8px] font-black tracking-tighter ${isActive ? 'bg-white/20 text-white' : 'bg-blue-600/10 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400'}`}>
+                                        {video.duration}
+                                      </Badge>
+                                    )}
                                   </div>
                                 </div>
                                 {isActive && (
@@ -8239,6 +8963,7 @@ export default function App() {
                           return (
                             <button
                               key={`${videoId}-${index}`}
+                              id={`yt-sidebar-item-${ytId}`}
                               onClick={() => setActiveVideo(ytId)}
                               className={`w-full flex items-center gap-3 p-2.5 rounded-2xl transition-all text-left group relative overflow-hidden ${
                                 isActive 
@@ -8461,36 +9186,7 @@ export default function App() {
                       <div className="space-y-2">
                         <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Target Chapter</label>
                         <input 
-                          className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white"
-                          placeholder="e.g. Chapter 1 or All"
-                          value={newExternal.chapter || ''}
-                          onChange={e => setNewExternal({...newExternal, chapter: e.target.value})}
-                        />
-                      </div>
-                    </div>
-
-              <div className="flex gap-3 pt-4">
-                <Button 
-                  variant="outline" 
-                  className="flex-1 py-4 rounded-2xl" 
-                  onClick={() => setIsAddingExternal(false)}
-                  disabled={isUploadingExternal}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  className="flex-1 py-4 bg-blue-600 hover:bg-blue-700 rounded-2xl" 
-                  onClick={handleAddExternal}
-                  disabled={isUploadingExternal}
-                >
-                  {isUploadingExternal ? <RefreshCcw className="animate-spin" size={20} /> : 'Save Link'}
-                </Button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
-        {isFeedbackOpen && (
+              {isFeedbackOpen && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -8501,6 +9197,51 @@ export default function App() {
               <div className="flex items-center justify-between">
                 <h3 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">Send Feedback</h3>
                 <Button variant="ghost" size="icon" onClick={() => setIsFeedbackOpen(false)}><X size={20} /></Button>
+              </div>
+              
+              {!user ? (
+                <div className="text-center p-6 bg-zinc-50 dark:bg-zinc-800/40 rounded-2xl border border-zinc-100 dark:border-zinc-800 space-y-4">
+                  <div className="w-12 h-12 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto text-indigo-500">
+                    <Lock size={22} />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-black text-zinc-900 dark:text-white">Account Required</h4>
+                    <p className="text-xs text-zinc-500 max-w-[280px] mx-auto leading-relaxed">To prevent spam, feedback submission requires a registered student account. Please sign in to tell us what you think.</p>
+                  </div>
+                  <Button 
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-xs font-bold shadow-lg shadow-blue-500/20 active:scale-95 duration-200"
+                    onClick={() => {
+                      setIsFeedbackOpen(false);
+                      handleLogin();
+                    }}
+                  >
+                    Continue with Google
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-zinc-500 font-medium">Your feedback helps us improve Parodorshhi for everyone.</p>
+                  <textarea 
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl outline-none dark:text-white min-h-[150px] text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all placeholder:text-zinc-400"
+                    placeholder="Tell us what you think..."
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                  />
+                  <div className="flex gap-3">
+                    <Button variant="outline" className="flex-1 py-4 rounded-2xl" onClick={() => setIsFeedbackOpen(false)}>Cancel</Button>
+                    <Button 
+                      className="flex-1 py-4 bg-blue-600 hover:bg-blue-700 rounded-2xl text-white font-bold" 
+                      onClick={handleSendFeedback}
+                      disabled={isSendingFeedback || !feedbackText.trim()}
+                    >
+                      {isSendingFeedback ? <RefreshCcw className="animate-spin" size={20} /> : 'Submit'}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </div>
+        )}iant="ghost" size="icon" onClick={() => setIsFeedbackOpen(false)}><X size={20} /></Button>
               </div>
               <p className="text-sm text-zinc-500 font-medium">Your feedback helps us improve Parodorshhi for everyone.</p>
               <textarea 
@@ -8564,7 +9305,7 @@ export default function App() {
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.1em]">Time Limit</span>
-                      <span className="text-xs font-bold text-blue-600">{examPrep.timeLimit} Minutes</span>
+                      <span className="text-xs font-bold text-blue-600">{examPrep.time_limit} Minutes</span>
                     </div>
                   </div>
 

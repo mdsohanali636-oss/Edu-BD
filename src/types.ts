@@ -1,17 +1,19 @@
 export type Category = 'Notes' | 'Books' | 'Question Papers' | 'YouTube Classes' | 'External Resources' | 'Practice Sheet';
-export type AcademicClass = 'Class 6' | 'Class 7' | 'Class 8' | 'Class 9' | 'Class 10' | 'Class 11' | 'Class 12' | 'SSC' | 'HSC' | 'Admission' | 'Job Prep' | 'General' | 'Engineering Admission-science' | 'Medical Admission-science' | 'Varsity Admission-science' | 'Varsity Admission-humanities' | 'Varsity Admission-commerce';
+export type AcademicClass = string;
 
 export interface UserProfile {
-  uid: string;
+  id: string;
   name: string;
   email: string;
+  photoURL?: string;
   phoneNumber?: string;
-  class: AcademicClass;
+  academicClass: AcademicClass;
+  academicGroup?: string;
   role: 'user' | 'admin';
   hasPremiumAccess: boolean;
-  premiumExpiry?: number;
+  premiumExpiry?: string | null;
   canUpload?: boolean;
-  createdAt: number;
+  createdAt: string;
 }
 
 export interface ContentItem {
@@ -20,24 +22,38 @@ export interface ContentItem {
   description: string;
   category: Category;
   academicClass: AcademicClass;
+  academic_class?: AcademicClass; // Compatibility
   subject: string;
-  url: string; // PDF URL or YouTube Video ID or External Link
+  academicGroup?: string;
+  academic_group?: string; // Compatibility
+  url: string; // Dynamic URL (PDF, Video ID, Link)
   thumbnail?: string;
-  year?: string;
-  author?: string;
-  channelName?: string; // For YouTube
+  thumbnail_url?: string; // Compatibility
+  year?: string;          // Books only
+  channelName?: string;   // YouTube Classes only
+  icon?: string;          // External Link only
+  authorName?: string;
   authorId?: string;
+  author_id?: string;     // Compatibility
   status: 'pending' | 'approved' | 'rejected';
   chapter?: string;
+  chapterId?: string;
+  chapter_id?: string;    // Compatibility
+  topicId?: string;
+  topic_id?: string;      // Compatibility
   tags?: string[];
-  createdAt: number;
+  createdAt: string;
+  created_at?: string;    // Compatibility
   isPremium: boolean;
+  is_premium?: boolean;   // Compatibility
+  active?: boolean;
 }
 
 export interface Bookmark {
   id: string;
+  userId: string;
   contentId: string;
-  savedAt: number;
+  createdAt: string;
 }
 
 export interface ExternalResource {
@@ -47,17 +63,32 @@ export interface ExternalResource {
   url: string;
   icon: string;
   thumbnail?: string;
+  category: string;
   chapter?: string;
-  createdAt: number;
+  chapterId?: string;
+  chapter_id?: string;
+  topicId?: string;
+  topic_id?: string;
+  academicClass?: string;
+  academic_class?: string;
+  subject?: string;
+  academicGroup?: string;
+  academic_group?: string;
+  isPremium: boolean;
+  is_premium?: boolean;
+  active: boolean;
+  createdAt: string;
 }
 
 export interface Feedback {
   id: string;
   userId: string;
+  user_id?: string; // Compatibility
   userEmail: string;
   userName: string;
   text: string;
-  createdAt: number;
+  content?: string; // Compatibility
+  createdAt: string;
 }
 
 export interface Playlist {
@@ -65,87 +96,125 @@ export interface Playlist {
   title: string;
   description: string;
   thumbnail: string;
+  thumbnail_url?: string; // Compatibility
   authorId: string;
+  author_id?: string; // Compatibility
   type: 'youtube' | 'custom';
   youtubePlaylistId?: string;
+  youtube_playlist_id?: string; // Compatibility
   videoIds?: string[]; // For custom playlists
+  video_ids?: string[]; // Compatibility
   academicClass: AcademicClass;
+  academic_class?: AcademicClass; // Compatibility
   subject: string;
+  academicGroup?: string;
+  academic_group?: string; // Compatibility
   status: 'pending' | 'approved' | 'rejected';
   chapter?: string;
-  createdAt: number;
+  chapterId?: string;
+  topicId?: string;
+  createdAt: string;
+  created_at?: string; // Compatibility
   isPremium: boolean;
+  is_premium?: boolean; // Compatibility
 }
 
 export interface Question {
   id: string;
   examId: string;
+  exam_id?: string; // Compatibility
   type: 'mcq' | 'written';
   questionText: string;
+  question_text?: string; // Compatibility
   options?: string[];
   correctAnswer?: number | string;
+  correct_answer?: number | string; // Compatibility
   points: number;
   class: AcademicClass;
   subject: string;
+  academicGroup?: string;
+  academic_group?: string; // Compatibility
   chapter: string;
   topicId?: string;
-  createdAt: number;
+  topic_id?: string; // Compatibility
+  createdAt: string;
+  created_at?: string; // Compatibility
+  question_image?: string;
+  option_a_image?: string;
+  option_b_image?: string;
+  option_c_image?: string;
+  option_d_image?: string;
 }
 
 export interface Exam {
   id: string;
   title: string;
+  description?: string;
   class: AcademicClass;
+  academicClass?: AcademicClass; // Compatibility field
+  academic_class?: AcademicClass; // Database field compatibility
   subject: string;
+  academicGroup?: string;
+  academic_group?: string; // Compatibility
   chapter: string;
   chapterNameCustom?: string;
+  chapter_name_custom?: string; // Compatibility
   topicIds?: string[];
-  timeLimit: number; // Added back as it's essential for timer logic
+  timeLimit: number;
+  time_limit?: number; // Compatibility
   examType: 'mcq' | 'written';
+  exam_type?: 'mcq' | 'written'; // Compatibility
   totalQuestionsToShow: number;
+  total_questions_to_show?: number; // Compatibility
+  mcqCount?: number;
+  writtenCount?: number;
   negativeMarking: boolean;
+  negative_marking?: boolean; // Compatibility
   negativeValue: number;
+  negative_value?: number; // Compatibility
   status: 'pending' | 'approved' | 'rejected';
-  createdAt: number;
-  updatedAt?: number;
+  createdAt: string;
+  created_at?: string; // Compatibility
+  updatedAt?: string;
+  updated_at?: string; // Compatibility
   createdBy: string;
+  created_by?: string; // Compatibility
   isPremium: boolean;
+  is_premium?: boolean; // Compatibility
+  questions: Question[];
 }
 
 export interface ExamAttempt {
   id: string;
   userId: string;
   examId: string;
-  answers: (string | number)[]; // The user requested answers[]
+  answers: (string | number)[];
   score: number;
   totalQuestions: number;
   timeTaken: number; // in seconds
-  submittedAt: number;
+  completedAt: string;
   // Internal tracking fields below
   userName: string;
-  userClass: AcademicClass;
-  maxScore: number;
+  userClass: string;
+  totalMarks: number;
   correctCount: number;
   wrongCount: number;
-  unansweredCount: number;
-  startTime: number;
-  examTitle: string;
+  unansweredCount: number; // Corrected typo here
   isPremium?: boolean;
 }
 
 export interface LeaderboardEntry {
   id: string; // userId_examId
-  class: AcademicClass; // Changed from academicClass
+  class: AcademicClass; 
   examId: string;
   userId: string;
   userName: string;
   userPhoto?: string;
   bestScore: number;
   timeTaken: number; // Low time priority
-  lastUpdated: number;
-  // Helpful metadata
+  lastUpdated: string;
   examTitle: string;
-  firstSubmissionAt: number;
+  firstSubmissionAt: string;
   totalAttempts: number;
 }
 
@@ -154,20 +223,22 @@ export interface AcademicClassInfo {
   name: string;
   active: boolean;
   order: number;
-  createdAt: number;
-  updatedAt?: number;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface AcademicSubject {
   id: string;
   name: string;
   classId: string;
+  academicGroup?: string;
+  academic_group?: string; // Compatibility
   active: boolean;
   order: number;
   icon?: string;
   color?: string;
-  createdAt: number;
-  updatedAt?: number;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface AcademicChapter {
@@ -177,8 +248,10 @@ export interface AcademicChapter {
   classId: string;
   active: boolean;
   order: number;
-  createdAt: number;
-  updatedAt?: number;
+  mcqCount?: number;
+  writtenCount?: number;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface AcademicTopic {
@@ -187,13 +260,15 @@ export interface AcademicTopic {
   chapterId: string;
   subjectId: string;
   classId: string;
+  academicGroup?: string;
+  academic_group?: string;
   active: boolean;
   order: number;
   tags?: string[]; // e.g., 'Important', 'Board Favorite'
   mcqCount?: number;
   writtenCount?: number;
-  createdAt: number;
-  updatedAt?: number;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Chapter {
@@ -239,10 +314,12 @@ export interface CustomExamSettings {
 
 export interface ExamTemplate {
   id: string;
-  userId: string;
+  user_id: string;
+  userId?: string; // Compatibility
   name: string;
   settings: CustomExamSettings;
-  createdAt: number;
+  created_at: string;
+  createdAt?: string; // Compatibility
 }
 
 export interface UserAnalytics {
@@ -263,6 +340,14 @@ export interface UserAnalytics {
     traits: string[];
     description: string;
   };
+}
+
+export interface AcademicGroup {
+  id: string;
+  name: string;
+  active: boolean;
+  order: number;
+  createdAt: string;
 }
 
 export enum OperationType {

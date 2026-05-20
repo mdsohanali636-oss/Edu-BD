@@ -16,58 +16,78 @@ import {
   ArrowUpDown,
   Eye,
   EyeOff,
-  Sparkles
+  Sparkles,
+  RefreshCw,
+  RefreshCcw
 } from 'lucide-react';
-import { 
-  collection, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
-  getDocs, 
-  query, 
-  where, 
-  orderBy,
-  Firestore 
-} from 'firebase/firestore';
+import { supabase } from '../../supabaseClient';
 import { AcademicClassInfo, AcademicSubject, AcademicChapter, AcademicTopic } from '../../types';
 import { Button, Card, Badge } from '../ui/Base';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface Props {
-  db: Firestore;
+  // Database handled via global supabase client now
 }
 
-export const AcademicManagement: React.FC<Props> = ({ db }) => {
+export const AcademicManagement: React.FC<Props> = () => {
   const [classes, setClasses] = useState<AcademicClassInfo[]>([]);
   const [subjects, setSubjects] = useState<AcademicSubject[]>([]);
   const [chapters, setChapters] = useState<AcademicChapter[]>([]);
   const [topics, setTopics] = useState<AcademicTopic[]>([]);
+  const [academicGroups, setAcademicGroups] = useState<any[]>([]);
   
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
   
   const [loading, setLoading] = useState(true);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   
   // Modal states
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
+  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
   const [isChapterModalOpen, setIsChapterModalOpen] = useState(false);
   const [isTopicModalOpen, setIsTopicModalOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    show: boolean;
+    type: 'class' | 'group' | 'subject' | 'chapter' | 'topic';
+    id: string;
+    name: string;
+  } | null>(null);
   
   const [editingItem, setEditingItem] = useState<any>(null);
-  const [formData, setFormData] = useState({ name: '', active: true, order: 0 });
+  const [formData, setFormData] = useState({ name: '', active: true, order: 0, academicGroup: 'All' });
   const [topicTags, setTopicTags] = useState<string[]>([]);
 
   useEffect(() => {
     fetchClasses();
+    fetchAcademicGroups();
   }, []);
+
+  const fetchAcademicGroups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('academic_groups')
+        .select('*')
+        .order('order', { ascending: true });
+      if (error) throw error;
+      setAcademicGroups(data || []);
+    } catch (err: any) {
+      console.error("Error fetching academic groups:", err);
+      showStatus('error', "Error fetching groups: " + err.message);
+    }
+  };
 
   useEffect(() => {
     if (selectedClassId) {
       fetchSubjects(selectedClassId);
+      setSelectedSubjectId(null);
+      setChapters([]);
+    } else {
+      setSubjects([]);
       setSelectedSubjectId(null);
       setChapters([]);
     }
@@ -78,23 +98,50 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
       fetchChapters(selectedSubjectId);
       setSelectedChapterId(null);
       setTopics([]);
+    } else {
+      setChapters([]);
+      setSelectedChapterId(null);
+      setTopics([]);
     }
   }, [selectedSubjectId]);
 
   useEffect(() => {
     if (selectedChapterId) {
       fetchTopics(selectedChapterId);
+    } else {
+      setTopics([]);
     }
   }, [selectedChapterId]);
+
+  const showStatus = (type: 'success' | 'error', text: string) => {
+    setStatusMessage({ type, text });
+    setTimeout(() => setStatusMessage(null), 5000);
+  };
 
   const fetchClasses = async () => {
     setLoading(true);
     try {
-      const q = query(collection(db, 'academic_classes'), orderBy('order', 'asc'));
-      const snap = await getDocs(q);
-      setClasses(snap.docs.map(d => ({ id: d.id, ...d.data() } as AcademicClassInfo)));
-    } catch (err) {
+      const { data, error } = await supabase
+        .from('academic_classes')
+        .select('*')
+        .order('order', { ascending: true });
+      if (error) {
+        if (error.code === '42P01') {
+          showStatus('error', "The 'academic_classes' table does not exist. Please run the SQL script I provided.");
+          return;
+        }
+        throw error;
+      }
+      
+      const mapped = (data || []).map(item => ({
+        ...item,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at
+      }));
+      setClasses(mapped as AcademicClassInfo[]);
+    } catch (err: any) {
       console.error("Error fetching classes:", err);
+      showStatus('error', "Error fetching classes: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -102,183 +149,564 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
 
   const fetchSubjects = async (classId: string) => {
     try {
-      const q = query(
-        collection(db, 'subjects'), 
-        where('classId', '==', classId),
-        orderBy('order', 'asc')
-      );
-      const snap = await getDocs(q);
-      setSubjects(snap.docs.map(d => ({ id: d.id, ...d.data() } as AcademicSubject)));
-    } catch (err) {
+      const { data, error } = await supabase
+        .from('subjects')
+        .select('*')
+        .eq('class_id', classId)
+        .order('order', { ascending: true });
+        
+      if (error) {
+        if (error.code === '42P01') {
+          showStatus('error', "The 'subjects' table does not exist. Please create it.");
+          return;
+        }
+        throw error;
+      }
+      
+      const mapped = (data || []).map(item => ({
+        ...item,
+        classId: item.class_id,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at
+      }));
+      setSubjects(mapped as any[]);
+    } catch (err: any) {
       console.error("Error fetching subjects:", err);
+      showStatus('error', "Error fetching subjects: " + err.message);
     }
   };
 
   const fetchChapters = async (subjectId: string) => {
     try {
-      const q = query(
-        collection(db, 'chapters'), 
-        where('subjectId', '==', subjectId),
-        orderBy('order', 'asc')
-      );
-      const snap = await getDocs(q);
-      setChapters(snap.docs.map(d => ({ id: d.id, ...d.data() } as AcademicChapter)));
-    } catch (err) {
+      const { data, error } = await supabase
+        .from('chapters')
+        .select('*')
+        .eq('subject_id', subjectId)
+        .order('order', { ascending: true });
+        
+      if (error) {
+        if (error.code === '42P01') {
+          showStatus('error', "The 'chapters' table does not exist.");
+          return;
+        }
+        throw error;
+      }
+      
+      const mapped = (data || []).map(item => ({
+        ...item,
+        subjectId: item.subject_id,
+        classId: item.class_id,
+        mcqCount: item.mcq_count,
+        writtenCount: item.written_count,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at
+      }));
+      setChapters(mapped as any[]);
+    } catch (err: any) {
       console.error("Error fetching chapters:", err);
+      showStatus('error', "Error fetching chapters: " + err.message);
     }
   };
 
   const fetchTopics = async (chapterId: string) => {
     try {
-      const q = query(
-        collection(db, 'topics'), 
-        where('chapterId', '==', chapterId),
-        orderBy('order', 'asc')
-      );
-      const snap = await getDocs(q);
-      setTopics(snap.docs.map(d => ({ id: d.id, ...d.data() } as AcademicTopic)));
-    } catch (err) {
+      const { data, error } = await supabase
+        .from('topics')
+        .select('*')
+        .eq('chapter_id', chapterId)
+        .order('order', { ascending: true });
+        
+      if (error) {
+        if (error.code === '42P01') {
+          showStatus('error', "The 'topics' table does not exist.");
+          return;
+        }
+        throw error;
+      }
+      
+      const mapped = (data || []).map(item => ({
+        ...item,
+        chapterId: item.chapter_id,
+        subjectId: item.subject_id,
+        classId: item.class_id,
+        mcqCount: item.mcq_count,
+        writtenCount: item.written_count,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at
+      }));
+      setTopics(mapped as any[]);
+    } catch (err: any) {
       console.error("Error fetching topics:", err);
+      showStatus('error', "Error fetching topics: " + err.message);
     }
   };
 
   const handleSaveClass = async () => {
-    if (!formData.name.trim()) return;
+    if (!formData.name.trim()) {
+      showStatus('error', "Please enter a name for the class.");
+      return;
+    }
     
+    setSaveLoading(true);
     try {
       if (editingItem) {
-        await updateDoc(doc(db, 'academic_classes', editingItem.id), {
-          ...formData,
-          updatedAt: Date.now()
-        });
+        const { error } = await supabase
+          .from('academic_classes')
+          .update({
+            name: formData.name,
+            active: formData.active,
+            "order": formData.order,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingItem.id);
+        if (error) throw error;
+        showStatus('success', "Class updated successfully!");
       } else {
-        await addDoc(collection(db, 'academic_classes'), {
-          ...formData,
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        });
+        const { error } = await supabase
+          .from('academic_classes')
+          .insert([{
+            name: formData.name,
+            active: formData.active,
+            "order": formData.order,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
+        if (error) throw error;
+        showStatus('success', "Class added successfully!");
       }
-      fetchClasses();
+      await fetchClasses();
       setIsClassModalOpen(false);
+      setIsGroupModalOpen(false);
       setEditingItem(null);
-      setFormData({ name: '', active: true, order: 0 });
-    } catch (err) {
+      setFormData({ name: '', active: true, order: 0, academicGroup: 'All' });
+    } catch (err: any) {
       console.error("Error saving class:", err);
+      // Check for specific Supabase errors
+      if (err.code === '42501') {
+        showStatus('error', "Permission Denied: Ensure your account has 'admin' role in Supabase profiles table.");
+      } else if (err.code === '23505') {
+        showStatus('error', "A class with this name or order already exists.");
+      } else {
+        showStatus('error', `Save Failed: ${err.message || 'Unknown error'}`);
+      }
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  const handleSaveGroup = async () => {
+    if (!formData.name.trim()) {
+      showStatus('error', "Please enter a group name.");
+      return;
+    }
+    
+    setSaveLoading(true);
+    try {
+      if (editingItem) {
+        const { error } = await supabase
+          .from('academic_groups')
+          .update({
+            name: formData.name,
+            active: formData.active,
+            "order": formData.order
+          })
+          .eq('id', editingItem.id);
+        if (error) throw error;
+        showStatus('success', "Group updated successfully!");
+      } else {
+        const { error } = await supabase
+          .from('academic_groups')
+          .insert([{
+            name: formData.name,
+            active: formData.active,
+            "order": formData.order
+          }]);
+        if (error) throw error;
+        showStatus('success', "Group added successfully!");
+      }
+      await fetchAcademicGroups();
+      setIsGroupModalOpen(false);
+      setEditingItem(null);
+      setFormData({ name: '', active: true, order: 0, academicGroup: 'All' });
+    } catch (err: any) {
+      console.error("Error saving group:", err);
+      showStatus('error', err.message || "Failed to save group.");
+    } finally {
+      setSaveLoading(false);
     }
   };
 
   const handleSaveSubject = async () => {
-    if (!formData.name.trim() || !selectedClassId) return;
+    if (!formData.name.trim()) {
+      showStatus('error', "Please enter a subject name.");
+      return;
+    }
+    if (!selectedClassId) {
+      showStatus('error', "No class selected!");
+      return;
+    }
     
+    setSaveLoading(true);
     try {
-      if (editingItem) {
-        await updateDoc(doc(db, 'subjects', editingItem.id), {
-          ...formData,
-          updatedAt: Date.now()
-        });
-      } else {
-        await addDoc(collection(db, 'subjects'), {
-          ...formData,
-          classId: selectedClassId,
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        });
+      // Normalize selected IDs to ensure they are UUIDs
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      
+      let actualClassId = selectedClassId;
+      if (actualClassId && !uuidRegex.test(actualClassId)) {
+        const found = classes.find(c => c.name === actualClassId);
+        if (found) actualClassId = found.id;
       }
-      fetchSubjects(selectedClassId);
+
+      // Find the actual class UUID
+      const currentClass = classes.find(c => c.id === actualClassId);
+      const finalClassId = currentClass?.id;
+
+      if (!finalClassId) {
+        showStatus('error', "Valid Class selection (UUID) is required to save subjects. Please re-select the class.");
+        setSaveLoading(false);
+        return;
+      }
+
+      if (editingItem) {
+        const { error } = await supabase
+          .from('subjects')
+          .update({
+            name: formData.name,
+            active: formData.active,
+            "order": formData.order,
+            academic_group: formData.academicGroup,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingItem.id);
+        if (error) throw error;
+        showStatus('success', "Subject updated successfully!");
+      } else {
+        const { error } = await supabase
+          .from('subjects')
+          .insert([{
+            name: formData.name,
+            active: formData.active,
+            "order": formData.order,
+            class_id: finalClassId,
+            academic_group: formData.academicGroup,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
+        if (error) throw error;
+        showStatus('success', "Subject added successfully!");
+      }
+      if (finalClassId) await fetchSubjects(finalClassId);
       setIsSubjectModalOpen(false);
       setEditingItem(null);
-      setFormData({ name: '', active: true, order: 0 });
-    } catch (err) {
+      setFormData({ name: '', active: true, order: 0, academicGroup: 'All' });
+    } catch (err: any) {
       console.error("Error saving subject:", err);
+      if (err.code === '42501') {
+        showStatus('error', "Permission Denied: Check your role in Supabase profiles.");
+      } else {
+        showStatus('error', "Failed: " + (err.message || 'Unknown error'));
+      }
+    } finally {
+      setSaveLoading(false);
     }
   };
 
   const handleSaveChapter = async () => {
-    if (!formData.name.trim() || !selectedClassId || !selectedSubjectId) return;
+    if (!formData.name.trim()) {
+      showStatus('error', "Please enter a chapter name.");
+      return;
+    }
+    if (!selectedClassId || !selectedSubjectId) {
+      showStatus('error', "Please select a class and subject first.");
+      return;
+    }
     
+    setSaveLoading(true);
     try {
-      if (editingItem) {
-        await updateDoc(doc(db, 'chapters', editingItem.id), {
-          ...formData,
-          updatedAt: Date.now()
-        });
-      } else {
-        await addDoc(collection(db, 'chapters'), {
-          ...formData,
-          classId: selectedClassId,
-          subjectId: selectedSubjectId,
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        });
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      
+      let actualClassId = selectedClassId;
+      if (actualClassId && !uuidRegex.test(actualClassId)) {
+        const found = classes.find(c => c.name === actualClassId);
+        if (found) actualClassId = found.id;
       }
-      fetchChapters(selectedSubjectId);
+      
+      let actualSubjectId = selectedSubjectId;
+      if (actualSubjectId && !uuidRegex.test(actualSubjectId)) {
+        const found = subjects.find(s => s.name === actualSubjectId);
+        if (found) actualSubjectId = found.id;
+      }
+
+      if (!actualClassId || !actualSubjectId) {
+        showStatus('error', "Valid Class and Subject selection (UUIDs) are required to save chapters.");
+        setSaveLoading(false);
+        return;
+      }
+
+      if (editingItem) {
+        const { error } = await supabase
+          .from('chapters')
+          .update({
+            name: formData.name,
+            active: formData.active,
+            "order": formData.order,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingItem.id);
+        if (error) throw error;
+        showStatus('success', "Chapter updated successfully!");
+      } else {
+        const { error } = await supabase
+          .from('chapters')
+          .insert([{
+            name: formData.name,
+            active: formData.active,
+            "order": formData.order,
+            class_id: actualClassId,
+            subject_id: actualSubjectId,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
+        if (error) throw error;
+        showStatus('success', "Chapter added successfully!");
+      }
+      if (actualSubjectId) await fetchChapters(actualSubjectId);
       setIsChapterModalOpen(false);
       setEditingItem(null);
-      setFormData({ name: '', active: true, order: 0 });
-    } catch (err) {
+      setFormData({ name: '', active: true, order: 0, academicGroup: 'All' });
+    } catch (err: any) {
       console.error("Error saving chapter:", err);
+      if (err.code === '42501') {
+        showStatus('error', "Permission Denied: Check your role in Supabase profiles.");
+      } else {
+        showStatus('error', "Failed: " + (err.message || 'Unknown error'));
+      }
+    } finally {
+      setSaveLoading(false);
     }
   };
 
   const handleSaveTopic = async () => {
-    if (!formData.name.trim() || !selectedClassId || !selectedSubjectId || !selectedChapterId) return;
+    if (!formData.name.trim()) {
+      showStatus('error', "Please enter a topic name.");
+      return;
+    }
+    if (!selectedClassId || !selectedSubjectId || !selectedChapterId) {
+      showStatus('error', "Selection missing! Make sure Class, Subject, and Chapter are selected.");
+      return;
+    }
     
+    setSaveLoading(true);
     try {
-      if (editingItem) {
-        await updateDoc(doc(db, 'topics', editingItem.id), {
-          ...formData,
-          tags: topicTags,
-          updatedAt: Date.now()
-        });
-      } else {
-        await addDoc(collection(db, 'topics'), {
-          ...formData,
-          classId: selectedClassId,
-          subjectId: selectedSubjectId,
-          chapterId: selectedChapterId,
-          tags: topicTags,
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        });
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      let actualClassId = selectedClassId;
+      if (actualClassId && !uuidRegex.test(actualClassId)) {
+        const found = classes.find(c => c.name === actualClassId);
+        if (found) actualClassId = found.id;
       }
-      fetchTopics(selectedChapterId);
+      
+      let actualSubjectId = selectedSubjectId;
+      if (actualSubjectId && !uuidRegex.test(actualSubjectId)) {
+        const found = subjects.find(s => s.name === actualSubjectId);
+        if (found) actualSubjectId = found.id;
+      }
+      
+      let actualChapterId = selectedChapterId;
+      if (actualChapterId && !uuidRegex.test(actualChapterId)) {
+        const found = chapters.find(c => c.name === actualChapterId);
+        if (found) actualChapterId = found.id;
+      }
+
+      if (!actualClassId || !actualSubjectId || !actualChapterId) {
+        showStatus('error', "Selection missing! Make sure Class, Subject, and Chapter are selected.");
+        setSaveLoading(false);
+        return;
+      }
+
+      if (editingItem) {
+        const { error } = await supabase
+          .from('topics')
+          .update({
+            name: formData.name,
+            active: formData.active,
+            "order": formData.order,
+            tags: topicTags,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingItem.id);
+        if (error) throw error;
+        showStatus('success', "Topic updated successfully!");
+      } else {
+        const { error } = await supabase
+          .from('topics')
+          .insert([{
+            name: formData.name,
+            active: formData.active,
+            "order": formData.order,
+            class_id: actualClassId,
+            subject_id: actualSubjectId,
+            chapter_id: actualChapterId,
+            tags: topicTags,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
+        if (error) throw error;
+        showStatus('success', "Topic added successfully!");
+      }
+      if (actualChapterId) await fetchTopics(actualChapterId);
       setIsTopicModalOpen(false);
       setEditingItem(null);
-      setFormData({ name: '', active: true, order: 0 });
+      setFormData({ name: '', active: true, order: 0, academicGroup: 'All' });
       setTopicTags([]);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error saving topic:", err);
+      if (err.code === '42501') {
+        showStatus('error', "Permission Denied: Check your role in Supabase profiles.");
+      } else {
+        showStatus('error', "Failed: " + (err.message || 'Unknown error'));
+      }
+    } finally {
+      setSaveLoading(false);
     }
   };
 
-  const handleDelete = async (type: 'class' | 'subject' | 'chapter' | 'topic', id: string) => {
-    if (!confirm(`Are you sure you want to delete this ${type}? This might affect existing data.`)) return;
+  const handleDelete = async (type: 'class' | 'group' | 'subject' | 'chapter' | 'topic', id: string) => {
+    if (!id) return;
     
+    let actualId = id;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    
+    // If id doesn't look like a UUID, try to find it in our state
+    if (!uuidRegex.test(id)) {
+      if (type === 'class') {
+        const found = classes.find(c => c.name === id || c.id === id);
+        if (found) actualId = found.id;
+      } else if (type === 'group') {
+        const found = academicGroups.find(g => g.name === id || g.id === id);
+        if (found) actualId = found.id;
+      } else if (type === 'subject') {
+        const found = subjects.find(s => s.name === id || s.id === id);
+        if (found) actualId = found.id;
+      } else if (type === 'chapter') {
+        const found = chapters.find(c => c.name === id || c.id === id);
+        if (found) actualId = found.id;
+      } else if (type === 'topic') {
+        const found = topics.find(t => t.name === id || t.id === id);
+        if (found) actualId = found.id;
+      }
+    }
+
+    // Still not a UUID? We can't delete by id.
+    if (!uuidRegex.test(actualId)) {
+      console.error(`Cannot delete ${type}: ID "${actualId}" is not a valid UUID.`);
+      showStatus('error', `Invalid ID format for ${type}. Try refreshing and deleting again.`);
+      setDeleteConfirm(null);
+      return;
+    }
+
+    setLoading(true);
     try {
       const collectionName = 
         type === 'class' ? 'academic_classes' : 
+        type === 'group' ? 'academic_groups' :
         type === 'subject' ? 'subjects' : 
         type === 'chapter' ? 'chapters' : 'topics';
-      await deleteDoc(doc(db, collectionName, id));
+      
+      const { error } = await supabase
+        .from(collectionName)
+        .delete()
+        .eq('id', actualId);
+        
+      if (error) {
+        console.error(`Supabase Delete Error [${error.code}]:`, error.message);
+        throw error;
+      }
+      
+      showStatus('success', `${type.charAt(0).toUpperCase() + type.slice(1)} deleted successfully.`);
       
       if (type === 'class') {
-        fetchClasses();
-        if (selectedClassId === id) setSelectedClassId(null);
+        await fetchClasses();
+        if (selectedClassId === actualId || selectedClassId === id) setSelectedClassId(null);
+      } else if (type === 'group') {
+        await fetchAcademicGroups();
       } else if (type === 'subject') {
-        if (selectedClassId) fetchSubjects(selectedClassId);
-        if (selectedSubjectId === id) setSelectedSubjectId(null);
+        const currentClass = classes.find(c => c.id === selectedClassId || c.name === selectedClassId);
+        const actualClassId = currentClass ? currentClass.id : selectedClassId;
+        if (actualClassId) await fetchSubjects(actualClassId);
+        if (selectedSubjectId === actualId || selectedSubjectId === id) setSelectedSubjectId(null);
       } else if (type === 'chapter') {
-        if (selectedSubjectId) fetchChapters(selectedSubjectId);
-        if (selectedChapterId === id) setSelectedChapterId(null);
+        const currentSubject = subjects.find(s => s.id === selectedSubjectId || s.name === selectedSubjectId);
+        const actualSubjectId = currentSubject ? currentSubject.id : selectedSubjectId;
+        if (actualSubjectId) await fetchChapters(actualSubjectId);
+        if (selectedChapterId === actualId || selectedChapterId === id) setSelectedChapterId(null);
       } else {
-        if (selectedChapterId) fetchTopics(selectedChapterId);
+        const currentChapter = chapters.find(c => c.id === selectedChapterId || c.name === selectedChapterId);
+        const actualChapterId = currentChapter ? currentChapter.id : selectedChapterId;
+        if (actualChapterId) await fetchTopics(actualChapterId);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(`Error deleting ${type}:`, err);
+      if (err.code === '23503') {
+        showStatus('error', `Cannot delete this ${type} because it has dependent items. Please delete its subjects/chapters/topics first.`);
+      } else if (err.code === '42501') {
+        showStatus('error', "Permission Denied: Ensure you have admin rights in your Supabase profile.");
+      } else {
+        showStatus('error', `Delete Failed: ${err.message || 'Unknown database error'}`);
+      }
+    } finally {
+      setLoading(false);
+      setDeleteConfirm(null);
     }
   };
 
-  const renderModal = (type: 'class' | 'subject' | 'chapter' | 'topic', isOpen: boolean, onClose: () => void, onSave: () => void) => {
+  const renderDeleteConfirmationModal = () => {
+    if (!deleteConfirm || !deleteConfirm.show) return null;
+
+    return (
+      <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          className="bg-white dark:bg-zinc-900 rounded-[40px] w-full max-w-md overflow-hidden shadow-2xl border border-red-500/20"
+        >
+          <div className="p-10 space-y-8">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="w-20 h-20 bg-red-500/10 text-red-500 rounded-3xl flex items-center justify-center mb-2">
+                <Trash2 size={40} />
+              </div>
+              <h3 className="text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Confirm Delete?</h3>
+              <p className="text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed">
+                Are you sure you want to delete <span className="text-red-500 font-bold">"{deleteConfirm.name}"</span>? 
+                This action is permanent and might break existing content links.
+              </p>
+            </div>
+            
+            <div className="flex flex-col gap-3">
+              <Button 
+                variant="danger" 
+                onClick={() => handleDelete(deleteConfirm.type, deleteConfirm.id)}
+                disabled={loading}
+                className="w-full rounded-2xl py-7 text-lg font-black uppercase tracking-widest shadow-xl shadow-red-500/20"
+              >
+                {loading ? <RefreshCcw className="animate-spin mr-2" /> : <Trash2 className="mr-2" />}
+                Yes, Delete it
+              </Button>
+              <Button 
+                variant="ghost" 
+                onClick={() => setDeleteConfirm(null)}
+                className="w-full rounded-2xl py-6 font-black uppercase tracking-widest text-zinc-400 hover:text-zinc-600"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  };
+
+  const renderModal = (type: 'class' | 'group' | 'subject' | 'chapter' | 'topic', isOpen: boolean, onClose: () => void, onSave: () => void) => {
     if (!isOpen) return null;
     
     return (
@@ -299,6 +727,73 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
             </div>
             
             <div className="space-y-4">
+              {/* Dropdown selection handling */}
+              {(type === 'subject' || type === 'chapter' || type === 'topic') && (
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2 block">Class</label>
+                  <select 
+                    value={selectedClassId || ''}
+                    onChange={(e) => setSelectedClassId(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-2xl p-4 text-zinc-900 dark:text-white font-bold focus:ring-2 focus:ring-blue-500/20 transition-all appearance-none"
+                  >
+                    <option value="" disabled>Select a class</option>
+                    {classes.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {(type === 'chapter' || type === 'topic') && (
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2 block">Subject</label>
+                  <select 
+                    value={selectedSubjectId || ''}
+                    onChange={(e) => setSelectedSubjectId(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-2xl p-4 text-zinc-900 dark:text-white font-bold focus:ring-2 focus:ring-blue-500/20 transition-all appearance-none"
+                    disabled={!selectedClassId}
+                  >
+                    <option value="" disabled>Select a subject</option>
+                    {subjects.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {type === 'topic' && (
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2 block">Chapter</label>
+                  <select 
+                    value={selectedChapterId || ''}
+                    onChange={(e) => setSelectedChapterId(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-2xl p-4 text-zinc-900 dark:text-white font-bold focus:ring-2 focus:ring-blue-500/20 transition-all appearance-none"
+                    disabled={!selectedSubjectId}
+                  >
+                    <option value="" disabled>Select a chapter</option>
+                    {chapters.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {type === 'subject' && (
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2 block">Academic Group / Stream</label>
+                  <select 
+                    value={formData.academicGroup}
+                    onChange={(e) => setFormData({...formData, academicGroup: e.target.value})}
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-2xl p-4 text-zinc-900 dark:text-white font-bold focus:ring-2 focus:ring-blue-500/20 transition-all appearance-none"
+                  >
+                    <option value="All">All Groups (Common)</option>
+                    {academicGroups.map(g => (
+                      <option key={g.id} value={g.name}>{g.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2 block">Name</label>
                 <input 
@@ -364,7 +859,12 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
             
             <div className="flex gap-4 pt-4">
               <Button variant="ghost" onClick={onClose} className="flex-1 rounded-2xl py-6 font-black uppercase tracking-widest">Cancel</Button>
-              <Button onClick={onSave} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl py-6 font-black uppercase tracking-widest shadow-xl shadow-blue-500/20">
+              <Button 
+                onClick={onSave} 
+                disabled={saveLoading}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl py-6 font-black uppercase tracking-widest shadow-xl shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {saveLoading ? <RefreshCcw size={18} className="animate-spin mr-2" /> : (editingItem ? <Pencil size={18} className="mr-2" /> : <Save size={18} className="mr-2" />)}
                 {editingItem ? 'Update' : 'Save'} {type}
               </Button>
             </div>
@@ -376,8 +876,104 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+      {/* Floating Status Message */}
+      <AnimatePresence>
+        {statusMessage && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className={`fixed top-4 right-4 z-[200] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 font-bold border ${
+              statusMessage.type === 'success' 
+                ? 'bg-emerald-500 text-white border-emerald-400' 
+                : 'bg-red-500 text-white border-red-400'
+            }`}
+          >
+            {statusMessage.type === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
+            {statusMessage.text}
+            <button onClick={() => setStatusMessage(null)} className="ml-4 opacity-70 hover:opacity-100">
+              <X size={16} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
         
+        {/* Groups Column */}
+        <div className="space-y-6">
+          <div className="flex items-center justify-between px-2">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-amber-500/10 text-amber-600 rounded-xl flex items-center justify-center">
+                <Sparkles size={20} />
+              </div>
+              <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Groups</h3>
+            </div>
+            <Button 
+              size="sm" 
+              onClick={() => {
+                setEditingItem(null);
+                setFormData({ name: '', active: true, order: academicGroups.length, academicGroup: 'All' });
+                setIsGroupModalOpen(true);
+              }}
+              className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl"
+            >
+              <Plus size={18} />
+            </Button>
+          </div>
+          
+          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
+            {academicGroups.length === 0 ? (
+              <div className="p-8 text-center bg-zinc-50 dark:bg-zinc-800/50 rounded-[32px] border border-zinc-100 dark:border-zinc-800">
+                <p className="text-zinc-500 text-[10px] font-bold">No groups found.</p>
+              </div>
+            ) : (
+              academicGroups.map((group) => (
+                <div 
+                  key={group.id}
+                  className="w-full p-4 rounded-[24px] text-left transition-all border group bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 text-zinc-900 dark:text-white hover:border-amber-500/50"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-black opacity-40">#{group.order}</span>
+                      <span className="font-bold tracking-tight text-sm">{group.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                       <div className="flex transition-opacity opacity-0 group-hover:opacity-100">
+                         <button 
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             setEditingItem(group);
+                             setFormData({ name: group.name, active: group.active, order: group.order, academicGroup: 'All' });
+                             setIsGroupModalOpen(true);
+                           }}
+                           className="p-1.5 hover:bg-amber-500/10 text-zinc-400 rounded-lg hover:text-amber-600"
+                         >
+                           <Pencil size={12} />
+                         </button>
+                         <button 
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             setDeleteConfirm({
+                               show: true,
+                               type: 'group',
+                               id: group.id,
+                               name: group.name
+                             });
+                           }}
+                           className="p-1.5 hover:bg-red-500/10 text-zinc-400 rounded-lg hover:text-red-600"
+                         >
+                           <Trash2 size={12} />
+                         </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
         {/* Classes Column */}
         <div className="space-y-6">
           <div className="flex items-center justify-between px-2">
@@ -391,7 +987,7 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
               size="sm" 
               onClick={() => {
                 setEditingItem(null);
-                setFormData({ name: '', active: true, order: classes.length });
+                setFormData({ name: '', active: true, order: classes.length, academicGroup: 'All' });
                 setIsClassModalOpen(true);
               }}
               className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl"
@@ -401,50 +997,61 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
           </div>
           
           <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
-            {classes.map((cls) => (
-              <div 
-                key={cls.id}
-                onClick={() => setSelectedClassId(cls.id)}
-                className={`w-full p-4 rounded-[24px] text-left transition-all border group cursor-pointer ${
-                  selectedClassId === cls.id 
-                    ? 'bg-blue-600 border-blue-500 text-white shadow-xl shadow-blue-500/20' 
-                    : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 text-zinc-900 dark:text-white hover:border-blue-500/50'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-black opacity-40">#{cls.order}</span>
-                    <span className="font-bold tracking-tight text-sm">{cls.name}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingItem(cls);
-                          setFormData({ name: cls.name, active: cls.active, order: cls.order });
-                          setIsClassModalOpen(true);
-                        }}
-                        className={`p-1.5 hover:bg-white/20 rounded-lg ${selectedClassId === cls.id ? 'text-white' : 'text-zinc-400'}`}
-                      >
-                        <Pencil size={12} />
-                      </button>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete('class', cls.id);
-                        }}
-                        className={`p-1.5 hover:bg-white/20 rounded-lg ${selectedClassId === cls.id ? 'text-white' : 'text-zinc-400'}`}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                    <ChevronRight size={16} className={selectedClassId === cls.id ? 'text-white' : 'text-zinc-300'} />
-                  </div>
-                </div>
+            {classes.length === 0 ? (
+              <div className="p-8 text-center bg-zinc-50 dark:bg-zinc-800/50 rounded-[32px] border border-zinc-100 dark:border-zinc-800">
+                <p className="text-zinc-500 text-[10px] font-bold">No classes found. Add one to start.</p>
               </div>
-            ))}
-          </div>
+            ) : (
+              classes.map((cls) => (
+                <div 
+                  key={cls.id}
+                  onClick={() => setSelectedClassId(cls.id)}
+                  className={`w-full p-4 rounded-[24px] text-left transition-all border group cursor-pointer ${
+                    selectedClassId === cls.id 
+                      ? 'bg-blue-600 border-blue-500 text-white shadow-xl shadow-blue-500/20' 
+                      : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800 text-zinc-900 dark:text-white hover:border-blue-500/50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] font-black opacity-40">#{cls.order}</span>
+                      <span className="font-bold tracking-tight text-sm">{cls.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className={`flex transition-opacity ${selectedClassId === cls.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingItem(cls);
+                              setFormData({ name: cls.name, active: cls.active, order: cls.order, academicGroup: 'All' });
+                              setIsClassModalOpen(true);
+                            }}
+                            className={`p-1.5 hover:bg-white/20 rounded-lg ${selectedClassId === cls.id ? 'text-white' : 'text-zinc-400'}`}
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirm({
+                                show: true,
+                                type: 'class',
+                                id: cls.id,
+                                name: cls.name
+                              });
+                            }}
+                            className={`p-1.5 hover:bg-white/20 rounded-lg ${selectedClassId === cls.id ? 'text-white' : 'text-zinc-400'}`}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                        <ChevronRight size={16} className={selectedClassId === cls.id ? 'text-white' : 'text-zinc-300'} />
+                      </div>
+                    </div>
+                  </div>
+    ))
+  )}
+</div>
         </div>
 
         {/* Subjects Column */}
@@ -461,7 +1068,7 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
                 size="sm" 
                 onClick={() => {
                   setEditingItem(null);
-                  setFormData({ name: '', active: true, order: subjects.length });
+                  setFormData({ name: '', active: true, order: subjects.length, academicGroup: 'All' });
                   setIsSubjectModalOpen(true);
                 }}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl"
@@ -473,8 +1080,17 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
           
           <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
             {!selectedClassId ? (
+              <div className="p-10 text-center bg-zinc-50 dark:bg-zinc-800/20 rounded-[32px] border border-dashed border-zinc-200 dark:border-zinc-800">
+                <div className="w-12 h-12 bg-white dark:bg-zinc-800 rounded-2xl shadow-sm flex items-center justify-center mx-auto mb-4">
+                  <BookOpen size={24} className="text-zinc-300" />
+                </div>
+                <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest leading-relaxed">
+                  Select a Class<br/>to manage Subjects
+                </p>
+              </div>
+            ) : subjects.length === 0 ? (
               <div className="p-8 text-center bg-zinc-50 dark:bg-zinc-800/50 rounded-[32px] border border-zinc-100 dark:border-zinc-800">
-                <p className="text-zinc-500 text-[10px] font-bold">Select class</p>
+                <p className="text-zinc-500 text-[10px] font-bold">No subjects found for this class.</p>
               </div>
             ) : (
               subjects.map((sub) => (
@@ -493,24 +1109,28 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
                       <span className="font-bold tracking-tight text-sm">{sub.name}</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
                             setEditingItem(sub);
-                            setFormData({ name: sub.name, active: sub.active, order: sub.order });
+                            setFormData({ name: sub.name, active: sub.active, order: sub.order, academicGroup: sub.academicGroup || (sub as any).academic_group || 'All' });
                             setIsSubjectModalOpen(true);
                           }}
-                          className={`p-1.5 rounded-lg ${selectedSubjectId === sub.id ? 'text-white' : 'text-zinc-400'}`}
+                          className={`p-1.5 rounded-lg ${selectedSubjectId === sub.id ? 'text-white' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                         >
                           <Pencil size={12} />
                         </button>
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDelete('subject', sub.id);
+                            setDeleteConfirm({
+                              show: true,
+                              type: 'subject',
+                              id: sub.id,
+                              name: sub.name
+                            });
                           }}
-                          className={`p-1.5 rounded-lg ${selectedSubjectId === sub.id ? 'text-white' : 'text-zinc-400'}`}
+                          className={`p-1.5 rounded-lg ${selectedSubjectId === sub.id ? 'text-white' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                         >
                           <Trash2 size={12} />
                         </button>
@@ -518,8 +1138,8 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
                       <ChevronRight size={16} className={selectedSubjectId === sub.id ? 'text-white' : 'text-zinc-300'} />
                     </div>
                   </div>
-                </div>
-              ))
+                )
+              )
             )}
           </div>
         </div>
@@ -538,7 +1158,7 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
                 size="sm" 
                 onClick={() => {
                   setEditingItem(null);
-                  setFormData({ name: '', active: true, order: chapters.length });
+                  setFormData({ name: '', active: true, order: chapters.length, academicGroup: 'All' });
                   setIsChapterModalOpen(true);
                 }}
                 className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl"
@@ -550,8 +1170,13 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
           
           <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
             {!selectedSubjectId ? (
-              <div className="p-8 text-center bg-zinc-50 dark:bg-zinc-800/50 rounded-[32px] border border-zinc-100 dark:border-zinc-800">
-                <p className="text-zinc-500 text-[10px] font-bold">Select subject</p>
+              <div className="p-10 text-center bg-zinc-50 dark:bg-zinc-800/20 rounded-[32px] border border-dashed border-zinc-200 dark:border-zinc-800">
+                <div className="w-12 h-12 bg-white dark:bg-zinc-800 rounded-2xl shadow-sm flex items-center justify-center mx-auto mb-4">
+                  <Library size={24} className="text-zinc-300" />
+                </div>
+                <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest leading-relaxed">
+                  Select a Subject<br/>to manage Chapters
+                </p>
               </div>
             ) : (
               chapters.map((ch) => (
@@ -570,12 +1195,12 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
                       <span className="font-bold tracking-tight text-sm">{ch.name}</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className={`flex transition-opacity ${selectedChapterId === ch.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
                             setEditingItem(ch);
-                            setFormData({ name: ch.name, active: ch.active, order: ch.order });
+                            setFormData({ name: ch.name, active: ch.active, order: ch.order, academicGroup: 'All' });
                             setIsChapterModalOpen(true);
                           }}
                           className={`p-1.5 rounded-lg ${selectedChapterId === ch.id ? 'text-white' : 'text-zinc-400'}`}
@@ -585,7 +1210,12 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
                         <button 
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDelete('chapter', ch.id);
+                            setDeleteConfirm({
+                              show: true,
+                              type: 'chapter',
+                              id: ch.id,
+                              name: ch.name
+                            });
                           }}
                           className={`p-1.5 rounded-lg ${selectedChapterId === ch.id ? 'text-white' : 'text-zinc-400'}`}
                         >
@@ -615,7 +1245,7 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
                 size="sm" 
                 onClick={() => {
                   setEditingItem(null);
-                  setFormData({ name: '', active: true, order: topics.length });
+                  setFormData({ name: '', active: true, order: topics.length, academicGroup: 'All' });
                   setTopicTags([]);
                   setIsTopicModalOpen(true);
                 }}
@@ -628,8 +1258,13 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
           
           <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
             {!selectedChapterId ? (
-              <div className="p-8 text-center bg-zinc-50 dark:bg-zinc-800/50 rounded-[32px] border border-zinc-100 dark:border-zinc-800">
-                <p className="text-zinc-500 text-[10px] font-bold">Select chapter</p>
+              <div className="p-10 text-center bg-zinc-50 dark:bg-zinc-800/20 rounded-[32px] border border-dashed border-zinc-200 dark:border-zinc-800">
+                <div className="w-12 h-12 bg-white dark:bg-zinc-800 rounded-2xl shadow-sm flex items-center justify-center mx-auto mb-4">
+                  <Sparkles size={24} className="text-zinc-300" />
+                </div>
+                <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest leading-relaxed">
+                  Select a Chapter<br/>to manage Topics
+                </p>
               </div>
             ) : (
               topics.map((tp) => (
@@ -646,7 +1281,7 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
                       <button 
                         onClick={() => {
                           setEditingItem(tp);
-                          setFormData({ name: tp.name, active: tp.active, order: tp.order });
+                          setFormData({ name: tp.name, active: tp.active, order: tp.order, academicGroup: 'All' });
                           setTopicTags(tp.tags || []);
                           setIsTopicModalOpen(true);
                         }}
@@ -655,7 +1290,12 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
                         <Pencil size={14} />
                       </button>
                       <button 
-                        onClick={() => handleDelete('topic', tp.id)}
+                        onClick={() => setDeleteConfirm({
+                          show: true,
+                          type: 'topic',
+                          id: tp.id,
+                          name: tp.name
+                        })}
                         className="p-1.5 text-zinc-400 hover:text-red-500 transition-colors"
                       >
                         <Trash2 size={14} />
@@ -680,7 +1320,9 @@ export const AcademicManagement: React.FC<Props> = ({ db }) => {
       </div>
 
       {/* Modals */}
+      {renderDeleteConfirmationModal()}
       {renderModal('class', isClassModalOpen, () => setIsClassModalOpen(false), handleSaveClass)}
+      {renderModal('group', isGroupModalOpen, () => setIsGroupModalOpen(false), handleSaveGroup)}
       {renderModal('subject', isSubjectModalOpen, () => setIsSubjectModalOpen(false), handleSaveSubject)}
       {renderModal('chapter', isChapterModalOpen, () => setIsChapterModalOpen(false), handleSaveChapter)}
       {renderModal('topic', isTopicModalOpen, () => setIsTopicModalOpen(false), handleSaveTopic)}

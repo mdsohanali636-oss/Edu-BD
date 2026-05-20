@@ -32,23 +32,12 @@ import {
   AcademicChapter,
   AcademicTopic
 } from '../../types';
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  orderBy, 
-  limit,
-  addDoc,
-  Firestore
-} from 'firebase/firestore';
-import { User } from 'firebase/auth';
+import { supabase } from '../../supabaseClient';
 
 type ViewMode = 'dashboard' | 'builder' | 'analytics' | 'templates';
 
 interface Props {
-  user: User | null;
-  db: Firestore;
+  user: any; // Using simplified any for user as it's passed from App.tsx (Supabase session user)
   dynamicClasses: AcademicClassInfo[];
   dynamicSubjects: AcademicSubject[];
   dynamicChapters: AcademicChapter[];
@@ -57,7 +46,6 @@ interface Props {
 
 export const PremiumExamSection: React.FC<Props> = ({ 
   user, 
-  db,
   dynamicClasses,
   dynamicSubjects,
   dynamicChapters,
@@ -74,7 +62,7 @@ export const PremiumExamSection: React.FC<Props> = ({
   const analytics = useMemo<UserAnalytics>(() => {
     if (allAttempts.length === 0) {
       return {
-        userId: user?.uid || 'guest',
+        userId: user?.id || 'guest',
         accuracy: 0,
         speed: 0,
         strongChapters: [],
@@ -87,8 +75,10 @@ export const PremiumExamSection: React.FC<Props> = ({
         slowestSpeed: 0,
         examDNA: {
           traits: ['শীক্ষার্থী'],
-          description: 'আপনার এক্সাম প্রোফাইলটি তৈরি হচ্ছে। আরও কিছু পরীক্ষায় অংশ নিয়ে আপনার দক্ষতা এবং শেখার ধরন উন্মোচন করুন।'
-        }
+          description: 'আপনার এক্সাম প্রোফailটি তৈরি হচ্ছে। আরও কিছু পরীক্ষায় অংশ নিয়ে আপনার দক্ষতা এবং শেখার ধরন উন্মোচন করুন।'
+        },
+        strongTopics: [],
+        weakTopics: []
       };
     }
 
@@ -103,10 +93,10 @@ export const PremiumExamSection: React.FC<Props> = ({
 
     // Improvement Data (last 7)
     const improvementData = [...allAttempts]
-      .sort((a, b) => a.submittedAt - b.submittedAt)
+      .sort((a, b) => new Date(a.completedAt).getTime() - new Date(b.completedAt).getTime())
       .slice(-7)
       .map(att => ({
-        date: att.submittedAt,
+        date: new Date(att.completedAt).getTime(),
         score: Math.round((att.correctCount / (att.totalQuestions || 1)) * 100)
       }));
 
@@ -161,7 +151,7 @@ export const PremiumExamSection: React.FC<Props> = ({
     });
 
     return {
-      userId: user?.uid || 'guest',
+      userId: user?.id || 'guest',
       accuracy: avgAccuracy,
       speed: avgSpeed,
       strongChapters: [], // Empty by default for new users
@@ -187,16 +177,16 @@ export const PremiumExamSection: React.FC<Props> = ({
     const fetchAttempts = async () => {
       setIsLoadingAnalytics(true);
       try {
-        const q = query(
-          collection(db, 'attempts'),
-          where('userId', '==', user.uid),
-          where('isPremium', '==', true), // Strictly filter for premium activity
-          orderBy('submittedAt', 'desc'),
-          limit(50)
-        );
-        const snap = await getDocs(q);
-        const attempts = snap.docs.map(d => ({ ...d.data() } as ExamAttempt));
-        setAllAttempts(attempts);
+        const { data, error } = await supabase
+          .from('exam_attempts')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('is_premium', true)
+          .order('completed_at', { ascending: false })
+          .limit(50);
+        
+        if (error) throw error;
+        setAllAttempts(data as any[]);
       } catch (err) {
         console.error("Error fetching analytics:", err);
       } finally {
@@ -205,7 +195,7 @@ export const PremiumExamSection: React.FC<Props> = ({
     };
 
     fetchAttempts();
-  }, [user?.uid, db]);
+  }, [user?.id]);
 
   // Mock Templates (Updated to be empty by default or fetched if I had a templates collection)
   const [templates, setTemplates] = useState<ExamTemplate[]>([]);
@@ -215,15 +205,18 @@ export const PremiumExamSection: React.FC<Props> = ({
     if (!user) return;
     const fetchTemplates = async () => {
       try {
-        const q = query(collection(db, 'exam_templates'), where('userId', '==', user.uid));
-        const snap = await getDocs(q);
-        setTemplates(snap.docs.map(d => ({ id: d.id, ...d.data() } as ExamTemplate)));
+        const { data, error } = await supabase
+          .from('exam_templates')
+          .select('*')
+          .eq('user_id', user.id);
+        if (error) throw error;
+        setTemplates(data as ExamTemplate[]);
       } catch (err) {
         console.error("Error fetching templates:", err);
       }
     };
     fetchTemplates();
-  }, [user?.uid, db]);
+  }, [user?.id]);
 
   const handleGenerate = (settings: CustomExamSettings) => {
     // Generate mock questions based on settings
@@ -240,7 +233,7 @@ export const PremiumExamSection: React.FC<Props> = ({
         class: 'HSC' as AcademicClass,
         subject: settings.subjects[0],
         chapter: settings.chapters[0] || 'General',
-        createdAt: Date.now()
+        createdAt: new Date().toISOString()
       });
     }
     for (let i = 0; i < settings.writtenCount; i++) {
@@ -253,7 +246,7 @@ export const PremiumExamSection: React.FC<Props> = ({
         class: 'HSC' as AcademicClass,
         subject: settings.subjects[0],
         chapter: settings.chapters[0] || 'General',
-        createdAt: Date.now()
+        createdAt: new Date().toISOString()
       });
     }
     
@@ -271,6 +264,7 @@ export const PremiumExamSection: React.FC<Props> = ({
     const settings: CustomExamSettings = {
       subjects: ['phy'],
       chapters: ['p1', 'p2'],
+      topics: [],
       mcqCount: 25,
       writtenCount: 5,
       duration: 60,
@@ -331,30 +325,34 @@ export const PremiumExamSection: React.FC<Props> = ({
 
     const now = Date.now();
     const attemptData = {
-      userId: user.uid,
-      userName: user.displayName || 'Premium Student',
-      examId: 'premium-custom-' + now,
-      examTitle: `Premium ${activeExam.settings.difficulty} Session`,
+      user_id: user.id,
+      user_name: user?.user_metadata?.full_name || user.email?.split('@')[0] || 'Premium Student',
+      exam_id: 'premium-custom-' + now,
+      exam_title: `Premium ${activeExam.settings.difficulty} Session`,
       subject: activeExam.settings.subjects[0] || 'General',
       chapters: activeExam.settings.chapters,
-      userClass: 'Premium',
+      user_class: 'Premium',
       answers: examAnswers,
       score: Math.max(0, score),
-      maxScore,
-      correctCount,
-      wrongCount,
-      unansweredCount,
-      totalQuestions: activeExam.questions.length,
-      timeTaken,
-      startTime: now - timeTaken * 1000,
-      submittedAt: now,
-      isPremium: true // Flag for filtering
+      total_marks: maxScore,
+      correct_count: correctCount,
+      wrong_count: wrongCount,
+      unanswered_count: unansweredCount,
+      total_questions: activeExam.questions.length,
+      time_taken: timeTaken,
+      completed_at: new Date(now).toISOString(),
+      is_premium: true // Flag for filtering
     };
 
     try {
-      const docRef = await addDoc(collection(db, 'attempts'), attemptData);
+      const { data, error } = await supabase
+        .from('exam_attempts')
+        .insert([attemptData])
+        .select()
+        .single();
+      if (error) throw error;
       // Optimistically update local attempts to reflect in Pulse immediately
-      setAllAttempts(prev => [{ ...attemptData, id: docRef.id } as ExamAttempt, ...prev]);
+      setAllAttempts(prev => [data as any, ...prev]);
     } catch (err) {
       console.error("Error saving premium attempt:", err);
     }
@@ -377,8 +375,8 @@ export const PremiumExamSection: React.FC<Props> = ({
   return (
     <div className="min-h-screen bg-zinc-50/50 dark:bg-black/50 p-4 sm:p-8 lg:p-12 font-sans relative overflow-hidden">
       {/* Premium Background Effects */}
-      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary-palette/10 rounded-full blur-[120px] -z-10 animate-pulse" />
-      <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-blue-500/10 rounded-full blur-[100px] -z-10" />
+      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary-palette/5 rounded-full blur-3xl -z-10" />
+      <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-blue-500/5 rounded-full blur-2xl -z-10" />
 
       <div className="max-w-6xl mx-auto">
         <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
@@ -426,7 +424,7 @@ export const PremiumExamSection: React.FC<Props> = ({
               <div className="space-y-12">
                 {/* Hero Section */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center bg-zinc-900 dark:bg-zinc-900 rounded-[32px] sm:rounded-[48px] p-8 sm:p-12 text-white relative overflow-hidden shadow-2xl">
-                   <div className="absolute -right-20 -top-20 w-80 h-80 bg-primary-palette/40 rounded-full blur-[100px]" />
+                   <div className="absolute -right-10 -top-10 w-64 h-64 bg-primary-palette/30 rounded-full blur-2xl" />
                    
                    <div className="relative z-10 space-y-8">
                      <Badge className="bg-primary-palette text-white border-none px-4 py-2">প্রিমিয়াম অভিজ্ঞতা</Badge>
@@ -450,17 +448,17 @@ export const PremiumExamSection: React.FC<Props> = ({
                    <div className="relative hidden lg:flex justify-center items-center">
                       <motion.div 
                         animate={{ 
-                          translateY: [0, -15, 0],
+                          y: [0, -10, 0],
                         }}
                         transition={{ 
                           duration: 4, 
                           repeat: Infinity,
                           ease: "easeInOut"
                         }}
-                        className="w-72 h-72 bg-gradient-to-br from-primary-palette to-blue-600 rounded-[64px] shadow-[0_0_50px_rgba(155,142,199,0.3)] flex items-center justify-center relative border-4 border-white/10"
+                        className="w-72 h-72 bg-gradient-to-br from-primary-palette to-blue-600 rounded-[64px] shadow-xl flex items-center justify-center relative border-4 border-white/10"
                       >
                          <Crown size={120} className="text-white/80" />
-                         <div className="absolute -bottom-6 -right-6 w-32 h-32 bg-white/5 backdrop-blur-xl rounded-[40px] border border-white/20 p-6 shadow-2xl">
+                         <div className="absolute -bottom-6 -right-6 w-32 h-32 bg-white/5 backdrop-blur-lg rounded-[40px] border border-white/20 p-6 shadow-xl">
                             <Sparkles className="text-amber-400 mb-2" size={32} />
                             <span className="text-[10px] font-black uppercase tracking-widest text-zinc-300">Elite OS</span>
                          </div>
@@ -482,6 +480,7 @@ export const PremiumExamSection: React.FC<Props> = ({
                             handleGenerate({
                               subjects: ['General'],
                               chapters: analytics.weakChapters,
+                              topics: [],
                               mcqCount: 20,
                               writtenCount: 2,
                               duration: 30,
@@ -580,14 +579,19 @@ export const PremiumExamSection: React.FC<Props> = ({
                 onSaveTemplate={async (s) => {
                   if (!user) return;
                   const newTemplate = {
-                    userId: user.uid,
+                    user_id: user.id,
                     name: `Template ${templates.length + 1}`,
                     settings: s,
-                    createdAt: Date.now()
+                    created_at: new Date().toISOString()
                   };
                   try {
-                    const docRef = await addDoc(collection(db, 'exam_templates'), newTemplate);
-                    setTemplates(prev => [...prev, { id: docRef.id, ...newTemplate }]);
+                    const { data, error } = await supabase
+                      .from('exam_templates')
+                      .insert([newTemplate])
+                      .select()
+                      .single();
+                    if (error) throw error;
+                    setTemplates(prev => [...prev, data as ExamTemplate]);
                   } catch (err) {
                     console.error("Error saving template:", err);
                   }
@@ -617,7 +621,7 @@ export const PremiumExamSection: React.FC<Props> = ({
                     <Card key={template.id} className="p-8 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 relative overflow-hidden group">
                        <div className="absolute top-0 right-0 p-6 pointer-events-none opacity-0 group-hover:opacity-10 dark:text-white transition-opacity"><Save size={100} /></div>
                        <h4 className="text-2xl font-black mb-1 text-zinc-900 dark:text-white">{template.name}</h4>
-                       <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold mb-8 uppercase tracking-widest italic tracking-[0.2em]">{new Date(template.createdAt).toLocaleDateString()}-এ তৈরি করা হয়েছে</p>
+                       <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold mb-8 uppercase tracking-widest italic tracking-[0.2em]">{new Date(template.created_at).toLocaleDateString()}-এ তৈরি করা হয়েছে</p>
                        
                        <div className="space-y-3 mb-8">
                           <div className="flex justify-between text-xs font-bold"><span className="text-zinc-600 dark:text-zinc-500">সময়সীমা</span><span className="text-zinc-900 dark:text-white">{template.settings.duration}মি.</span></div>
@@ -646,11 +650,11 @@ export const PremiumExamSection: React.FC<Props> = ({
       </div>
 
       {isGenerating && (
-        <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-3xl flex flex-col items-center justify-center">
+        <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-xl flex flex-col items-center justify-center">
            <motion.div 
-            animate={{ scale: [1, 1.2, 1], rotate: [0, 180, 360] }}
-            transition={{ duration: 2, repeat: Infinity }}
-            className="w-24 h-24 border-4 border-primary-palette border-t-transparent rounded-full mb-8 shadow-[0_0_40px_rgba(155,142,199,0.5)]"
+            animate={{ scale: [1, 1.1, 1], rotate: [0, 180, 360] }}
+            transition={{ duration: 3, repeat: Infinity }}
+            className="w-24 h-24 border-4 border-primary-palette border-t-transparent rounded-full mb-8 shadow-lg shadow-purple-500/20"
            />
            <div className="text-center space-y-2">
              <h3 className="text-3xl font-black text-white uppercase tracking-tighter">সেশন তৈরি করা হচ্ছে</h3>

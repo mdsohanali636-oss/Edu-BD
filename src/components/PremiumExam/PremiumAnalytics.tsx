@@ -51,7 +51,7 @@ export const PremiumAnalytics: React.FC<Props> = ({ analytics }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Exam DNA System */}
         <Card className="lg:col-span-1 p-6 sm:p-8 border-2 border-primary-palette/30 bg-primary-palette/5 relative overflow-hidden flex flex-col justify-between">
-          <div className="absolute -top-10 -right-10 w-40 h-40 bg-primary-palette/20 rounded-full blur-3xl" />
+          <div className="absolute -top-10 -right-10 w-40 h-40 bg-primary-palette/15 rounded-full blur-2xl" />
           
           <div>
             <div className="flex items-center gap-3 mb-6">

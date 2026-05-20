@@ -69,6 +69,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
     classId: '',
     subjects: [],
     chapters: [],
+    topics: [],
     mcqCount: 20,
     writtenCount: 5,
     duration: 60,
@@ -408,7 +409,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                         {isSelected && (
                           <motion.div 
                             layoutId={`glow-${topic.id}`}
-                            className="absolute -inset-1 bg-gradient-to-br from-primary-palette/20 to-transparent blur-xl -z-10"
+                            className="absolute -inset-1 bg-gradient-to-br from-primary-palette/15 to-transparent blur-lg -z-10"
                           />
                         )}
                         <div className="flex items-start justify-between mb-4">
@@ -676,7 +677,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
              <div className="max-w-2xl mx-auto space-y-8">
                <Card className="p-8 border-2 border-primary-palette bg-primary-palette/5 relative overflow-hidden">
                  {/* Decorative background circle */}
-                 <div className="absolute -top-24 -right-24 w-64 h-64 bg-primary-palette/10 rounded-full blur-3xl -z-10" />
+                 <div className="absolute -top-16 -right-16 w-48 h-48 bg-primary-palette/10 rounded-full blur-2xl -z-10" />
                  
                  <div className="flex flex-col items-center text-center mb-10">
                     <div className="w-20 h-20 bg-primary-palette text-white rounded-[28px] flex items-center justify-center mb-4 shadow-xl">

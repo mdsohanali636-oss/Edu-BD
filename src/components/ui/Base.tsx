@@ -14,7 +14,7 @@ export const Card = ({ children, className = '', onClick, ...props }: CardProps)
     whileHover={onClick ? { y: -4, transition: { duration: 0.3, ease: "easeOut" } } : {}}
     onClick={onClick}
     className={`glass-card rounded-[32px] overflow-hidden transition-all duration-300 cursor-pointer ${className}`}
-    {...props}
+    {...(props as any)}
   >
     {children}
   </motion.div>
@@ -61,7 +61,7 @@ export const Button = ({
       whileTap={{ scale: 0.97 }}
       onClick={onClick}
       className={`inline-flex items-center justify-center gap-2 font-semibold rounded-2xl transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none ${variants[variant]} ${sizes[size]} ${className}`}
-      {...props}
+      {...(props as any)}
     >
       {Icon && <Icon size={size === 'sm' ? 14 : 18} className="pointer-events-none" strokeWidth={2.5} />}
       {children && <span className="pointer-events-none whitespace-nowrap">{children}</span>}
