@@ -82,13 +82,18 @@ export interface ExternalResource {
 
 export interface Feedback {
   id: string;
-  userId: string;
-  user_id?: string; // Compatibility
+  userId?: string | null;
+  user_id?: string | null; // Compatibility
   userEmail: string;
+  user_email?: string; // Compatibility
   userName: string;
-  text: string;
-  content?: string; // Compatibility
+  user_name?: string; // Compatibility
+  message: string;
+  status: 'unread' | 'read' | 'resolved' | string;
+  reply?: string | null;
+  admin_reply?: string | null; // Compatibility
   createdAt: string;
+  created_at?: string; // Compatibility
 }
 
 export interface Playlist {
@@ -144,6 +149,16 @@ export interface Question {
   option_b_image?: string;
   option_c_image?: string;
   option_d_image?: string;
+  difficulty?: 'easy' | 'medium' | 'hard' | string;
+  status?: 'draft' | 'published' | 'hidden' | string;
+  isPremium?: boolean;
+  tags?: string[];
+  explanation?: string;
+  explanationImage?: string;
+  explanationVideo?: string;
+  explanationText?: string;
+  isPlaceholder?: boolean;
+  negativeMarks?: number;
 }
 
 export interface Exam {
@@ -195,12 +210,38 @@ export interface ExamAttempt {
   completedAt: string;
   // Internal tracking fields below
   userName: string;
-  userClass: string;
   totalMarks: number;
   correctCount: number;
   wrongCount: number;
   unansweredCount: number; // Corrected typo here
   isPremium?: boolean;
+  academicClass: string;
+  academicGroup: string;
+  subject: string;
+  chapter: string;
+  topic: string;
+}
+
+export interface ExamAttemptDB {
+  id?: string;
+  user_id: string | null;
+  exam_id: string | null;
+  answers: Record<string, any>;
+  score: number;
+  total_questions: number;
+  time_taken: number;
+  completed_at: string;
+  user_name: string;
+  total_marks: number;
+  correct_count: number;
+  wrong_count: number;
+  unanswered_count: number;
+  is_premium: boolean;
+  academic_class: string;
+  academic_group: string;
+  subject: string;
+  chapter: string;
+  topic: string;
 }
 
 export interface LeaderboardEntry {
@@ -216,6 +257,30 @@ export interface LeaderboardEntry {
   examTitle: string;
   firstSubmissionAt: string;
   totalAttempts: number;
+  accuracy?: number;
+  xp?: number;
+  streak?: number;
+  badge?: string;
+  correctCount?: number;
+  wrongCount?: number;
+  unansweredCount?: number;
+  totalQuestions?: number;
+}
+
+export interface UserStats {
+  userId: string;
+  userName: string;
+  userPhoto?: string;
+  totalExams: number;
+  averageScore: number;
+  highestScore: number;
+  totalCorrect: number;
+  totalWrong: number;
+  totalSkipped: number;
+  totalXp: number;
+  streak: number;
+  badge: string;
+  updatedAt: string;
 }
 
 export interface AcademicClassInfo {
@@ -225,6 +290,11 @@ export interface AcademicClassInfo {
   order: number;
   createdAt: string;
   updatedAt?: string;
+  has_groups?: boolean;
+  hasGroups?: boolean;
+  short_name?: string;
+  shortName?: string;
+  slug?: string;
 }
 
 export interface AcademicSubject {
@@ -340,6 +410,12 @@ export interface UserAnalytics {
     traits: string[];
     description: string;
   };
+  consistency?: number;
+  streak?: number;
+  predictiveScore?: number;
+  skippedPatterns?: string[];
+  smartRoadmap?: string[];
+  subjectPerformance?: { name: string; accuracy: number; totalExams: number }[];
 }
 
 export interface AcademicGroup {
@@ -375,3 +451,153 @@ export interface FirestoreErrorInfo {
     }[];
   }
 }
+
+export function serializeExplanation(explanationText: string, meta: {
+  difficulty?: string;
+  is_premium?: boolean;
+  tags?: string[];
+  status?: string;
+  explanation_image?: string;
+  negative_marks?: number;
+}) {
+  const metaStr = JSON.stringify(meta);
+  return `${explanationText || ''} [META:${metaStr}]`;
+}
+
+export function deserializeExplanation(fullExplanation: string) {
+  if (!fullExplanation) {
+    return {
+      text: '',
+      difficulty: 'medium',
+      is_premium: false,
+      tags: [],
+      status: 'published',
+      explanation_image: '',
+      negative_marks: 0
+    };
+  }
+  const match = fullExplanation.match(/\[META:(.*?)\]$/);
+  if (match) {
+    try {
+      const meta = JSON.parse(match[1]);
+      const text = fullExplanation.replace(/\[META:.*?\]$/, '').trim();
+      return {
+        text,
+        difficulty: meta.difficulty || 'medium',
+        is_premium: !!meta.is_premium,
+        tags: meta.tags || [],
+        status: meta.status || 'published',
+        explanation_image: meta.explanation_image || '',
+        negative_marks: meta.negative_marks || 0
+      };
+    } catch (e) {
+      // fallback
+    }
+  }
+  return {
+    text: fullExplanation,
+    difficulty: 'medium',
+    is_premium: false,
+    tags: [],
+    status: 'published',
+    explanation_image: '',
+    negative_marks: 0
+  };
+}
+
+export interface SubscriptionSettings {
+  id: string;
+  current_price: number;
+  old_price: number;
+  discount_percent: number;
+  poster_image_url: string | null;
+  poster_title: string;
+  poster_description: string;
+  payment_number_bkash: string;
+  payment_number_nagad: string;
+  is_subscription_enabled: boolean;
+  updated_at?: string;
+  // Custom stats section fields (Feature 2)
+  stats_members?: number;
+  stats_exams?: number;
+  stats_notes?: number;
+  stats_sheets?: number;
+}
+
+export interface SubscriptionPackage {
+  id: string;
+  name: string;
+  duration_days: number;
+  price: number;
+  old_price?: number;
+  discount_percent?: number;
+  is_active: boolean;
+  created_at?: string;
+  // Highlight flag (Feature 1)
+  is_most_popular?: boolean;
+}
+
+export interface SubscriptionBenefit {
+  id: string;
+  text: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface SubscriptionRequest {
+  id: string;
+  user_id: string;
+  package_name: string;
+  amount: number;
+  payment_method: string;
+  transaction_id: string;
+  payment_number: string;
+  status: 'pending' | 'approved' | 'rejected';
+  approved_by?: string | null;
+  approved_at?: string | null;
+  created_at?: string;
+  user_profiles?: {
+    full_name: string;
+    email: string;
+  };
+  // Extra fields for coupon and review notes support (Features 3, 4, 6, 9)
+  admin_note?: string | null;
+  coupon_code?: string | null;
+  original_amount?: number | null;
+  discount_amount?: number | null;
+}
+
+export interface SubscriptionCoupon {
+  id: string;
+  code: string;
+  discount_type: 'fixed' | 'percentage';
+  discount_value: number;
+  expiry_date?: string | null;
+  usage_limit?: number | null;
+  is_active: boolean;
+  created_at?: string;
+  used_count?: number;
+}
+
+export interface SavedQuestion {
+  id: string;
+  user_id: string;
+  question_id: string;
+  saved_at: string;
+  question?: Question; // Related question fetched from questions table
+}
+
+export interface WrongQuestion {
+  id: string;
+  user_id: string;
+  question_id: string;
+  user_answer: string;
+  correct_answer: string;
+  exam_id?: string | null;
+  exam_type?: string;
+  created_at: string;
+  question?: Question; // Related question fetched from questions table
+}
+
+
+

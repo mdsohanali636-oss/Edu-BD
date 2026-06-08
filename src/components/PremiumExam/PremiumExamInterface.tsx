@@ -10,7 +10,8 @@ import {
   CheckCircle2,
   X,
   Play,
-  Check
+  Check,
+  Bookmark
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Button, Badge, Card } from '../ui/Base';
@@ -21,9 +22,18 @@ interface Props {
   questions: Question[];
   onFinish: (answers: any[], timeTaken: number) => void;
   onClose: () => void;
+  savedQuestionIds?: Set<string>;
+  onToggleSaveQuestion?: (qId: string) => void;
 }
 
-export const PremiumExamInterface: React.FC<Props> = ({ settings, questions, onFinish, onClose }) => {
+export const PremiumExamInterface: React.FC<Props> = ({ 
+  settings, 
+  questions, 
+  onFinish, 
+  onClose,
+  savedQuestionIds = new Set(),
+  onToggleSaveQuestion
+}) => {
   const [answers, setAnswers] = useState<any[]>(new Array(questions.length).fill(null));
   const [flags, setFlags] = useState<boolean[]>(new Array(questions.length).fill(false));
   const [timeLeft, setTimeLeft] = useState(settings.duration * 60);
@@ -146,7 +156,8 @@ export const PremiumExamInterface: React.FC<Props> = ({ settings, questions, onF
             </div>
           </div>
           <Button 
-            className="w-full py-5 bg-white text-black hover:bg-zinc-200"
+            variant="secondary"
+            className="w-full py-5 bg-white dark:bg-white text-zinc-950 dark:text-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-100 font-extrabold text-base border border-zinc-200 shadow-md"
             onClick={() => setIsStarted(true)}
           >
             পরীক্ষা শুরু করুন
@@ -196,13 +207,68 @@ export const PremiumExamInterface: React.FC<Props> = ({ settings, questions, onF
            <div className="max-w-3xl mx-auto space-y-24 pb-32">
              {questions.map((q, qIdx) => (
                <div 
-                 key={q.id || qIdx} 
+                 key={q.id || `premium-q-${qIdx}`} 
                  id={`question-${qIdx}`}
                  className="space-y-8 scroll-mt-32"
                >
+                 {q.isPlaceholder ? (
+                   <div className="w-full bg-zinc-500/5 dark:bg-zinc-950/20 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-[32px] p-8 text-center space-y-6 relative overflow-hidden backdrop-blur-md text-left">
+                     <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl" />
+                     
+                     <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-full text-xs font-bold uppercase tracking-widest">
+                       <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                       Upcoming Question
+                     </div>
+
+                     <div className="space-y-2">
+                       <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white leading-relaxed">
+                         Question {qIdx + 1} Coming Soon
+                       </h2>
+                       <p className="text-zinc-500 font-bold">This question is under preparation.</p>
+                     </div>
+
+                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl mx-auto pt-4">
+                       {["Option 1", "Option 2", "Option 3", "Option 4"].map((optVal, optIndex) => (
+                         <button
+                           key={optIndex}
+                           disabled
+                           className="w-full p-5 text-left rounded-2xl border-2 border-zinc-100 dark:border-zinc-900/60 bg-zinc-50/55 dark:bg-zinc-900/10 text-zinc-400 cursor-not-allowed font-bold"
+                         >
+                           <span className="w-7 h-7 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-400 inline-flex items-center justify-center mr-3 text-xs font-black">
+                             {String.fromCharCode(65 + optIndex)}
+                           </span>
+                           {optVal}
+                         </button>
+                       ))}
+                     </div>
+                   </div>
+                 ) : (
+                   <>
                  <div className="flex items-center justify-between">
                     <div>
-                       <Badge className="bg-primary-palette/10 text-primary-palette mb-2">প্রশ্ন {qIdx + 1} / {questions.length || 0}</Badge>
+                       <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <Badge className="bg-primary-palette/10 text-primary-palette">প্রশ্ন {qIdx + 1} / {questions.length || 0}</Badge>
+                        {onToggleSaveQuestion && q.id && (
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => onToggleSaveQuestion(q.id)}
+                            className={`flex items-center gap-2 px-3.5 py-1 px-4 rounded-full text-[10px] font-black uppercase tracking-wider transition-all duration-300 shadow-sm border ${
+                              savedQuestionIds.has(q.id)
+                                ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/40 shadow-amber-500/10'
+                                : 'bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:text-zinc-800 dark:hover:text-white border-zinc-200/80 dark:border-zinc-700/80 hover:shadow-md'
+                            }`}
+                          >
+                            <Bookmark 
+                              size={12} 
+                              className={`transition-transform duration-300 ${
+                                savedQuestionIds.has(q.id) ? 'fill-amber-500 text-amber-500 scale-110' : 'text-zinc-400 dark:text-zinc-500'
+                              }`} 
+                            />
+                            <span>{savedQuestionIds.has(q.id) ? 'Saved' : 'Save Question'}</span>
+                          </motion.button>
+                        )}
+                     </div>
                        <h2 className="text-2xl sm:text-3xl font-bold dark:text-white leading-relaxed">
                          {q.questionText}
                        </h2>
@@ -218,7 +284,7 @@ export const PremiumExamInterface: React.FC<Props> = ({ settings, questions, onF
                  <div className="space-y-4">
                     {q.type === 'mcq' && q.options?.map((opt, i) => (
                       <button
-                        key={i}
+                        key={`opt-${q.id || qIdx}-${i}`}
                         onClick={() => {
                           const newAnswers = [...answers];
                           newAnswers[qIdx] = i;
@@ -270,6 +336,8 @@ export const PremiumExamInterface: React.FC<Props> = ({ settings, questions, onF
                       </span>
                     </button>
                  </div>
+                 </>
+                 )}
                </div>
              ))}
 
@@ -299,7 +367,7 @@ export const PremiumExamInterface: React.FC<Props> = ({ settings, questions, onF
                    
                    return (
                      <button
-                        key={i}
+                        key={questions[i]?.id || `nav-dot-${i}`}
                         onClick={() => {
                           const el = document.getElementById(`question-${i}`);
                           if (el) el.scrollIntoView({ behavior: 'smooth' });

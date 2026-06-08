@@ -180,4 +180,106 @@ CREATE POLICY "Admins can manage all user_roles" ON public.user_roles ALL USING 
 );
 CREATE POLICY "Users can insert own roles" ON public.user_roles FOR INSERT WITH CHECK (auth.uid() = user_id OR auth.uid() = id);
 
+-- 9. NEWSLETTER_EMAIL_LOGS Table
+CREATE TABLE IF NOT EXISTS public.newsletter_email_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subscriber_email TEXT,
+  subject TEXT,
+  message TEXT,
+  status TEXT DEFAULT 'sent',
+  sent_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.newsletter_email_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Only admins can view email logs" ON public.newsletter_email_logs FOR SELECT USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+CREATE POLICY "Admins can manage email logs" ON public.newsletter_email_logs ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+
+-- 10. SUBSCRIPTION_SETTINGS Table
+CREATE TABLE IF NOT EXISTS public.subscription_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  current_price NUMERIC NOT NULL DEFAULT 500,
+  old_price NUMERIC DEFAULT 1000,
+  discount_percent NUMERIC DEFAULT 50,
+  poster_image_url TEXT,
+  poster_title TEXT DEFAULT 'Parodorshhi Premium',
+  poster_description TEXT DEFAULT 'Get access to premium exams, performance analytics, and practice sheets',
+  payment_number_bkash TEXT DEFAULT '01700000000',
+  payment_number_nagad TEXT DEFAULT '01900000000',
+  is_subscription_enabled BOOLEAN DEFAULT TRUE,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.subscription_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public select settings" ON public.subscription_settings FOR SELECT USING (true);
+CREATE POLICY "Allow admin all settings" ON public.subscription_settings FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+
+INSERT INTO public.subscription_settings (id, current_price, old_price, discount_percent, poster_image_url, poster_title, poster_description, payment_number_bkash, payment_number_nagad, is_subscription_enabled)
+VALUES ('default', 500, 1000, 50, 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=1200&auto=format&fit=crop', 'Parodorshhi Premium', 'Get full access to all premium exams, in-depth subject-specific interactive analytics, exclusive books and notes, and automatic future premium modules.', '01712345678', '01912345678', TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- 11. SUBSCRIPTION_PACKAGES Table
+CREATE TABLE IF NOT EXISTS public.subscription_packages (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  duration_days INTEGER NOT NULL,
+  price NUMERIC NOT NULL,
+  old_price NUMERIC,
+  discount_percent NUMERIC,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.subscription_packages ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public select packages" ON public.subscription_packages FOR SELECT USING (true);
+CREATE POLICY "Allow admin all packages" ON public.subscription_packages FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+
+INSERT INTO public.subscription_packages (name, duration_days, price, old_price, discount_percent, is_active)
+VALUES 
+  ('1 Month', 30, 500, 1000, 50, TRUE),
+  ('3 Months', 90, 1200, 2400, 50, TRUE),
+  ('6 Months', 180, 2000, 4000, 50, TRUE),
+  ('12 Months', 365, 3500, 7000, 50, TRUE)
+ON CONFLICT (name) DO NOTHING;
+
+-- 12. SUBSCRIPTION_BENEFITS Table
+CREATE TABLE IF NOT EXISTS public.subscription_benefits (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  text TEXT UNIQUE NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.subscription_benefits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public select benefits" ON public.subscription_benefits FOR SELECT USING (true);
+CREATE POLICY "Allow admin all benefits" ON public.subscription_benefits FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+
+INSERT INTO public.subscription_benefits (text, is_active)
+VALUES 
+  ('Premium Exams', TRUE),
+  ('Advanced Performance Analytics', TRUE),
+  ('Exclusive Resources', TRUE),
+  ('Future Premium Features', TRUE)
+ON CONFLICT (text) DO NOTHING;
+
+-- 13. SUBSCRIPTION_REQUESTS Table
+CREATE TABLE IF NOT EXISTS public.subscription_requests (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+  package_name TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  payment_method TEXT NOT NULL,
+  transaction_id TEXT UNIQUE NOT NULL,
+  payment_number TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  approved_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  approved_at TIMESTAMPTZ,
+  expiry_date TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.subscription_requests ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view own request" ON public.subscription_requests FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own request" ON public.subscription_requests FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Admins can manage subscription requests" ON public.subscription_requests FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+
 -- RE-APPLY POLICIES (Handled in SUPABASE_POLICIES_V2.sql)

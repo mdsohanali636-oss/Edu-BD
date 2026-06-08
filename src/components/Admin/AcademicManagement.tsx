@@ -26,10 +26,10 @@ import { Button, Card, Badge } from '../ui/Base';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface Props {
-  // Database handled via global supabase client now
+  onDataChanged?: () => void;
 }
 
-export const AcademicManagement: React.FC<Props> = () => {
+export const AcademicManagement: React.FC<Props> = ({ onDataChanged }) => {
   const [classes, setClasses] = useState<AcademicClassInfo[]>([]);
   const [subjects, setSubjects] = useState<AcademicSubject[]>([]);
   const [chapters, setChapters] = useState<AcademicChapter[]>([]);
@@ -59,7 +59,19 @@ export const AcademicManagement: React.FC<Props> = () => {
   } | null>(null);
   
   const [editingItem, setEditingItem] = useState<any>(null);
-  const [formData, setFormData] = useState({ name: '', active: true, order: 0, academicGroup: 'All' });
+  const [formData, setFormData] = useState<{
+    name: string;
+    active: boolean;
+    order: number;
+    academicGroup: string;
+    hasGroups?: boolean;
+  }>({ 
+    name: '', 
+    active: true, 
+    order: 0, 
+    academicGroup: 'All',
+    hasGroups: false
+  });
   const [topicTags, setTopicTags] = useState<string[]>([]);
 
   useEffect(() => {
@@ -247,17 +259,29 @@ export const AcademicManagement: React.FC<Props> = () => {
       return;
     }
     
+    const trimmedName = formData.name.trim().toLowerCase();
+    const isDuplicate = classes.some(c => 
+      c.name.trim().toLowerCase() === trimmedName && (!editingItem || c.id !== editingItem.id)
+    );
+    if (isDuplicate) {
+      showStatus('error', `A class named "${formData.name.trim()}" already exists.`);
+      return;
+    }
+    
     setSaveLoading(true);
     try {
+      const classPayload = {
+        name: formData.name,
+        active: formData.active,
+        "order": formData.order,
+        has_groups: formData.hasGroups,
+        updated_at: new Date().toISOString()
+      };
+
       if (editingItem) {
         const { error } = await supabase
           .from('academic_classes')
-          .update({
-            name: formData.name,
-            active: formData.active,
-            "order": formData.order,
-            updated_at: new Date().toISOString()
-          })
+          .update(classPayload)
           .eq('id', editingItem.id);
         if (error) throw error;
         showStatus('success', "Class updated successfully!");
@@ -265,20 +289,24 @@ export const AcademicManagement: React.FC<Props> = () => {
         const { error } = await supabase
           .from('academic_classes')
           .insert([{
-            name: formData.name,
-            active: formData.active,
-            "order": formData.order,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            ...classPayload,
+            created_at: new Date().toISOString()
           }]);
         if (error) throw error;
         showStatus('success', "Class added successfully!");
       }
       await fetchClasses();
+      onDataChanged?.();
       setIsClassModalOpen(false);
       setIsGroupModalOpen(false);
       setEditingItem(null);
-      setFormData({ name: '', active: true, order: 0, academicGroup: 'All' });
+      setFormData({ 
+        name: '', 
+        active: true, 
+        order: classes.length + 1, 
+        academicGroup: 'All',
+        hasGroups: false
+      });
     } catch (err: any) {
       console.error("Error saving class:", err);
       // Check for specific Supabase errors
@@ -297,6 +325,15 @@ export const AcademicManagement: React.FC<Props> = () => {
   const handleSaveGroup = async () => {
     if (!formData.name.trim()) {
       showStatus('error', "Please enter a group name.");
+      return;
+    }
+    
+    const trimmedName = formData.name.trim().toLowerCase();
+    const isDuplicate = academicGroups.some(g => 
+      g.name.trim().toLowerCase() === trimmedName && (!editingItem || g.id !== editingItem.id)
+    );
+    if (isDuplicate) {
+      showStatus('error', `A group named "${formData.name.trim()}" already exists.`);
       return;
     }
     
@@ -325,6 +362,7 @@ export const AcademicManagement: React.FC<Props> = () => {
         showStatus('success', "Group added successfully!");
       }
       await fetchAcademicGroups();
+      onDataChanged?.();
       setIsGroupModalOpen(false);
       setEditingItem(null);
       setFormData({ name: '', active: true, order: 0, academicGroup: 'All' });
@@ -343,6 +381,15 @@ export const AcademicManagement: React.FC<Props> = () => {
     }
     if (!selectedClassId) {
       showStatus('error', "No class selected!");
+      return;
+    }
+    
+    const trimmedName = formData.name.trim().toLowerCase();
+    const isDuplicate = subjects.some(s => 
+      s.name.trim().toLowerCase() === trimmedName && (!editingItem || s.id !== editingItem.id)
+    );
+    if (isDuplicate) {
+      showStatus('error', `A subject named "${formData.name.trim()}" already exists under this class.`);
       return;
     }
     
@@ -396,6 +443,7 @@ export const AcademicManagement: React.FC<Props> = () => {
         showStatus('success', "Subject added successfully!");
       }
       if (finalClassId) await fetchSubjects(finalClassId);
+      onDataChanged?.();
       setIsSubjectModalOpen(false);
       setEditingItem(null);
       setFormData({ name: '', active: true, order: 0, academicGroup: 'All' });
@@ -418,6 +466,15 @@ export const AcademicManagement: React.FC<Props> = () => {
     }
     if (!selectedClassId || !selectedSubjectId) {
       showStatus('error', "Please select a class and subject first.");
+      return;
+    }
+    
+    const trimmedName = formData.name.trim().toLowerCase();
+    const isDuplicate = chapters.some(c => 
+      c.name.trim().toLowerCase() === trimmedName && (!editingItem || c.id !== editingItem.id)
+    );
+    if (isDuplicate) {
+      showStatus('error', `A chapter named "${formData.name.trim()}" already exists under this subject.`);
       return;
     }
     
@@ -471,6 +528,7 @@ export const AcademicManagement: React.FC<Props> = () => {
         showStatus('success', "Chapter added successfully!");
       }
       if (actualSubjectId) await fetchChapters(actualSubjectId);
+      onDataChanged?.();
       setIsChapterModalOpen(false);
       setEditingItem(null);
       setFormData({ name: '', active: true, order: 0, academicGroup: 'All' });
@@ -493,6 +551,15 @@ export const AcademicManagement: React.FC<Props> = () => {
     }
     if (!selectedClassId || !selectedSubjectId || !selectedChapterId) {
       showStatus('error', "Selection missing! Make sure Class, Subject, and Chapter are selected.");
+      return;
+    }
+    
+    const trimmedName = formData.name.trim().toLowerCase();
+    const isDuplicate = topics.some(t => 
+      t.name.trim().toLowerCase() === trimmedName && (!editingItem || t.id !== editingItem.id)
+    );
+    if (isDuplicate) {
+      showStatus('error', `A topic named "${formData.name.trim()}" already exists under this chapter.`);
       return;
     }
     
@@ -555,6 +622,7 @@ export const AcademicManagement: React.FC<Props> = () => {
         showStatus('success', "Topic added successfully!");
       }
       if (actualChapterId) await fetchTopics(actualChapterId);
+      onDataChanged?.();
       setIsTopicModalOpen(false);
       setEditingItem(null);
       setFormData({ name: '', active: true, order: 0, academicGroup: 'All' });
@@ -645,6 +713,7 @@ export const AcademicManagement: React.FC<Props> = () => {
         const actualChapterId = currentChapter ? currentChapter.id : selectedChapterId;
         if (actualChapterId) await fetchTopics(actualChapterId);
       }
+      onDataChanged?.();
     } catch (err: any) {
       console.error(`Error deleting ${type}:`, err);
       if (err.code === '23503') {
@@ -778,21 +847,26 @@ export const AcademicManagement: React.FC<Props> = () => {
                 </div>
               )}
 
-              {type === 'subject' && (
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2 block">Academic Group / Stream</label>
-                  <select 
-                    value={formData.academicGroup}
-                    onChange={(e) => setFormData({...formData, academicGroup: e.target.value})}
-                    className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-2xl p-4 text-zinc-900 dark:text-white font-bold focus:ring-2 focus:ring-blue-500/20 transition-all appearance-none"
-                  >
-                    <option value="All">All Groups (Common)</option>
-                    {academicGroups.map(g => (
-                      <option key={g.id} value={g.name}>{g.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              {type === 'subject' && (() => {
+                const selectedClass = classes.find(c => c.id === selectedClassId);
+                const classHasGroups = selectedClass ? (selectedClass.has_groups ?? (selectedClass as any).hasGroups ?? false) : false;
+                if (!classHasGroups) return null;
+                return (
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2 block">Academic Group / Stream</label>
+                    <select 
+                      value={formData.academicGroup}
+                      onChange={(e) => setFormData({...formData, academicGroup: e.target.value})}
+                      className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-2xl p-4 text-zinc-900 dark:text-white font-bold focus:ring-2 focus:ring-blue-500/20 transition-all appearance-none"
+                    >
+                      <option value="All">All Groups (Common)</option>
+                      {academicGroups.map(g => (
+                        <option key={g.id} value={g.name}>{g.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })()}
 
               <div>
                 <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2 block">Name</label>
@@ -804,6 +878,22 @@ export const AcademicManagement: React.FC<Props> = () => {
                   className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-2xl p-4 text-zinc-900 dark:text-white font-bold focus:ring-2 focus:ring-blue-500/20 transition-all"
                 />
               </div>
+
+              {type === 'class' && (
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2 block">Enable Streams / Groups</label>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({...formData, hasGroups: !formData.hasGroups})}
+                    className={`w-full flex items-center justify-center gap-2 p-4 rounded-2xl font-bold transition-all ${
+                      formData.hasGroups ? 'bg-blue-500/10 text-blue-600' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
+                    }`}
+                  >
+                    <Settings2 size={18} />
+                    {formData.hasGroups ? 'Groups Enabled (Science, Humanities, Commerce)' : 'Groups Disabled (All Group Common)'}
+                  </button>
+                </div>
+              )}
 
               {type === 'topic' && (
                 <div>
@@ -983,11 +1073,17 @@ export const AcademicManagement: React.FC<Props> = () => {
               </div>
               <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">Classes</h3>
             </div>
-            <Button 
+             <Button 
               size="sm" 
               onClick={() => {
                 setEditingItem(null);
-                setFormData({ name: '', active: true, order: classes.length, academicGroup: 'All' });
+                setFormData({ 
+                  name: '', 
+                  active: true, 
+                  order: classes.length + 1, 
+                  academicGroup: 'All',
+                  hasGroups: false
+                });
                 setIsClassModalOpen(true);
               }}
               className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl"
@@ -1015,7 +1111,18 @@ export const AcademicManagement: React.FC<Props> = () => {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className="text-[10px] font-black opacity-40">#{cls.order}</span>
-                      <span className="font-bold tracking-tight text-sm">{cls.name}</span>
+                      <div className="flex flex-col">
+                        <span className="font-bold tracking-tight text-sm">{cls.name}</span>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          {(cls.has_groups ?? cls.hasGroups) ? (
+                            <span className={`text-[8px] font-black tracking-wider uppercase px-1.5 py-0.5 rounded ${
+                              selectedClassId === cls.id ? 'bg-amber-400 text-zinc-900 font-extrabold' : 'bg-amber-500/10 text-amber-500'
+                            }`}>With Groups</span>
+                          ) : (
+                            <span className="text-[8px] font-black tracking-wider uppercase px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800/40 text-zinc-400">Common only</span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                         <div className={`flex transition-opacity ${selectedClassId === cls.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
@@ -1023,7 +1130,13 @@ export const AcademicManagement: React.FC<Props> = () => {
                             onClick={(e) => {
                               e.stopPropagation();
                               setEditingItem(cls);
-                              setFormData({ name: cls.name, active: cls.active, order: cls.order, academicGroup: 'All' });
+                              setFormData({ 
+                                name: cls.name, 
+                                active: cls.active, 
+                                order: cls.order, 
+                                academicGroup: 'All',
+                                hasGroups: cls.has_groups ?? cls.hasGroups ?? false
+                              });
                               setIsClassModalOpen(true);
                             }}
                             className={`p-1.5 hover:bg-white/20 rounded-lg ${selectedClassId === cls.id ? 'text-white' : 'text-zinc-400'}`}

@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   email TEXT,
   display_name TEXT,
   role TEXT DEFAULT 'user',
-  academic_class TEXT DEFAULT 'Class 9',
+  academic_class TEXT,
   can_upload BOOLEAN DEFAULT FALSE,
   photo_url TEXT,
   phone_number TEXT,
@@ -18,6 +18,11 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "Admins can update all profiles" ON public.profiles FOR UPDATE USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+) WITH CHECK (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+);
 
 -- RESOURCES table (Renamed from CONTENTS)
 CREATE TABLE IF NOT EXISTS public.resources (
@@ -151,8 +156,8 @@ ALTER TABLE public.questions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Questions are viewable by everyone" ON public.questions FOR SELECT USING (true);
 CREATE POLICY "Admins can manage questions" ON public.questions ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
 
--- ATTEMPTS table (Renamed from EXAM_ATTEMPTS)
-CREATE TABLE IF NOT EXISTS public.attempts (
+-- EXAM_ATTEMPTS table
+CREATE TABLE IF NOT EXISTS public.exam_attempts (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users,
   exam_id UUID REFERENCES public.exams,
@@ -162,23 +167,27 @@ CREATE TABLE IF NOT EXISTS public.attempts (
   time_taken INTEGER,
   completed_at TIMESTAMPTZ DEFAULT NOW(),
   user_name TEXT,
-  user_class TEXT,
   total_marks FLOAT,
   correct_count INTEGER,
   wrong_count INTEGER,
   unanswered_count INTEGER,
-  is_premium BOOLEAN DEFAULT FALSE
+  is_premium BOOLEAN DEFAULT FALSE,
+  academic_class TEXT,
+  academic_group TEXT,
+  subject TEXT,
+  chapter TEXT,
+  topic TEXT
 );
 
-ALTER TABLE public.attempts ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can view own attempts" ON public.attempts FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Admins can view all attempts" ON public.attempts FOR SELECT USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
-CREATE POLICY "Authenticated users can save attempts" ON public.attempts FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+ALTER TABLE public.exam_attempts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view own exam_attempts" ON public.exam_attempts FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Admins can view all exam_attempts" ON public.exam_attempts FOR SELECT USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+CREATE POLICY "Authenticated users can save exam_attempts" ON public.exam_attempts FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
--- ANSWERS table
-CREATE TABLE IF NOT EXISTS public.answers (
+-- EXAM_ANSWERS table
+CREATE TABLE IF NOT EXISTS public.exam_answers (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  attempt_id UUID REFERENCES public.attempts ON DELETE CASCADE,
+  attempt_id UUID REFERENCES public.exam_attempts ON DELETE CASCADE,
   question_id UUID REFERENCES public.questions ON DELETE CASCADE,
   selected_option TEXT,
   is_correct BOOLEAN,
@@ -186,9 +195,9 @@ CREATE TABLE IF NOT EXISTS public.answers (
   UNIQUE(attempt_id, question_id)
 );
 
-ALTER TABLE public.answers ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can manage own answers via attempt" ON public.answers FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.attempts WHERE id = attempt_id AND user_id = auth.uid())
+ALTER TABLE public.exam_answers ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage own answers via attempt" ON public.exam_answers FOR ALL USING (
+  EXISTS (SELECT 1 FROM public.exam_attempts WHERE id = attempt_id AND user_id = auth.uid())
 );
 
 -- LEADERBOARDS table
@@ -204,12 +213,41 @@ CREATE TABLE IF NOT EXISTS public.leaderboards (
   last_updated TIMESTAMPTZ DEFAULT NOW(),
   exam_title TEXT,
   first_submission_at TIMESTAMPTZ DEFAULT NOW(),
-  total_attempts INTEGER DEFAULT 1
+  total_attempts INTEGER DEFAULT 1,
+  accuracy FLOAT DEFAULT 0.0,
+  xp INTEGER DEFAULT 0,
+  streak INTEGER DEFAULT 0,
+  badge TEXT DEFAULT 'Bronze',
+  correct_count INTEGER DEFAULT 0,
+  wrong_count INTEGER DEFAULT 0,
+  unanswered_count INTEGER DEFAULT 0,
+  total_questions INTEGER DEFAULT 0
 );
 
 ALTER TABLE public.leaderboards ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Leaderboards are viewable by everyone" ON public.leaderboards FOR SELECT USING (true);
 CREATE POLICY "Users can upsert own leaderboard entries" ON public.leaderboards ALL USING (auth.uid() = user_id);
+
+-- USER_STATS table
+CREATE TABLE IF NOT EXISTS public.user_stats (
+  user_id UUID REFERENCES auth.users PRIMARY KEY,
+  user_name TEXT,
+  user_photo TEXT,
+  total_exams INTEGER DEFAULT 0,
+  average_score FLOAT DEFAULT 0.0,
+  highest_score FLOAT DEFAULT 0.0,
+  total_correct INTEGER DEFAULT 0,
+  total_wrong INTEGER DEFAULT 0,
+  total_skipped INTEGER DEFAULT 0,
+  total_xp INTEGER DEFAULT 0,
+  streak INTEGER DEFAULT 0,
+  badge TEXT DEFAULT 'Bronze',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.user_stats ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "User stats are viewable by everyone" ON public.user_stats FOR SELECT USING (true);
+CREATE POLICY "Users can upsert own user stats" ON public.user_stats ALL USING (auth.uid() = user_id);
 
 -- ACADEMIC_CLASSES table
 CREATE TABLE IF NOT EXISTS public.academic_classes (
@@ -287,11 +325,15 @@ CREATE TABLE IF NOT EXISTS public.feedback (
   user_email TEXT,
   user_name TEXT,
   content TEXT,
+  status TEXT DEFAULT 'unread',
+  reply TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 ALTER TABLE public.feedback ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Admins can view feedback" ON public.feedback FOR SELECT USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+CREATE POLICY "Admins can update feedback" ON public.feedback FOR UPDATE USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+CREATE POLICY "Users can view own feedback" ON public.feedback FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Authenticated users can submit feedback" ON public.feedback FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
 -- BOOKMARKS table
@@ -327,3 +369,107 @@ CREATE TABLE IF NOT EXISTS public.newsletter_subscribers (
 ALTER TABLE public.newsletter_subscribers ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Only admins can view subscribers" ON public.newsletter_subscribers FOR SELECT USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
 CREATE POLICY "Public can subscribe to newsletter" ON public.newsletter_subscribers FOR INSERT WITH CHECK (true);
+
+-- NEWSLETTER_EMAIL_LOGS table
+CREATE TABLE IF NOT EXISTS public.newsletter_email_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subscriber_email TEXT,
+  subject TEXT,
+  message TEXT,
+  status TEXT DEFAULT 'sent',
+  sent_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.newsletter_email_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Only admins can view email logs" ON public.newsletter_email_logs FOR SELECT USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+CREATE POLICY "Admins can manage email logs" ON public.newsletter_email_logs ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+
+-- SUBSCRIPTION_SETTINGS table
+CREATE TABLE IF NOT EXISTS public.subscription_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  current_price NUMERIC NOT NULL DEFAULT 500,
+  old_price NUMERIC DEFAULT 1000,
+  discount_percent NUMERIC DEFAULT 50,
+  poster_image_url TEXT,
+  poster_title TEXT DEFAULT 'Parodorshhi Premium',
+  poster_description TEXT DEFAULT 'Get access to premium exams, performance analytics, and practice sheets',
+  payment_number_bkash TEXT DEFAULT '01700000000',
+  payment_number_nagad TEXT DEFAULT '01900000000',
+  is_subscription_enabled BOOLEAN DEFAULT TRUE,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.subscription_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public select settings" ON public.subscription_settings FOR SELECT USING (true);
+CREATE POLICY "Allow admin all settings" ON public.subscription_settings FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+
+INSERT INTO public.subscription_settings (id, current_price, old_price, discount_percent, poster_image_url, poster_title, poster_description, payment_number_bkash, payment_number_nagad, is_subscription_enabled)
+VALUES ('default', 500, 1000, 50, 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=1200&auto=format&fit=crop', 'Parodorshhi Premium', 'Get full access to all premium exams, in-depth subject-specific interactive analytics, exclusive books and notes, and automatic future premium modules.', '01712345678', '01912345678', TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- SUBSCRIPTION_PACKAGES table
+CREATE TABLE IF NOT EXISTS public.subscription_packages (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  duration_days INTEGER NOT NULL,
+  price NUMERIC NOT NULL,
+  old_price NUMERIC,
+  discount_percent NUMERIC,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.subscription_packages ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public select packages" ON public.subscription_packages FOR SELECT USING (true);
+CREATE POLICY "Allow admin all packages" ON public.subscription_packages FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+
+INSERT INTO public.subscription_packages (name, duration_days, price, old_price, discount_percent, is_active)
+VALUES 
+  ('1 Month', 30, 500, 1000, 50, TRUE),
+  ('3 Months', 90, 1200, 2400, 50, TRUE),
+  ('6 Months', 180, 2000, 4000, 50, TRUE),
+  ('12 Months', 365, 3500, 7000, 50, TRUE)
+ON CONFLICT (name) DO NOTHING;
+
+-- SUBSCRIPTION_BENEFITS table
+CREATE TABLE IF NOT EXISTS public.subscription_benefits (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  text TEXT UNIQUE NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.subscription_benefits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public select benefits" ON public.subscription_benefits FOR SELECT USING (true);
+CREATE POLICY "Allow admin all benefits" ON public.subscription_benefits FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+
+INSERT INTO public.subscription_benefits (text, is_active)
+VALUES 
+  ('Premium Exams', TRUE),
+  ('Advanced Performance Analytics', TRUE),
+  ('Exclusive Resources', TRUE),
+  ('Future Premium Features', TRUE)
+ON CONFLICT (text) DO NOTHING;
+
+-- SUBSCRIPTION_REQUESTS table
+CREATE TABLE IF NOT EXISTS public.subscription_requests (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+  package_name TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  payment_method TEXT NOT NULL,
+  transaction_id TEXT UNIQUE NOT NULL,
+  payment_number TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  approved_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  approved_at TIMESTAMPTZ,
+  expiry_date TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.subscription_requests ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view own request" ON public.subscription_requests FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own request" ON public.subscription_requests FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Admins can manage subscription requests" ON public.subscription_requests FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'));
+
+

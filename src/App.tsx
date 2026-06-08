@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import React, { useState, useMemo, useEffect, useRef, ChangeEvent, FormEvent, cloneElement, useCallback } from 'react';
+import parodorshhiLogo from './assets/images/parodorshhi_logo_1780464304136.png';
 import { 
   MathQuestionContent, 
   MathOptionContent, 
@@ -7,6 +8,7 @@ import {
   parseOption, 
   serializeQuestionText 
 } from './components/Exam/MathQuestionContent';
+import { RevisionCenter } from './components/RevisionCenter';
 import { 
   Search, 
   BookOpen, 
@@ -18,6 +20,10 @@ import {
   Settings, 
   Plus, 
   Trash2, 
+  Users,
+  CheckCircle,
+  Activity,
+  Send,
   ChevronLeft, 
   ChevronRight,
   ChevronDown,
@@ -78,15 +84,50 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, Button, Badge } from './components/ui/Base';
 import { INITIAL_DATA, MOCK_EXAMS } from './data/mockData';
-import { ContentItem, Category, AcademicClass, ExternalResource, Feedback, Playlist, Exam, Question, ExamAttempt, LeaderboardEntry, CustomExamSettings, AcademicClassInfo, AcademicSubject, AcademicChapter, AcademicTopic, AcademicGroup, OperationType, FirestoreErrorInfo } from './types';
+import { ContentItem, Category, AcademicClass, ExternalResource, Feedback, Playlist, Exam, Question, ExamAttempt, ExamAttemptDB, LeaderboardEntry, CustomExamSettings, AcademicClassInfo, AcademicSubject, AcademicChapter, AcademicTopic, AcademicGroup, OperationType, FirestoreErrorInfo, deserializeExplanation, serializeExplanation, UserStats } from './types';
+
+export const padQuestionsWithPlaceholders = (
+  realQuestions: Question[], 
+  targetTotalCount: number, 
+  examType: 'mcq' | 'written' | 'hybrid' | string = 'mcq',
+  settingsOrExam: any = {}
+): Question[] => {
+  const finalQuestions = [...realQuestions];
+  const missingCount = targetTotalCount - realQuestions.length;
+  if (missingCount <= 0) return finalQuestions;
+
+  for (let i = 0; i < missingCount; i++) {
+    const placeholderIdx = realQuestions.length + i + 1;
+    const isWritten = examType === 'written' || (examType === 'hybrid' && i % 2 !== 0);
+    
+    finalQuestions.push({
+      id: `placeholder_${isWritten ? 'written' : 'mcq'}_${placeholderIdx}`,
+      examId: settingsOrExam.id || settingsOrExam.examId || 'custom',
+      type: isWritten ? 'written' : 'mcq',
+      questionText: `Upcoming Question ${placeholderIdx}: This question is under preparation.`,
+      options: ["Option 1", "Option 2", "Option 3", "Option 4"],
+      correctAnswer: -1,
+      points: Number((isWritten ? settingsOrExam.marksPerWritten || settingsOrExam.written_points : settingsOrExam.marksPerMcq || settingsOrExam.mcq_points) || 1),
+      class: settingsOrExam.class || settingsOrExam.academicClass || 'Premium',
+      subject: settingsOrExam.subject || 'General',
+      chapter: settingsOrExam.chapter || 'General',
+      createdAt: new Date().toISOString(),
+      isPlaceholder: true
+    } as unknown as Question);
+  }
+  return finalQuestions;
+};
 import { supabase } from './supabaseClient';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { PremiumExamSection } from './components/PremiumExam/PremiumExamSection';
 import { AcademicManagement } from './components/Admin/AcademicManagement';
+import { PremiumSubscriptionPage } from './components/PremiumSubscription/PremiumSubscriptionPage';
+import { AdminSubscriptionManager } from './components/PremiumSubscription/AdminSubscriptionManager';
 import { LandingPage } from './components/Landing/LandingPage';
-import { PdfViewer } from './components/ui/PdfViewer';
+import { PdfViewer, prefetchPdfUrl } from './components/ui/PdfViewer';
 import { TiltContainer, FlyInteraction, MiniRobot, WaveDivider, ScrollSection } from './components/Landing/LandingComponents';
 import { supabaseService, TABLE_MAP } from './services/supabaseService';
 import { User } from '@supabase/supabase-js';
@@ -178,12 +219,243 @@ const getEmbedUrl = (url: string | null) => {
 
 // Landing page components moved to LandingPage.tsx and LandingComponents.tsx
 
+interface FeedbackCardProps {
+  feedback: Feedback;
+  onUpdate: () => void;
+}
+
+const FeedbackCard: React.FC<FeedbackCardProps> = ({ feedback, onUpdate }) => {
+  const [replyText, setReplyText] = useState((feedback.reply || feedback.admin_reply) || '');
+  const [isEditingReply, setIsEditingReply] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleStatusChange = async (newStatus: string) => {
+    setLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      await supabaseService.updateFeedbackStatus(feedback.id, newStatus);
+      setSuccessMsg(`Status updated to ${newStatus}!`);
+      onUpdate();
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to update status.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReplySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!replyText.trim()) return;
+    setLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      await supabaseService.replyToFeedback(feedback.id, replyText.trim());
+      setSuccessMsg('Reply saved successfully!');
+      setIsEditingReply(false);
+      onUpdate();
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to submit reply.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'resolved':
+        return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20';
+      case 'read':
+        return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
+      default:
+        return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20';
+    }
+  };
+
+  const emailText = feedback.userEmail || feedback.user_email || 'guest@educationalportal.org';
+  const nameText = feedback.userName || feedback.user_name || 'Guest Student';
+
+  return (
+    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 space-y-4 shadow-sm transition-all hover:shadow-md hover:border-zinc-300 dark:hover:border-zinc-700">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* User Info */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-600 font-bold">
+            {nameText.charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <h4 className="text-sm font-black text-zinc-900 dark:text-white flex items-center gap-2">
+              {nameText}
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${getStatusColor(feedback.status)}`}>
+                {feedback.status}
+              </span>
+            </h4>
+            <p className="text-[10px] text-zinc-500 font-medium">{emailText}</p>
+          </div>
+        </div>
+        {/* Date */}
+        <div className="flex items-center gap-2 text-[10px] text-zinc-400 font-bold uppercase tracking-widest sm:text-right">
+          <Clock size={12} />
+          {formatDate(feedback.createdAt)}
+        </div>
+      </div>
+
+      {/* Message Content */}
+      <div className="space-y-2">
+        <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed bg-zinc-50 dark:bg-zinc-800/50 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800 whitespace-pre-wrap">
+          {feedback.message}
+        </p>
+      </div>
+
+      {/* Admin Action Row */}
+      <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/85 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* Status buttons */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 mr-1">Status:</span>
+            <button
+              type="button"
+              onClick={() => handleStatusChange('unread')}
+              disabled={loading}
+              className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                feedback.status === 'unread'
+                  ? 'bg-amber-500 text-white border-amber-500'
+                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100'
+              }`}
+            >
+              Unread
+            </button>
+            <button
+              type="button"
+              onClick={() => handleStatusChange('read')}
+              disabled={loading}
+              className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                feedback.status === 'read'
+                  ? 'bg-blue-500 text-white border-blue-500'
+                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100'
+              }`}
+            >
+              Read
+            </button>
+            <button
+              type="button"
+              onClick={() => handleStatusChange('resolved')}
+              disabled={loading}
+              className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                feedback.status === 'resolved'
+                  ? 'bg-emerald-500 text-white border-emerald-500'
+                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100'
+              }`}
+            >
+              Resolved
+            </button>
+          </div>
+
+          {/* Reply Toggle Button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsEditingReply(!isEditingReply)}
+            className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50/50 px-2 py-1 rounded-lg"
+          >
+            <MessageSquare size={14} className="mr-1.5 inline" />
+            {(feedback.reply || feedback.admin_reply) ? 'Edit Reply' : 'Reply'}
+          </Button>
+        </div>
+
+        {/* Display response if exists and not editing */}
+        {(feedback.reply || feedback.admin_reply) && !isEditingReply && (
+          <div className="bg-indigo-50/40 dark:bg-indigo-950/20 border border-indigo-100/50 dark:border-indigo-900/10 p-4 rounded-2xl flex gap-3 animate-in fade-in slide-in-from-top-1">
+            <div className="w-8 h-8 rounded-full bg-indigo-500 text-white font-bold flex items-center justify-center text-xs shadow-sm">
+              A
+            </div>
+            <div className="flex-1 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-extrabold uppercase text-indigo-600 dark:text-indigo-400 tracking-widest">Admin Response</span>
+                <span className="text-[9px] text-emerald-500 font-extrabold uppercase tracking-wide">solved</span>
+              </div>
+              <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                {feedback.reply || feedback.admin_reply}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Reply Composer Form */}
+        {isEditingReply && (
+          <form onSubmit={handleReplySubmit} className="space-y-3 pt-1 animate-in slide-in-from-top-2 duration-200">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between px-1">
+                <label className="text-[10px] font-extrabold uppercase text-zinc-400 tracking-widest pl-1">Write Administrator Response</label>
+                {replyText && (
+                  <span className="text-[9px] text-zinc-400 font-medium font-mono">Auto-marks feedback as Resolved</span>
+                )}
+              </div>
+              <textarea
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder="Type your response here..."
+                disabled={loading}
+                className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-2xl outline-none text-xs dark:text-white min-h-[90px] focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder:text-zinc-400"
+                required
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2 text-xs">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsEditingReply(false);
+                  setReplyText((feedback.reply || feedback.admin_reply) || '');
+                }}
+                disabled={loading}
+                className="rounded-xl px-4 py-2"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={loading || !replyText.trim()}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-4 py-2 font-bold flex items-center gap-1.5 shadow-md shadow-indigo-500/10"
+              >
+                {loading ? <RefreshCcw className="animate-spin" size={14} /> : <Check size={14} />}
+                Save Reply
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {/* Local Error & Success Alerts */}
+        {successMsg && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-600 dark:text-emerald-400 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+            <CheckCircle2 size={14} />
+            {successMsg}
+          </div>
+        )}
+        {errorMsg && (
+          <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-2 animate-in fade-in">
+            <AlertCircle size={14} />
+            {errorMsg}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const Logo = ({ className = "h-10 w-auto", alt = "Parodorshhi Logo" }: { className?: string, alt?: string }) => {
   const [error, setError] = useState(false);
   const paths = [
-    "/api/v1/files/Gemini_Generated_Image_ro03d6ro03d6ro03.png",
+    parodorshhiLogo,
+    "/api/v1/files/input_file_2.png",
+    "/api/v1/files/input_file_1.png",
     "/api/v1/files/input_file_0.png",
-    "/api/v1/files/input_file_1.png"
+    "/api/v1/files/Gemini_Generated_Image_ro03d6ro03d6ro03.png"
   ];
   const [pathIndex, setPathIndex] = useState(0);
 
@@ -209,10 +481,13 @@ const Logo = ({ className = "h-10 w-auto", alt = "Parodorshhi Logo" }: { classNa
 };
 
 export default function App() {
+  const queryClient = useQueryClient();
   const [contents, setContents] = useState<ContentItem[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [externalResources, setExternalResources] = useState<ExternalResource[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [adminUserSearchQuery, setAdminUserSearchQuery] = useState('');
+  const [adminUserCategory, setAdminUserCategory] = useState<'all' | 'normal' | 'premium'>('all');
   const [bookmarks, setBookmarks] = useState<string[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [firestoreUser, setFirestoreUser] = useState<any>(null);
@@ -227,24 +502,108 @@ export default function App() {
   const [canManageQuestions, setCanManageQuestions] = useState(false);
   const [canManageResources, setCanManageResources] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTick(t => t + 1);
+    }, 10000); // Dynamic timer that ticks every 10 seconds to ensure real-time subscription expiry checks
+    return () => clearInterval(timer);
+  }, []);
 
   const hasPremiumAccess = useMemo(() => {
-    return isPremium || firestoreUser?.hasPremiumAccess === true || userRole === 'admin';
-  }, [isPremium, firestoreUser?.hasPremiumAccess, userRole]);
+    if (userRole === 'admin') return true;
+    const basePremium = isPremium || firestoreUser?.hasPremiumAccess === true;
+    if (basePremium && firestoreUser?.premiumExpiry) {
+      if (new Date(firestoreUser.premiumExpiry).getTime() < Date.now()) {
+        return false;
+      }
+    }
+    return basePremium;
+  }, [isPremium, firestoreUser?.hasPremiumAccess, firestoreUser?.premiumExpiry, userRole, tick]);
 
   const hasAdminAccess = useMemo(() => {
     return userRole === 'admin' || canUpload || canManageExams || canManageQuestions || canManageResources;
   }, [userRole, canUpload, canManageExams, canManageQuestions, canManageResources]);
 
+  const usersWithRealtimeExpiry = useMemo(() => {
+    return allUsers.map(u => {
+      const isExpired = u.premium_expiry && new Date(u.premium_expiry).getTime() < Date.now();
+      if (isExpired) {
+        return {
+          ...u,
+          hasPremiumAccess: false,
+          isPremium: false
+        };
+      }
+      return u;
+    });
+  }, [allUsers, tick]);
+
+  const filteredUsers = useMemo(() => {
+    let users = usersWithRealtimeExpiry;
+    if (adminUserCategory === 'normal') {
+      users = usersWithRealtimeExpiry.filter(u => !(u.hasPremiumAccess || u.isPremium));
+    } else if (adminUserCategory === 'premium') {
+      users = usersWithRealtimeExpiry.filter(u => (u.hasPremiumAccess || u.isPremium));
+    }
+
+    if (!adminUserSearchQuery.trim()) return users;
+    const query = adminUserSearchQuery.trim().toLowerCase();
+    return users.filter(u => 
+      (u.email && u.email.toLowerCase().includes(query)) ||
+      (u.name && u.name.toLowerCase().includes(query)) ||
+      (u.id && u.id.toLowerCase().includes(query))
+    );
+  }, [usersWithRealtimeExpiry, adminUserSearchQuery, adminUserCategory]);
+
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [view, setView] = useState<'home' | 'category' | 'saved' | 'admin' | 'dashboard' | 'exam' | 'leaderboard' | 'privacy' | 'terms' | 'cookies' | 'premium-exam'>('home');
+  const [view, setView] = useState<'home' | 'category' | 'saved' | 'admin' | 'dashboard' | 'exam' | 'leaderboard' | 'privacy' | 'terms' | 'cookies' | 'premium-exam' | 'premium-subscription' | 'revision'>('home');
+  const [savedQuestionIds, setSavedQuestionIds] = useState<Set<string>>(new Set());
+
+  const handleToggleSaveQuestion = async (questionId: string) => {
+    if (!user) {
+      setGlobalError("দয়া করে প্রশ্ন সেভ করতে প্রথমে লগইন করুন।");
+      return;
+    }
+    try {
+      const isCurrentlySaved = savedQuestionIds.has(questionId);
+      if (isCurrentlySaved) {
+        await supabaseService.unsaveQuestion(user.id, questionId);
+      } else {
+        await supabaseService.saveQuestion(user.id, questionId);
+      }
+      refetchSavedQuestions();
+    } catch (err: any) {
+      console.error("Error toggling saved question:", err);
+      setGlobalError("প্রশ্নটি সেভ করতে সমস্যা হয়েছে। দয়া করে আবার চেষ্টা করুন।");
+    }
+  };
+
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    if (isUserMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [isUserMenuOpen]);
   const [isDarkMode, setIsDarkMode] = useLocalStorage('parodorshhi_darkmode', false);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
-  const [adminTab, setAdminTab] = useState<'resources' | 'playlists' | 'users' | 'feedback' | 'exams' | 'questions' | 'leaderboards' | 'academics'>('resources');
+  const [adminTab, setAdminTab] = useState<'resources' | 'playlists' | 'users' | 'feedback' | 'exams' | 'questions' | 'leaderboards' | 'academics' | 'newsletter' | 'subscriptions'>('resources');
   const [allFeedback, setAllFeedback] = useState<Feedback[]>([]);
   const [allExams, setAllExams] = useState<Exam[]>([]);
   const [allQuestions, setAllQuestions] = useState<Question[]>([]);
@@ -255,6 +614,16 @@ export default function App() {
   const [isDeletingExam, setIsDeletingExam] = useState(false);
 
   const [contentTypeFilter, setContentTypeFilter] = useState<'free' | 'premium'>('free');
+  const [showPremiumPromptModal, setShowPremiumPromptModal] = useState(false);
+
+  // Newsletter Admin States
+  const [newsletterSubject, setNewsletterSubject] = useState('');
+  const [newsletterMsg, setNewsletterMsg] = useState('');
+  const [isSendingLogs, setIsSendingLogs] = useState(false);
+  const [sendingStats, setSendingStats] = useState<{ total: number; sent: number; duplicates: number; failed: number } | null>(null);
+  const [sendingStatusText, setSendingStatusText] = useState('');
+  const [newsletterSearchFilter, setNewsletterSearchFilter] = useState('');
+  const [newsletterSubTab, setNewsletterSubTab] = useState<'subscribers' | 'logs'>('subscribers');
 
   // Filters
   const [classFilter, setClassFilter] = useState<AcademicClass | 'All'>('All');
@@ -267,8 +636,16 @@ export default function App() {
 
   const isGroupNeeded = (className: any) => {
     if (!className || typeof className !== 'string') return false;
-    const classNum = parseInt(className.replace(/\D/g, ''));
-    return !isNaN(classNum) && classNum >= 9 && classNum <= 12;
+    const foundClass = dynamicClasses.find(c => c.name === className);
+    if (foundClass) {
+      return foundClass.has_groups ?? (foundClass as any).hasGroups ?? false;
+    }
+    // Fallback default logic if not loaded: SSC, HSC, Admission have groups
+    const nameLower = className.toLowerCase();
+    if (nameLower === 'ssc' || nameLower === 'hsc' || nameLower === 'admission') {
+      return true;
+    }
+    return false;
   };
 
   // Reset group filter when class changes to non-stream level
@@ -298,11 +675,14 @@ export default function App() {
     const matchedClass = dynamicClasses.find(c => c.name === className);
     if (!matchedClass) return [];
     
-    return dynamicSubjects.filter(s => {
+    const subjectNames = dynamicSubjects.filter(s => {
       const matchClass = s.classId === matchedClass.id;
-      const matchGroup = groupName === 'All' || s.academicGroup === groupName || s.academicGroup === 'All' || (s as any).academic_group === 'All';
+      const sGroup = (s.academicGroup || (s as any).academic_group || 'All').trim().toLowerCase();
+      const filterGroup = (groupName || 'All').trim().toLowerCase();
+      const matchGroup = filterGroup === 'all' || sGroup === filterGroup || sGroup === 'all';
       return matchClass && matchGroup;
     }).map(s => s.name);
+    return Array.from(new Set(subjectNames));
   }, [dynamicSubjects, dynamicClasses]);
 
   const currentSubjects = useMemo(() => getSubjectNamesForClass(classFilter, groupFilter), [getSubjectNamesForClass, classFilter, groupFilter]);
@@ -313,6 +693,7 @@ export default function App() {
   const [activePdf, setActivePdf] = useState<{ url: string; isRestricted: boolean } | null>(null);
   const [isPdfFullScreen, setIsPdfFullScreen] = useState(false);
   const [activeVideo, setActiveVideo] = useState<string | null>(null);
+  const [isVideoLoading, setIsVideoLoading] = useState(false);
   const [activePlaylist, setActivePlaylist] = useState<Playlist | null>(null);
   const [fetchedPlaylistVideos, setFetchedPlaylistVideos] = useState<any[]>([]);
   const [isFetchingPlaylist, setIsFetchingPlaylist] = useState(false);
@@ -328,9 +709,12 @@ export default function App() {
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [profileFormData, setProfileFormData] = useState({ 
     displayName: '', 
-    academicClass: (dynamicClasses[0]?.name || 'Class 9') as AcademicClass,
+    academicClass: (dynamicClasses?.[0]?.name || 'SSC') as AcademicClass,
     academicGroup: 'All'
   });
+  const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
+  const [isAvatarRemoved, setIsAvatarRemoved] = useState<boolean>(false);
   const [examSubjectFilter, setExamSubjectFilter] = useState('All');
   const [examChapterFilter, setExamChapterFilter] = useState<string>('');
   const [examTopicFilter, setExamTopicFilter] = useState<string>('All');
@@ -339,20 +723,19 @@ export default function App() {
     subject: string;
     chapter: string;
   }>({
-     academicClass: dynamicClasses[0]?.name || 'Class 9',
+     academicClass: dynamicClasses?.[0]?.name || 'SSC',
      subject: '',
      chapter: 'All Chapters'
    });
   const [isGeneratingExam, setIsGeneratingExam] = useState(false);
 
   const handlePremiumExamClick = () => {
-    if (hasPremiumAccess) {
-      setView('premium-exam');
-      setActiveExam(null);
+    if (!hasPremiumAccess) {
+      setShowPremiumPromptModal(true);
     } else {
-      // Show upgrade modal or alert
-      alert("Elite Customize Exam is a PREMIUM feature. Please upgrade your account to access it.");
+      setView('premium-exam');
     }
+    setActiveExam(null);
   };
 
   const ai = useMemo(() => {
@@ -651,12 +1034,7 @@ export default function App() {
 
   const handleStartExam = async (exam: Exam) => {
     if (exam.isPremium && !hasPremiumAccess) {
-      setGlobalError("🔒 This Exam is for Premium users only. Contact admin for access.");
-      return;
-    }
-    
-    if (!user) {
-      setGlobalError("Please login to start the exam.");
+      setShowPremiumPromptModal(true);
       return;
     }
 
@@ -667,36 +1045,65 @@ export default function App() {
     console.log('--- STARTING NEW EXAM SYSTEM ---');
 
     try {
-      // 1. Create a row in 'attempts' table
-      const currentUserName = firestoreUser?.display_name || user.user_metadata?.full_name || 'Student';
-      const currentUserClass = firestoreUser?.academic_class || dynamicClasses[0]?.name || 'Class 9';
+      // Create attempt safely
+      const currentUserName = user ? (firestoreUser?.display_name || user.user_metadata?.full_name || 'Student') : 'Guest Student';
+      const currentUserClass = user ? (firestoreUser?.academic_class || dynamicClasses?.[0]?.name || 'SSC') : (dynamicClasses?.[0]?.name || 'SSC');
       
-      const attempt = await supabaseService.createAttempt({
-        user_id: user.id,
-        exam_id: exam.id,
-        user_name: currentUserName,
-        user_class: currentUserClass
-      });
-      
-      if (!attempt) throw new Error("Failed to initialize exam attempt.");
-      setCurrentAttemptId(attempt.id);
-
-      // 2. Fetch questions from the specific exam's ID
-      let pool = await supabaseService.fetchQuestions(exam.id);
-      
-      if (!pool || pool.length === 0) {
-        console.warn("No questions fetched from DB for exam, generating robust fallback hybrid math/GK questions...");
-        pool = getFallbackQuestions(exam.subject || 'Math', exam.class || 'Class 9', exam.id);
+      let attemptId = '';
+      if (user) {
+        try {
+          const attempt = await supabaseService.createAttempt({
+            user_id: user.id,
+            exam_id: exam.id,
+            user_name: currentUserName,
+            academic_class: String(exam.class || exam.academicClass || exam.academic_class || currentUserClass || 'SSC').trim(),
+            academic_group: String(exam.academicGroup || exam.academic_group || 'General').trim(),
+            subject: String(exam.subject || 'All').trim(),
+            chapter: String(exam.chapter || 'All').trim(),
+            topic: String((exam as any).topic || 'All').trim()
+          });
+          if (attempt && attempt.id) {
+            attemptId = attempt.id;
+          }
+        } catch (dbErr) {
+          console.warn("Could not write attempt to Supabase, falling back to local guest mode:", dbErr);
+        }
       }
 
-      // Selection Logic: Shuffle and slice based on totalQuestionsToShow
-      const finalQuestions = [...pool]
-        .sort(() => Math.random() - 0.5)
-        .slice(0, exam.totalQuestionsToShow || pool.length);
+      if (!attemptId) {
+        attemptId = `local-fallback-attempt-${Date.now()}`;
+      }
+      setCurrentAttemptId(attemptId);
+
+      // 2. Fetch questions from the specific exam with fallback
+      let pool: Question[] = [];
+      try {
+        pool = await supabaseService.fetchQuestions(exam);
+      } catch (poolErr) {
+        console.warn("Could not fetch questions from db: ", poolErr);
+      }
+      
+      // Selection Logic: Shuffle / slice based on totalQuestionsToShow / total_questions_to_show
+      const limitCount = exam.totalQuestionsToShow || exam.total_questions_to_show || pool.length || 10;
+      let finalQuestions = [...pool];
+      if ((exam as any).randomizeQuestions !== false) {
+        finalQuestions.sort(() => Math.random() - 0.5);
+      }
+      finalQuestions = finalQuestions.slice(0, limitCount);
+
+      // Pad with pristine placeholders if we have less questions in DB than configured/expected
+      if (finalQuestions.length < limitCount) {
+        finalQuestions = padQuestionsWithPlaceholders(
+          finalQuestions,
+          limitCount,
+          exam.examType || exam.exam_type || 'mcq',
+          exam
+        );
+      }
       
       console.log(`Pool size: ${pool.length}, Selected: ${finalQuestions.length}`);
 
-      const timeLimit = exam.timeLimit || 30;
+      const timeLimit = exam.timeLimit || exam.time_limit || 30;
 
       setActiveExam({ 
         ...exam, 
@@ -726,7 +1133,7 @@ export default function App() {
       [questionId]: value
     }));
 
-    if (currentAttemptId) {
+    if (currentAttemptId && !currentAttemptId.startsWith('local-fallback-attempt-')) {
       try {
         await supabaseService.upsertAnswer({
           attempt_id: currentAttemptId,
@@ -739,36 +1146,257 @@ export default function App() {
     }
   };
 
-  const handleExamSubmit = async () => {
-    if (!activeExam || !user || !currentAttemptId) return;
+  const handleCustomExamFinished = (customExam: any, result: any) => {
+    setActiveExam(customExam);
+    setExamResults(result);
+    const answersObj: any = {};
+    if (result.answers) {
+      if (Array.isArray(result.answers)) {
+        customExam.questions.forEach((q: any, idx: number) => {
+          answersObj[q.id] = result.answers[idx];
+        });
+      } else {
+        Object.assign(answersObj, result.answers);
+      }
+    }
+    setExamAnswers(answersObj);
+    setView('exam');
+  };
 
+  const handleExamSubmit = async () => {
+    // Step 0: Initial guards and state checks
+    console.log("--- STARTING EXAM SUBMISSION FLOW ---");
+    if (!activeExam) {
+      console.warn("[handleExamSubmit][Step 0] Blocked submission: activeExam is null or undefined.");
+      return;
+    }
+
+    if (isGeneratingExam) {
+      console.warn("[handleExamSubmit][Step 0] Blocked submission: Submission already in progress (isGeneratingExam is true).");
+      return;
+    }
+
+    console.log("[handleExamSubmit][Step 1] Preparing transition states. Active exam ID:", activeExam?.id);
     setIsExamActive(false);
     setIsGeneratingExam(true); // Reuse as overall loading state
+    setGlobalError(null);
     
     try {
-      // 1. Call Supabase Edge Function for auto scoring
-      await supabaseService.submitExam(currentAttemptId);
-
-      // 2. Fetch updated attempt with score
-      const updatedAttempt = await supabaseService.getAttempt(currentAttemptId);
+      // Step 2: Extract attributes with safe fallback values
+      console.log("[handleExamSubmit][Step 2] Processing exam parameters with safe defensive fallbacks...");
+      const examQuestions = Array.isArray(activeExam?.questions) 
+        ? activeExam.questions.filter((q: any) => q && !q.isPlaceholder)
+        : [];
       
-      if (updatedAttempt) {
-        setExamResults({
-          ...updatedAttempt,
-          userName: updatedAttempt.user_name || 'Student',
-          totalQuestions: activeExam.questions.length,
-          examTitle: activeExam.title || (updatedAttempt as any).exams?.title
-        } as any);
+      const examTitleFallback = activeExam?.title || "Practice Match";
+      const examSubjectFallback = activeExam?.subject || "General";
+      const examChapterFallback = activeExam?.chapter || (activeExam as any)?.academicChapter || "General";
+      const examTopicFallback = (activeExam as any)?.topic_id || (activeExam as any)?.topicId || (activeExam as any)?.topic || "General";
+      const examAcademicGroupFallback = activeExam?.academicGroup || (activeExam as any)?.academic_group || "General";
+      const examAnswersFallback = examAnswers || {};
+      const examTimeLimitFallback = Number(activeExam?.timeLimit || 30);
+      const isPremiumExamFallback = activeExam?.isPremium ?? (activeExam as any)?.is_premium ?? false;
+
+      console.log("[handleExamSubmit][Step 2] Parameter stats resolved:", {
+        questionsCount: examQuestions.length,
+        title: examTitleFallback,
+        subject: examSubjectFallback,
+        chapter: examChapterFallback,
+        topic: examTopicFallback,
+        academic_group: examAcademicGroupFallback,
+        time_limit: examTimeLimitFallback
+      });
+
+      // Step 3: Local answer evaluation & score calculation
+      console.log("[handleExamSubmit][Step 3] Initiating local score evaluation...");
+      let score = 0;
+      let wrongCount = 0;
+      let unansweredCount = 0;
+
+      examQuestions.forEach((q: any, index: number) => {
+        if (!q) {
+          console.warn(`[handleExamSubmit][Step 3] Warning: Question at index ${index} is null or undefined.`);
+          return;
+        }
+        const userSelectedOption = examAnswersFallback[q.id];
+        const correctAnswers = q?.correctAnswer ?? q?.correct_answer;
+
+        if (userSelectedOption === undefined || userSelectedOption === null || userSelectedOption === '') {
+          unansweredCount++;
+        } else if (String(userSelectedOption).trim() === String(correctAnswers).trim()) {
+          score += Number(q?.points || 1);
+        } else {
+          wrongCount++;
+        }
+      });
+
+      const totalMarks = examQuestions.reduce((acc: number, q: any) => acc + (q?.points ? Number(q.points) : 1), 0);
+      const timeSpent = Math.max(0, Math.round(examTimeLimitFallback * 60 - examTimeLeft));
+      const percentageScore = totalMarks > 0 ? Number(((score / totalMarks) * 100).toFixed(2)) : 0;
+      const correctCount = examQuestions.length - wrongCount - unansweredCount;
+
+      console.log("[handleExamSubmit][Step 3] Local score evaluation results:", {
+        calculatedScore: score,
+        totalMarks,
+        timeSpentSeconds: timeSpent,
+        percentageScore,
+        correctCount,
+        wrongCount,
+        unansweredCount
+      });
+
+      const currentUserName = user ? (firestoreUser?.display_name || user.user_metadata?.full_name || 'Student') : 'Guest Student';
+      const currentUserClass = user ? (firestoreUser?.academic_class || dynamicClasses?.[0]?.name || 'SSC') : (dynamicClasses?.[0]?.name || 'SSC');
+
+      // Step 4: Construct the database insert payload - matching public.exam_attempts exactly
+      const cleanPayload: ExamAttemptDB = {
+        exam_id: activeExam?.id || null,
+        user_id: user?.id || null,
+        answers: examAnswersFallback,
+        score: Math.max(0, isNaN(score) ? 0 : score),
+        total_questions: Math.max(0, isNaN(examQuestions.length) ? 0 : examQuestions.length),
+        time_taken: Math.max(0, isNaN(timeSpent) ? 0 : timeSpent),
+        completed_at: new Date().toISOString(),
+        user_name: String(currentUserName || 'Student').trim(),
+        total_marks: Math.max(0, isNaN(totalMarks) ? 0 : totalMarks),
+        correct_count: Math.max(0, isNaN(correctCount) ? 0 : correctCount),
+        wrong_count: Math.max(0, isNaN(wrongCount) ? 0 : wrongCount),
+        unanswered_count: Math.max(0, isNaN(unansweredCount) ? 0 : unansweredCount),
+        is_premium: Boolean(isPremiumExamFallback),
+        academic_class: String(activeExam?.class || activeExam?.academicClass || activeExam?.academic_class || currentUserClass || 'SSC').trim(),
+        academic_group: String(activeExam?.academicGroup || activeExam?.academic_group || 'General').trim(),
+        subject: String(activeExam?.subject || 'All').trim(),
+        chapter: String(activeExam?.chapter || 'All').trim(),
+        topic: String((activeExam as any)?.topic || 'All').trim()
+      };
+
+      let isUpsert = false;
+      if (currentAttemptId && !currentAttemptId.startsWith('local-fallback-attempt-')) {
+        cleanPayload.id = currentAttemptId;
+        isUpsert = true;
       }
 
+      console.log(`[handleExamSubmit][Step 4] DB WRITE PREPARATION. Mode: ${isUpsert ? 'UPSERT' : 'INSERT'}`);
+      console.log("[handleExamSubmit][Step 4] Final frontend payload to transmit:", cleanPayload);
+
+      // Step 5: Save to Database
+      console.log("[handleExamSubmit][Step 5] Triggering supabaseService.safeWrite transaction...");
+      const savedAttempt = await supabaseService.safeWrite(
+        'exam_attempts',
+        cleanPayload,
+        isUpsert ? 'upsert' : 'insert'
+      );
+
+      if (!savedAttempt || !savedAttempt.id) {
+        console.error("[handleExamSubmit][Step 5] DB Save failed! Result is empty or missing ID column response.");
+        throw new Error("Supabase insert/upsert returned null or empty result. Row was not saved successfully.");
+      }
+
+      console.log("[handleExamSubmit][Step 5] DB Save SUCCESS. Supabase response returned row:", savedAttempt);
+
+      // Automatically track wrong/correct questions for MCQ checks
+      if (user && user.id) {
+        examQuestions.forEach((q: any) => {
+          if (q && q.type === 'mcq' && q.id) {
+            const userSelectedOption = examAnswersFallback[q.id];
+            const correctOption = q?.correctAnswer ?? q?.correct_answer;
+            if (userSelectedOption !== undefined && userSelectedOption !== null && userSelectedOption !== '') {
+              if (String(userSelectedOption).trim() === String(correctOption).trim()) {
+                supabaseService.removeWrongQuestion(user.id, q.id).catch(e => {
+                  console.warn("[handleExamSubmit] Failed to remove correct question from wrong track:", e);
+                });
+              } else {
+                supabaseService.recordWrongQuestion(
+                  user.id,
+                  q.id,
+                  String(userSelectedOption),
+                  String(correctOption),
+                  activeExam?.id || null,
+                  'Standard Exam'
+                ).catch(e => {
+                  console.warn("[handleExamSubmit] Failed to record wrong question:", e);
+                });
+              }
+            }
+          }
+        });
+      }
+
+      // Step 6: Update local results state with all UI attributes
+      console.log("[handleExamSubmit][Step 6] Updating local results page client-side state...");
+      setExamResults({
+        ...savedAttempt,
+        id: savedAttempt.id,
+        user_id: savedAttempt.user_id || user?.id || 'guest',
+        exam_id: activeExam.id,
+        user_name: savedAttempt.user_name || currentUserName,
+        academicClass: savedAttempt.academic_class || currentUserClass,
+        academicGroup: savedAttempt.academic_group || 'General',
+        subject: savedAttempt.subject || 'All',
+        chapter: savedAttempt.chapter || 'All',
+        topic: savedAttempt.topic || 'All',
+        score: savedAttempt.score !== undefined ? Number(savedAttempt.score) : score,
+        wrong_count: savedAttempt.wrong_count !== undefined ? Number(savedAttempt.wrong_count) : wrongCount,
+        unanswered_count: savedAttempt.unanswered_count !== undefined ? Number(savedAttempt.unanswered_count) : unansweredCount,
+        total_questions: savedAttempt.total_questions !== undefined ? Number(savedAttempt.total_questions) : examQuestions.length,
+        time_taken: savedAttempt.time_taken !== undefined ? Number(savedAttempt.time_taken) : timeSpent,
+        completed_at: savedAttempt.completed_at || new Date().toISOString(),
+        userName: savedAttempt.user_name || currentUserName,
+        totalQuestions: examQuestions.length,
+        examTitle: examTitleFallback,
+        totalMarks: totalMarks,
+        answers: examAnswersFallback,
+        percentage: percentageScore
+      } as any);
+
+      // Step 7: Update leaderboards, achievements, streaks, and user stats on success path
+      if (user && user.id) {
+        try {
+          console.log("[handleExamSubmit][Step 7] Automatically syncing achievements, stats, XP, and streaks...");
+          
+          await supabaseService.syncLeaderboardAndStats(user.id, activeExam.id, {
+            score: Math.max(0, score),
+            time_taken: timeSpent,
+            correct_count: correctCount,
+            wrong_count: wrongCount,
+            unanswered_count: unansweredCount,
+            total_questions: examQuestions.length,
+            user_name: currentUserName,
+            user_class: currentUserClass,
+            exam_title: examTitleFallback,
+            user_photo: user?.user_metadata?.avatar_url || '',
+            subject: String(activeExam?.subject || 'All').trim(),
+            chapter: String(activeExam?.chapter || 'All').trim(),
+            topic: String((activeExam as any)?.topic || 'All').trim(),
+            academic_group: String(activeExam?.academicGroup || activeExam?.academic_group || 'General').trim()
+          });
+          
+          console.log("[handleExamSubmit][Step 7] Achievements & User Stats update SUCCESS.");
+          
+          // Trigger instant real-time scoreboard fetch
+          console.log("[handleExamSubmit][Step 7] Requesting instant leaderboard update...");
+          await fetchLeaderboards();
+          console.log("[handleExamSubmit][Step 7] Leaderboards update complete!");
+        } catch (syncErr: any) {
+          console.error("[handleExamSubmit][Step 7] Warning: Achievements & statistics synchronization failed (Attempt was saved successfully though):", syncErr);
+        }
+      }
+
+      console.log("[handleExamSubmit][Final State] Redirecting view to results...");
       setView('exam');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error: any) {
-      console.error("Exam submission error:", error);
-      setGlobalError("Submission failed: " + (error.message || "Please try again."));
+      console.error("[handleExamSubmit] CRITICAL SUBMISSION FAILURE INTERRUPTED:", error);
+      console.error("[handleExamSubmit] Structural error logs:", {
+        errorMessage: error.message || error,
+        errorDetails: error.details || "",
+        errorCode: error.code || ""
+      });
+      setGlobalError("Submission failed: " + (error.message || "Database insert error occurred. Please try again."));
     } finally {
       setIsGeneratingExam(false);
       setCurrentAttemptId(null);
+      console.log("--- EXAM SUBMISSION FLOW WORKFLOW TERMINATED ---");
     }
   };
 
@@ -802,7 +1430,7 @@ export default function App() {
 
   const [newItem, setNewItem] = useState<Partial<ContentItem>>({
     category: 'Notes',
-    academicClass: dynamicClasses[0]?.name || 'Class 9',
+    academicClass: dynamicClasses?.[0]?.name || 'SSC',
     subject: '',
     chapter: '',
     chapterId: '',
@@ -822,7 +1450,7 @@ export default function App() {
     type: 'youtube',
     youtubePlaylistId: '',
     videoIds: [],
-    academicClass: dynamicClasses[0]?.name || 'Class 9',
+    academicClass: dynamicClasses?.[0]?.name || 'SSC',
     academicGroup: 'All',
     subject: '',
     chapter: '',
@@ -831,7 +1459,7 @@ export default function App() {
   });
   const [newExam, setNewExam] = useState<Partial<Exam>>({
     title: '',
-    class: dynamicClasses[0]?.name || 'Class 9',
+    class: dynamicClasses?.[0]?.name || 'SSC',
     academicGroup: 'All',
     subject: 'Math',
     chapter: '',
@@ -852,7 +1480,7 @@ export default function App() {
     options: ['', '', '', ''],
     correctAnswer: 0,
     points: 1,
-    class: dynamicClasses[0]?.name || 'Class 9',
+    class: dynamicClasses?.[0]?.name || 'SSC',
     academicGroup: 'All',
     subject: '',
     chapter: '',
@@ -863,6 +1491,8 @@ export default function App() {
   const [questionImagePreview, setQuestionImagePreview] = useState<string | null>(null);
   const [optionImageFiles, setOptionImageFiles] = useState<(File | null)[]>([null, null, null, null]);
   const [optionImagePreviews, setOptionImagePreviews] = useState<(string | null)[]>([null, null, null, null]);
+  const [explanationImageFile, setExplanationImageFile] = useState<File | null>(null);
+  const [explanationImagePreview, setExplanationImagePreview] = useState<string | null>(null);
 
   const compressImage = (file: File): Promise<File> => {
     return new Promise((resolve) => {
@@ -936,17 +1566,27 @@ export default function App() {
     if (q.option_c_image) parsedOptionImages[2] = q.option_c_image;
     if (q.option_d_image) parsedOptionImages[3] = q.option_d_image;
 
+    const parsedExplanation = deserializeExplanation(q.explanation || q.explanationText || '');
+
     setNewQuestion({
       ...q,
       questionText: parsedText.text,
       options: parsedOptions,
       correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : q.correct_answer,
+      explanation: parsedExplanation.text,
+      difficulty: q.difficulty || parsedExplanation.difficulty,
+      isPremium: q.is_premium !== undefined ? q.is_premium : (q.isPremium !== undefined ? q.isPremium : parsedExplanation.is_premium),
+      tags: q.tags || parsedExplanation.tags,
+      status: q.status || parsedExplanation.status,
+      negativeMarks: q.negative_marks !== undefined ? q.negative_marks : (q.negativeMarks !== undefined ? q.negativeMarks : parsedExplanation.negative_marks)
     });
 
     setQuestionImageFile(null);
     setQuestionImagePreview(directQuestionImage);
     setOptionImageFiles([null, null, null, null]);
     setOptionImagePreviews(parsedOptionImages);
+    setExplanationImageFile(null);
+    setExplanationImagePreview(q.explanation_image || parsedExplanation.explanation_image || null);
 
     setEditingQuestionId(q.id);
     setIsAddingQuestion(true);
@@ -954,12 +1594,134 @@ export default function App() {
 
   const [temporaryQuestions, setTemporaryQuestions] = useState<Question[]>([]);
   const [allLeaderboards, setAllLeaderboards] = useState<LeaderboardEntry[]>([]);
+  const [allUserStats, setAllUserStats] = useState<UserStats[]>([]);
+  const [leaderboardTab, setLeaderboardTab] = useState<'global' | 'exam'>('global');
+  
+  const fetchLeaderboards = useCallback(async () => {
+    queryClient.invalidateQueries({ queryKey: ['leaderboards'] });
+  }, [queryClient]);
+
   const [leaderboardClassFilter, setLeaderboardClassFilter] = useState<string>('');
   const [leaderboardExamId, setLeaderboardExamId] = useState<string | null>(null);
   const [questionBankExamId, setQuestionBankExamId] = useState<string>('global');
 
-  const getClassGroup = (academicClass: string): string => {
-    return academicClass;
+  const getClassGroup = (academicClass: string | null | undefined): string => {
+    if (!academicClass) return '';
+    return String(academicClass).trim().toLowerCase();
+  };
+
+  const compressAndCropAvatar = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const size = 300; // 300x300 pixels
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(file); // fallback
+            return;
+          }
+
+          // Center crop the source image
+          const minDimension = Math.min(img.width, img.height);
+          const sourceX = (img.width - minDimension) / 2;
+          const sourceY = (img.height - minDimension) / 2;
+
+          ctx.drawImage(
+            img,
+            sourceX,
+            sourceY,
+            minDimension,
+            minDimension,
+            0,
+            0,
+            size,
+            size
+          );
+
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                resolve(blob);
+              } else {
+                resolve(file);
+              }
+            },
+            'image/jpeg',
+            0.85
+          );
+        };
+        img.onerror = (e) => reject(e);
+        img.src = event.target?.result as string;
+      };
+      reader.onerror = (e) => reject(e);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const uploadProfileImage = async (file: File | Blob, originalName: string): Promise<string> => {
+    console.log("[STORAGE] Starting profile picture upload log:", {
+      fileName: originalName,
+      fileSize: file.size,
+      fileType: file.type
+    });
+
+    if (!user) throw new Error("User session expired. Please sign in again.");
+
+    const ext = originalName.split('.').pop()?.toLowerCase() || 'jpg';
+    const filePath = `avatars/${user.id}/${Date.now()}.${ext}`;
+
+    try {
+      // 1. Try "profile-images" bucket first
+      console.log("[STORAGE] Attempting upload to bucket 'profile-images' at path:", filePath);
+      const { data, error } = await supabase.storage
+        .from('profile-images')
+        .upload(filePath, file, {
+          cacheControl: '31536000',
+          upsert: true,
+          contentType: file.type || 'image/jpeg'
+        });
+
+      if (error) {
+        console.warn("[STORAGE] 'profile-images' bucket upload failed, attempting fallback to 'resources':", error);
+        
+        // 2. Fall back to "resources" bucket if "profile-images" failed
+        console.log("[STORAGE] Falling back to bucket 'resources' at path:", filePath);
+        const { error: fallbackError } = await supabase.storage
+          .from('resources')
+          .upload(filePath, file, {
+            cacheControl: '31536000',
+            upsert: true,
+            contentType: file.type || 'image/jpeg'
+          });
+
+        if (fallbackError) {
+          console.error("[STORAGE] Fallback upload to 'resources' bucket also failed:", fallbackError);
+          throw fallbackError;
+        }
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('resources')
+          .getPublicUrl(filePath);
+
+        console.log("[STORAGE] Upload to fallback bucket 'resources' successful. URL:", publicUrl);
+        return publicUrl;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('profile-images')
+        .getPublicUrl(filePath);
+
+      console.log("[STORAGE] Upload to bucket 'profile-images' successful. URL:", publicUrl);
+      return publicUrl;
+    } catch (err: any) {
+      console.error("[STORAGE] Profile storage error / upload failures captured:", err);
+      throw new Error(`Profile image upload failed: ${err.message || err}`);
+    }
   };
 
   const handleUpdateProfile = async (e: FormEvent) => {
@@ -967,44 +1729,137 @@ export default function App() {
     if (!user) return;
     setIsUpdatingProfile(true);
     setGlobalError(null);
+
+    // Detailed console logs as requested
+    console.log("[fetchLeaderboards] Initiating profile update for user:", user.id);
+    console.log("[fetchLeaderboards] Profile form data payload:", profileFormData);
+    console.log("[fetchLeaderboards] Avatar modification state:", { selectedAvatarFile: !!selectedAvatarFile, isAvatarRemoved });
+
     try {
+      let finalAvatarUrl: string | null = firestoreUser?.avatarUrl || firestoreUser?.avatar_url || firestoreUser?.photoURL || user?.user_metadata?.avatar_url || null;
+
+      if (isAvatarRemoved) {
+        finalAvatarUrl = null;
+        console.log("[fetchLeaderboards] User explicitly requested to remove avatar.");
+      } else if (selectedAvatarFile) {
+        console.log("[fetchLeaderboards] Compressing selected avatar file.");
+        try {
+          const croppedBlob = await compressAndCropAvatar(selectedAvatarFile);
+          console.log("[fetchLeaderboards] Image compressed successfully. Size:", croppedBlob.size);
+          
+          finalAvatarUrl = await uploadProfileImage(croppedBlob, selectedAvatarFile.name);
+          console.log("[fetchLeaderboards] Profile image uploaded. Final URL:", finalAvatarUrl);
+        } catch (uploadErr: any) {
+          console.error("[fetchLeaderboards] Profile picture upload/storage error:", uploadErr);
+          throw new Error(`Profile picture save failed: ${uploadErr.message || uploadErr}`);
+        }
+      }
+
       // Update Supabase Auth metadata
+      console.log("[fetchLeaderboards] Updating Supabase Auth user metadata.");
       const { error: authError } = await supabase.auth.updateUser({
         data: { 
           full_name: profileFormData.displayName,
           academic_class: profileFormData.academicClass,
-          academic_group: profileFormData.academicGroup
+          academic_group: profileFormData.academicGroup,
+          avatar_url: finalAvatarUrl
         }
       });
 
-      if (authError) throw authError;
+      if (authError) {
+        console.error("[fetchLeaderboards] Supabase Auth update failed:", authError);
+        throw authError;
+      }
 
-      // Update profiles table
-      const { error: profileError } = await supabase
+      // Update profiles table. Column name is full_name, avatar_url, updated_at, and NOT display_name!
+      console.log("[fetchLeaderboards] Updating profiles table with payload:", {
+        full_name: profileFormData.displayName,
+        academic_class: profileFormData.academicClass,
+        academic_group: profileFormData.academicGroup,
+        avatar_url: finalAvatarUrl,
+        updated_at: new Date().toISOString()
+      });
+
+      const { data: updateResp, error: profileError } = await supabase
         .from('profiles')
         .update({
-          display_name: profileFormData.displayName,
+          full_name: profileFormData.displayName,
           academic_class: profileFormData.academicClass,
           academic_group: profileFormData.academicGroup,
+          avatar_url: finalAvatarUrl,
+          photo_url: finalAvatarUrl, // Keep both in sync to prevent broken photoURL references in existing parts
           updated_at: new Date().toISOString()
         })
-        .eq('id', user.id);
+        .eq('id', user.id)
+        .select();
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        console.error("[fetchLeaderboards] Supabase profiles update failed:", profileError);
+        throw profileError;
+      }
 
-      // Update local state
-      setUser(prev => prev ? { ...prev, user_metadata: { ...prev.user_metadata, full_name: profileFormData.displayName } } : null);
-      setFirestoreUser(prev => prev ? { 
+      console.log("[fetchLeaderboards] Supabase profiles update response:", updateResp);
+
+      // Update local state instantly so everything synchronizes in real-time
+      setUser(prev => prev ? { 
         ...prev, 
-        display_name: profileFormData.displayName,
-        academic_class: profileFormData.academicClass,
-        academic_group: profileFormData.academicGroup
+        user_metadata: { 
+          ...prev.user_metadata, 
+          full_name: profileFormData.displayName,
+          avatar_url: finalAvatarUrl
+        } 
       } : null);
 
+      setFirestoreUser(prev => prev ? { 
+        ...prev, 
+        displayName: profileFormData.displayName,
+        display_name: profileFormData.displayName,
+        name: profileFormData.displayName,
+        academicClass: profileFormData.academicClass,
+        academic_class: profileFormData.academicClass,
+        academicGroup: profileFormData.academicGroup,
+        academic_group: profileFormData.academicGroup,
+        avatar_url: finalAvatarUrl,
+        avatarUrl: finalAvatarUrl,
+        photoURL: finalAvatarUrl
+      } : null);
+
+      // Instantly synchronize changes directly to both leaderboards and user_stats caches
+      console.log("[fetchLeaderboards] Syncing profile changes directly to leaderboards table.");
+      const { error: syncLeadErr } = await supabase
+        .from('leaderboards')
+        .update({
+          user_photo: finalAvatarUrl,
+          user_name: profileFormData.displayName
+        })
+        .eq('user_id', user.id);
+      if (syncLeadErr) {
+        console.warn("[fetchLeaderboards] Warning: failed syncing updated photo to leaderboards cached rows:", syncLeadErr);
+      }
+
+      console.log("[fetchLeaderboards] Syncing profile changes directly to user_stats table.");
+      const { error: syncStatsErr } = await supabase
+        .from('user_stats')
+        .update({
+          user_photo: finalAvatarUrl,
+          user_name: profileFormData.displayName
+        })
+        .eq('user_id', user.id);
+      if (syncStatsErr) {
+        console.warn("[fetchLeaderboards] Warning: failed syncing updated photo to user_stats cached rows:", syncStatsErr);
+      }
+
+      // Re-trigger global leaderboard fetch so all elements are updated instantly in the current layout
+      fetchLeaderboards();
+
       setIsEditingProfile(false);
+      console.log("[fetchLeaderboards] Profile update accomplished successfully.");
     } catch (error: any) {
-      console.error("Profile update error:", error);
-      setGlobalError("Failed to update profile. Please try again.");
+      console.error("[fetchLeaderboards] Profiles update general caught exception:", error);
+      // Requirement 7: Show REAL error messages in development mode
+      const isDev = window.location.hostname.includes('localhost') || window.location.hostname.includes('ais-dev') || window.location.hostname.includes('run.app');
+      const errorMsg = error.message || error.details || "Failed to update profile";
+      setGlobalError(isDev ? `Error: ${errorMsg}` : "Failed to update profile. Please try again.");
     } finally {
       setIsUpdatingProfile(false);
     }
@@ -1058,29 +1913,50 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const normalizeClassName = (name: string) => {
+    if (!name) return '';
+    const n = name.trim().toLowerCase();
+    if (n === 'class 10' || n === 'ssc' || n === 'class x' || n === 'class-10') return 'ssc';
+    if (n === 'class 12' || n === 'hsc' || n === 'class xii' || n === 'class-12') return 'hsc';
+    return n;
+  };
+
   const getSubjectsForClass = (className: string) => {
-    const matchedClass = dynamicClasses.find(c => c.name === className);
+    const norm = normalizeClassName(className);
+    const matchedClass = dynamicClasses.find(c => normalizeClassName(c.name) === norm);
     if (!matchedClass) return [];
     return dynamicSubjects.filter(s => s.classId === matchedClass.id);
   };
 
   const getChaptersForSubject = (subjectName: string, className: string) => {
-    const matchedClass = dynamicClasses.find(c => c.name === className);
+    const norm = normalizeClassName(className);
+    const matchedClass = dynamicClasses.find(c => normalizeClassName(c.name) === norm);
     if (!matchedClass) return [];
-    // Subject names might not be unique globally but unique per class
-    const matchedSubject = dynamicSubjects.find(s => s.name === subjectName && s.classId === matchedClass.id);
+    const matchedSubject = dynamicSubjects.find(s => s.name?.toLowerCase() === subjectName?.toLowerCase() && s.classId === matchedClass.id);
     if (!matchedSubject) return [];
     return dynamicChapters.filter(c => c.subjectId === matchedSubject.id);
   };
 
   const getTopicsForChapter = (chapterName: string, subjectName: string, className: string) => {
-    const matchedClass = dynamicClasses.find(c => c.name === className);
+    const norm = normalizeClassName(className);
+    const matchedClass = dynamicClasses.find(c => normalizeClassName(c.name) === norm);
     if (!matchedClass) return [];
-    const matchedSubject = dynamicSubjects.find(s => s.name === subjectName && s.classId === matchedClass.id);
+    const matchedSubject = dynamicSubjects.find(s => s.name?.toLowerCase() === subjectName?.toLowerCase() && s.classId === matchedClass.id);
     if (!matchedSubject) return [];
-    const matchedChapter = dynamicChapters.find(c => c.name === chapterName && c.subjectId === matchedSubject.id);
+    const matchedChapter = dynamicChapters.find(c => c.name?.toLowerCase() === chapterName?.toLowerCase() && c.subjectId === matchedSubject.id);
     if (!matchedChapter) return [];
     return dynamicTopics.filter(t => t.chapterId === matchedChapter.id);
+  };
+
+  const getTopicsForSubject = (subjectName: string, className: string) => {
+    const norm = normalizeClassName(className);
+    const matchedClass = dynamicClasses.find(c => normalizeClassName(c.name) === norm);
+    if (!matchedClass) return [];
+    const matchedSubject = dynamicSubjects.find(s => s.name?.toLowerCase() === subjectName?.toLowerCase() && s.classId === matchedClass.id);
+    if (!matchedSubject) return [];
+    const chaps = dynamicChapters.filter(c => c.subjectId === matchedSubject.id);
+    const chapIds = chaps.map(c => c.id);
+    return dynamicTopics.filter(t => chapIds.includes(t.chapterId));
   };
 
   useEffect(() => {
@@ -1138,12 +2014,15 @@ export default function App() {
     return () => authListener.unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (!user) return;
+  // --- QUERY DEFINITIONS ---
 
-    // In Supabase, we can have a 'profiles' table. 
-    // For now, we'll use user_metadata or fetch a profile if available.
-    const fetchProfile = async () => {
+  // 1. Profile Query (handles profiles and user_roles)
+  const { data: qProfileData } = useQuery({
+    queryKey: ['profiles', user?.id],
+    queryFn: async () => {
+      if (!user) return null;
+      console.log("[ReactQuery] Fetch profile started for user ID:", user.id);
+      
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('*')
@@ -1151,8 +2030,6 @@ export default function App() {
         .single();
 
       const isAdminEmail = user.email === 'mdsohanali636@gmail.com';
-      
-      // Fetch or query user_roles table
       let userRoleData = null;
       try {
         const { data, error: rError } = await supabase
@@ -1163,27 +2040,314 @@ export default function App() {
         if (!rError && data) {
           userRoleData = data;
         } else {
-          // fallback query with id
-          const { data: dataById, error: rErrorById } = await supabase
+          const { data: dataById } = await supabase
             .from('user_roles')
             .select('*')
             .eq('id', user.id)
             .maybeSingle();
-          if (!rErrorById && dataById) {
+          if (dataById) {
             userRoleData = dataById;
           }
         }
       } catch (err) {
-        console.warn("Could not query user_roles direct:", err);
+        console.warn("[ReactQuery] Could not query user_roles:", err);
       }
 
-      // Default permissions
+      return { profile, userRoleData, isAdminEmail, error };
+    },
+    enabled: !!user,
+  });
+
+  // 2. Leaderboards & User Stats Query
+  const { data: qLeaderboardData } = useQuery({
+    queryKey: ['leaderboards'],
+    queryFn: async () => {
+      console.log("[ReactQuery] Fetching leaderboards and user stats...");
+      const { data: leadData, error: leadErr } = await supabase
+        .from('leaderboards')
+        .select('*')
+        .order('score', { ascending: false })
+        .order('completion_time', { ascending: true })
+        .limit(500);
+
+      if (leadErr) {
+        console.error("[ReactQuery] Leaderboard select failure:", leadErr);
+      }
+
+      const { data: statsData, error: statsErr } = await supabase
+        .from('user_stats')
+        .select('*')
+        .order('total_xp', { ascending: false })
+        .limit(500);
+
+      if (statsErr) {
+        console.error("[ReactQuery] User stats select failure:", statsErr);
+      }
+
+      const uniqueUserIds = Array.from(new Set([
+        ...(leadData || []).map((row: any) => row.user_id),
+        ...(statsData || []).map((row: any) => row.user_id)
+      ].filter(Boolean)));
+
+      let activeProfilesMap: Record<string, { avatar_url: string | null; full_name: string | null }> = {};
+      if (uniqueUserIds.length > 0) {
+        const { data: profileList } = await supabase
+          .from('profiles')
+          .select('id, avatar_url, full_name')
+          .in('id', uniqueUserIds);
+        if (profileList) {
+          profileList.forEach((p: any) => {
+            activeProfilesMap[p.id] = {
+              avatar_url: p.avatar_url,
+              full_name: p.full_name
+            };
+          });
+        }
+      }
+
+      return { leadData, statsData, activeProfilesMap };
+    },
+    enabled: !!user,
+  });
+
+  // 3. Feedback Query
+  const { data: qFeedbackData } = useQuery({
+    queryKey: ['feedbacks'],
+    queryFn: async () => {
+      console.log("[ReactQuery] Fetching feedback...");
+      const { data, error } = await supabase
+        .from('feedback')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: userRole === 'admin',
+  });
+
+  // Query to fetch active pro students in real-time
+  const { data: premiumStudents = [] } = useQuery({
+    queryKey: ['premiumStudents'],
+    queryFn: async () => {
+      console.log("[ReactQuery] Fetching premium/pro students...");
+      const premiumUserIds = new Set<string>();
+
+      try {
+        const { data: premiumRoles, error: rolesError } = await supabase
+          .from('user_roles')
+          .select('user_id, id')
+          .eq('is_premium', true);
+
+        if (!rolesError && premiumRoles) {
+          premiumRoles.forEach(r => {
+            if (r.user_id) premiumUserIds.add(r.user_id);
+            if (r.id) premiumUserIds.add(r.id);
+          });
+        }
+      } catch (rolesErr) {
+        console.warn("Could not query user_roles for premium check:", rolesErr);
+      }
+
+      try {
+        const { data: premiumProfilesDirect, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('has_premium_access', true);
+
+        if (!profilesError && premiumProfilesDirect) {
+          premiumProfilesDirect.forEach(p => {
+            if (p.id) premiumUserIds.add(p.id);
+          });
+        }
+      } catch (profilesErr) {
+        console.warn("Could not query profiles for direct premium check:", profilesErr);
+      }
+
+      if (premiumUserIds.size === 0) {
+        return [];
+      }
+
+      try {
+        const { data: userProfiles, error: detailsError } = await supabase
+          .from('profiles')
+          .select('id, full_name, display_name, avatar_url, created_at')
+          .in('id', Array.from(premiumUserIds))
+          .order('created_at', { ascending: false });
+
+        if (!detailsError && userProfiles) {
+          return userProfiles;
+        }
+      } catch (err) {
+        console.error("Error retrieving premium student profiles details:", err);
+      }
+
+      return [];
+    }
+  });
+
+  // 4. Resources / Content Items Query
+  const { data: qResourcesData } = useQuery({
+    queryKey: ['resources'],
+    queryFn: async () => {
+      console.log("[ReactQuery] Fetching resources...");
+      return await supabaseService.fetchResources();
+    },
+  });
+
+  // 5. Playlists Query
+  const { data: qPlaylistsData } = useQuery({
+    queryKey: ['playlists'],
+    queryFn: async () => {
+      console.log("[ReactQuery] Fetching playlists...");
+      const { data } = await supabase.from('playlists').select('*').order('created_at', { ascending: false });
+      return data || [];
+    },
+  });
+
+  // 6. Exams Query
+  const { data: qExamsData } = useQuery({
+    queryKey: ['exams', userRole, canUpload],
+    queryFn: async () => {
+      console.log("[ReactQuery] Fetching exams...");
+      return await supabaseService.fetchExams(userRole === 'admin' || canUpload);
+    },
+  });
+
+  // 7. Exam Attempts Query
+  const { data: qExamAttemptsData } = useQuery({
+    queryKey: ['exam_attempts', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      console.log("[ReactQuery] Fetching exam attempts...");
+      const { data } = await supabase
+        .from('exam_attempts')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      return data || [];
+    },
+    enabled: !!user,
+  });
+
+  // 7.5. Saved Questions Query
+  const { data: qSavedQuestionsData, refetch: refetchSavedQuestions } = useQuery({
+    queryKey: ['saved_questions', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      console.log("[ReactQuery] Fetching saved questions...");
+      return await supabaseService.getSavedQuestions(user.id);
+    },
+    enabled: !!user,
+  });
+
+  // 7.6. Wrong Questions Query
+  const { data: qWrongQuestionsData, refetch: refetchWrongQuestions } = useQuery({
+    queryKey: ['wrong_questions', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      console.log("[ReactQuery] Fetching wrong questions...");
+      return await supabaseService.getWrongQuestions(user.id);
+    },
+    enabled: !!user,
+  });
+
+  useEffect(() => {
+    if (qSavedQuestionsData) {
+      setSavedQuestionIds(new Set(qSavedQuestionsData.map((d: any) => d.question_id)));
+    } else {
+      setSavedQuestionIds(new Set());
+    }
+  }, [qSavedQuestionsData]);
+
+  // 8. Performance History Query
+  const { data: qPerformanceHistoryData } = useQuery({
+    queryKey: ['performance_history', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      console.log("[ReactQuery] Fetching performance history...");
+      const { data } = await supabase
+        .from('performance_history')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      return data || [];
+    },
+    enabled: !!user,
+  });
+
+  // 9. Newsletter Subscribers Query
+  const { data: qNewsletterSubscribers } = useQuery({
+    queryKey: ['newsletter_subscribers'],
+    queryFn: async () => {
+      console.log("[ReactQuery] Fetching newsletter subscribers...");
+      const { data, error } = await supabase
+        .from('newsletter_subscribers')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) {
+        if (!error.message.includes('permission denied')) {
+          console.warn("newsletter_subscribers select warning:", error);
+        }
+        return [];
+      }
+      return data || [];
+    },
+  });
+
+  // 10. Newsletter Email Logs Query
+  const { data: qNewsletterEmailLogs } = useQuery({
+    queryKey: ['newsletter_email_logs'],
+    queryFn: async () => {
+      console.log("[ReactQuery] Fetching newsletter email logs...");
+      const { data, error } = await supabase
+        .from('newsletter_email_logs')
+        .select('*')
+        .order('sent_at', { ascending: false });
+      if (error) {
+        if (!error.message.includes('permission denied')) {
+          console.warn("newsletter_email_logs select warning:", error);
+        }
+        return [];
+      }
+      return data || [];
+    },
+    enabled: userRole === 'admin',
+  });
+
+  // 11. Public Subscriber Count Query
+  const { data: qPublicSubscriberCount } = useQuery({
+    queryKey: ['public_subscriber_count'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('/api/newsletter/count');
+        if (res.ok) {
+          const d = await res.json();
+          return d.count || 0;
+        }
+      } catch (e) {
+        console.warn("Failed fetching public subscriber count:", e);
+      }
+      return 0;
+    },
+  });
+
+
+  // --- STATE SYNCHRONIZATION EFFECTS ---
+
+  // 1. Profile Sync Effect
+  useEffect(() => {
+    if (!user || !qProfileData) return;
+
+    const syncProfile = async () => {
+      const { profile, userRoleData, isAdminEmail } = qProfileData;
+
+      const isExpired = !isAdminEmail && profile?.premium_expiry && new Date(profile.premium_expiry).getTime() < Date.now();
       const defaultRole = isAdminEmail ? 'admin' : (profile?.role || 'user');
       const defaultCanUpload = isAdminEmail ? true : (profile?.can_upload ?? false);
       const defaultCanManageExams = isAdminEmail ? true : false;
       const defaultCanManageQuestions = isAdminEmail ? true : false;
       const defaultCanManageResources = isAdminEmail ? true : false;
-      const defaultIsPremium = isAdminEmail ? true : (profile?.has_premium_access ?? false);
+      const defaultIsPremium = isAdminEmail ? true : (isExpired ? false : (profile?.has_premium_access ?? false));
 
       let currentRole = defaultRole;
       let currentCanUpload = defaultCanUpload;
@@ -1198,9 +2362,8 @@ export default function App() {
         currentCanManageExams = userRoleData.can_manage_exams ?? defaultCanManageExams;
         currentCanManageQuestions = userRoleData.can_manage_questions ?? defaultCanManageQuestions;
         currentCanManageResources = userRoleData.can_manage_resources ?? defaultCanManageResources;
-        currentIsPremium = userRoleData.is_premium ?? defaultIsPremium;
+        currentIsPremium = isExpired ? false : (userRoleData.is_premium ?? defaultIsPremium);
       } else {
-        // Upsert to user_roles
         try {
           const insertRec = {
             user_id: user.id,
@@ -1225,11 +2388,21 @@ export default function App() {
             await supabase.from('user_roles').insert([altRec]);
           }
         } catch (err) {
-          console.warn("Warning: Could not create default user_roles record:", err);
+          console.warn("[ReactQuery] Error registering initial user roles:", err);
         }
       }
 
-      // Set user states
+      if (isExpired && (profile?.has_premium_access || (userRoleData && userRoleData.is_premium))) {
+        try {
+          await supabase.from('profiles').update({ has_premium_access: false }).eq('id', user.id);
+          if (userRoleData) {
+            await supabase.from('user_roles').update({ is_premium: false }).eq('user_id', user.id);
+          }
+        } catch (syncErr) {
+          console.warn("Failed to automatically deactivate expired status in DB:", syncErr);
+        }
+      }
+
       setUserRole(currentRole as any);
       setCanUpload(currentCanUpload);
       setCanManageExams(currentCanManageExams);
@@ -1240,50 +2413,66 @@ export default function App() {
       const hasPremium = currentIsPremium || (profile?.has_premium_access ?? false);
 
       if (profile) {
-        // Map snake_case to camelCase for consistent frontend usage
         const mappedProfile = {
           ...profile,
-          displayName: profile.display_name,
+          id: profile.id,
+          email: profile.email,
+          display_name: profile.full_name || 'Student',
+          displayName: profile.full_name || 'Student',
+          name: profile.full_name || 'Student',
+          academic_class: profile.academic_class,
           academicClass: profile.academic_class,
+          academic_group: profile.academic_group,
+          academicGroup: profile.academic_group,
           hasPremiumAccess: hasPremium,
           premiumExpiry: profile.premium_expiry,
           canUpload: currentCanUpload,
           createdAt: profile.created_at,
-          photoURL: profile.photo_url,
+          photoURL: profile.avatar_url || profile.photo_url || '',
+          avatar_url: profile.avatar_url || '',
+          avatarUrl: profile.avatar_url || '',
           phoneNumber: profile.phone_number
         };
-        
         setFirestoreUser(mappedProfile);
-        
-        // Sync admin role/permission to profiles if email matches but role is user
+
         if (isAdminEmail && profile.role !== 'admin') {
           await supabase.from('profiles').update({ role: 'admin', can_upload: true }).eq('id', user.id);
         }
       } else {
-        // Create initial profile
-        const { data: newProfile } = await supabase
+        const { data: newProfile, error: profileInitError } = await supabase
           .from('profiles')
           .upsert({
             id: user.id,
             email: user.email,
-            display_name: user.user_metadata?.full_name || 'Student',
+            full_name: user.user_metadata?.full_name || 'Student',
             role: currentRole,
-            academic_class: user.user_metadata?.academic_class || dynamicClasses[0]?.name || 'Class 9',
+            academic_class: user.user_metadata?.academic_class || (dynamicClasses?.[0]?.name || 'SSC'),
             can_upload: currentCanUpload,
           })
           .select()
           .single();
-          
-        if (newProfile) {
+
+        if (profileInitError) {
+          console.error("[ReactQuery] Initial profile insertion failed:", profileInitError);
+        } else if (newProfile) {
           const mappedNewProfile = {
             ...newProfile,
-            displayName: newProfile.display_name,
+            id: newProfile.id,
+            email: newProfile.email,
+            display_name: newProfile.full_name || 'Student',
+            displayName: newProfile.full_name || 'Student',
+            name: newProfile.full_name || 'Student',
+            academic_class: newProfile.academic_class,
             academicClass: newProfile.academic_class,
+            academic_group: newProfile.academic_group,
+            academicGroup: newProfile.academic_group,
             hasPremiumAccess: hasPremium,
             premiumExpiry: newProfile.premium_expiry,
             canUpload: currentCanUpload,
             createdAt: newProfile.created_at,
-            photoURL: newProfile.photo_url,
+            photoURL: newProfile.avatar_url || newProfile.photo_url || '',
+            avatar_url: newProfile.avatar_url || '',
+            avatarUrl: newProfile.avatar_url || '',
             phoneNumber: newProfile.phone_number
           };
           setFirestoreUser(mappedNewProfile);
@@ -1291,8 +2480,169 @@ export default function App() {
       }
     };
 
-    fetchProfile();
-  }, [user]);
+    syncProfile();
+  }, [qProfileData, user, dynamicClasses]);
+
+  // 2. Leaderboard Sync Effect
+  useEffect(() => {
+    if (!qLeaderboardData) return;
+    const { leadData, statsData, activeProfilesMap } = qLeaderboardData;
+
+    if (leadData) {
+      const mappedLead = leadData.map((row: any) => {
+        const profileOverride = activeProfilesMap[row.user_id];
+        return {
+          id: row.id || `${row.user_id}_${row.exam_id}`,
+          class: row.academic_class || 'SSC',
+          examId: row.exam_id,
+          userId: row.user_id,
+          userName: profileOverride?.full_name || row.user_name || 'Student',
+          userPhoto: profileOverride?.avatar_url !== undefined ? profileOverride.avatar_url : (row.user_photo || row.user_avatar),
+          bestScore: row.score !== undefined ? row.score : (row.best_score || 0),
+          timeTaken: row.completion_time !== undefined ? row.completion_time : (row.time_taken || 0),
+          lastUpdated: row.updated_at || row.last_updated,
+          examTitle: row.exam_title || 'Practice Match',
+          firstSubmissionAt: row.first_submission_at || row.last_updated || new Date().toISOString(),
+          totalAttempts: row.total_attempts || 1,
+          accuracy: row.accuracy || 0,
+          xp: row.xp || 0,
+          streak: row.streak || 0,
+          badge: row.badge || 'Bronze',
+          correctCount: row.correct_answers !== undefined ? row.correct_answers : (row.correct_count || 0),
+          wrongCount: row.wrong_answers !== undefined ? row.wrong_answers : (row.wrong_count || 0),
+          unansweredCount: row.skipped_answers !== undefined ? row.skipped_answers : (row.unanswered_count || 0),
+          totalQuestions: row.total_questions || 0
+        };
+      });
+      setAllLeaderboards(mappedLead);
+    }
+
+    if (statsData) {
+      const mappedStats = statsData.map((row: any) => {
+        const profileOverride = activeProfilesMap[row.user_id];
+        return {
+          userId: row.user_id,
+          userName: profileOverride?.full_name || row.user_name || 'Student',
+          userPhoto: profileOverride?.avatar_url !== undefined ? profileOverride.avatar_url : row.user_photo,
+          totalExams: row.total_exams || 0,
+          averageScore: row.average_score || 0,
+          highestScore: row.highest_score || 0,
+          totalCorrect: row.total_correct || 0,
+          totalWrong: row.total_wrong || 0,
+          totalSkipped: row.total_skipped || 0,
+          totalXp: row.total_xp || 0,
+          streak: row.streak || 0,
+          badge: row.badge || 'Bronze',
+          updatedAt: row.updated_at
+        };
+      });
+      setAllUserStats(mappedStats);
+    }
+  }, [qLeaderboardData]);
+
+  // 3. Feedback Sync Effect
+  useEffect(() => {
+    if (!qFeedbackData) return;
+    const mappedFeedback = qFeedbackData.map((f: any) => ({
+      id: f.id,
+      userId: f.user_id,
+      user_id: f.user_id,
+      userEmail: f.user_email || 'guest@educationalportal.org',
+      user_email: f.user_email || 'guest@educationalportal.org',
+      userName: f.user_name || 'Guest Student',
+      user_name: f.user_name || 'Guest Student',
+      message: f.message || f.content || 'No feedback text provided',
+      createdAt: f.created_at,
+      created_at: f.created_at,
+      status: f.status || 'unread',
+      reply: f.reply || null,
+      admin_reply: f.reply || null
+    }));
+    setAllFeedback(mappedFeedback);
+  }, [qFeedbackData]);
+
+  // 4. Resources Sync Effect
+  useEffect(() => {
+    if (qResourcesData) {
+      setContents(qResourcesData as ContentItem[]);
+      setAllContents(qResourcesData as ContentItem[]);
+    }
+  }, [qResourcesData]);
+
+  // 5. Playlists Sync Effect
+  useEffect(() => {
+    if (qPlaylistsData) {
+      const mappedPlaylists = qPlaylistsData.map((item: any) => ({
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        thumbnailUrl: item.thumbnail_url,
+        thumbnail_url: item.thumbnail_url,
+        type: item.type || 'custom',
+        authorId: item.author_id,
+        youtubePlaylistId: item.youtube_playlist_id,
+        videoIds: item.video_ids,
+        academicClass: item.academic_class,
+        createdAt: item.created_at,
+        isPremium: item.is_premium
+      }));
+      setPlaylists(mappedPlaylists as any as Playlist[]);
+      setAllPlaylists(mappedPlaylists as any as Playlist[]);
+    }
+  }, [qPlaylistsData]);
+
+  // 6. Exams Sync Effect
+  useEffect(() => {
+    if (qExamsData) {
+      setAllExams(qExamsData as Exam[]);
+    }
+  }, [qExamsData]);
+
+  // --- CENTRAL REALTIME SCHEMA-WIDE LISTENER ---
+  useEffect(() => {
+    console.log("[ReactQuery] Registering central realtime sub for all schema changes...");
+    const centralChannel = supabase
+      .channel('schema-changes-sync-all')
+      .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
+        console.log("[ReactQuery] Schema change detected on table", payload.table, payload);
+        const { table } = payload;
+        
+        // Match table to invalidate active React queries instantly
+        if (table === 'profiles' || table === 'user_roles') {
+          queryClient.invalidateQueries({ queryKey: ['profiles', user?.id] });
+          queryClient.invalidateQueries({ queryKey: ['leaderboards'] });
+          queryClient.invalidateQueries({ queryKey: ['premiumStudents'] });
+        } else if (table === 'leaderboards' || table === 'user_stats') {
+          queryClient.invalidateQueries({ queryKey: ['leaderboards'] });
+        } else if (table === 'feedback') {
+          queryClient.invalidateQueries({ queryKey: ['feedbacks'] });
+        } else if (table === 'exam_attempts') {
+          queryClient.invalidateQueries({ queryKey: ['exam_attempts', user?.id] });
+          queryClient.invalidateQueries({ queryKey: ['leaderboards'] });
+        } else if (table === 'performance_history') {
+          queryClient.invalidateQueries({ queryKey: ['performance_history', user?.id] });
+        } else if (['notes', 'books', 'video_classes', 'practice_sheets', 'external_links' ].includes(table)) {
+          queryClient.invalidateQueries({ queryKey: ['resources'] });
+        } else if (table === 'playlists') {
+          queryClient.invalidateQueries({ queryKey: ['playlists'] });
+        } else if (table === 'exams') {
+          queryClient.invalidateQueries({ queryKey: ['exams'] });
+        } else if (table === 'questions') {
+          queryClient.invalidateQueries({ queryKey: ['questions'] });
+        } else if (table === 'newsletter_subscribers') {
+          queryClient.invalidateQueries({ queryKey: ['newsletter_subscribers'] });
+          queryClient.invalidateQueries({ queryKey: ['public_subscriber_count'] });
+        } else if (table === 'newsletter_email_logs') {
+          queryClient.invalidateQueries({ queryKey: ['newsletter_email_logs'] });
+        }
+      })
+      .subscribe();
+
+    return () => {
+      console.log("[ReactQuery] Cleaning up central realtime subscription.");
+      supabase.removeChannel(centralChannel);
+    };
+  }, [user, queryClient]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -1306,7 +2656,14 @@ export default function App() {
           console.warn("Exams table might be missing or empty:", e);
           return [];
         });
-        const externalPromise = supabase.from('external_links').select('*').order('created_at', { ascending: false });
+        const externalPromise = (async () => {
+          try {
+            return await supabase.from('external_links').select('*').order('created_at', { ascending: false });
+          } catch (e) {
+            console.warn("External links table might be missing or empty:", e);
+            return { data: [], error: e };
+          }
+        })();
 
         const [dbResources, dbExams, dbExternals] = await Promise.all([
           resourcePromise,
@@ -1318,7 +2675,7 @@ export default function App() {
           setContents(dbResources as ContentItem[]);
           setAllContents(dbResources as ContentItem[]);
         }
-        if (dbExternals?.data) {
+        if (dbExternals && 'data' in dbExternals && dbExternals?.data) {
           const mapped = dbExternals.data.map((r: any) => ({
             ...r,
             createdAt: r.created_at
@@ -1347,127 +2704,144 @@ export default function App() {
   }, [user, userRole]);
 
   // Dynamic fetching of academic data
-  useEffect(() => {
-    const fetchClassesAndGroups = async () => {
-      try {
-        const { data: classData } = await supabase
-          .from('academic_classes')
-          .select('*')
-          .eq('active', true)
-          .order('order', { ascending: true });
-        if (classData) {
-          const mapped = (classData as any[]).map(c => ({
-            ...c,
-            createdAt: c.created_at,
-            updatedAt: c.updated_at
-          }));
-          setDynamicClasses(mapped as AcademicClassInfo[]);
-        }
+  const fetchClassesAndGroups = async () => {
+    try {
+      const { data: classData, error: classError } = await supabase
+        .from('academic_classes')
+        .select('*');
+      
+      if (classError) throw classError;
 
-        const groupData = await supabaseService.fetchAcademicGroups();
-        if (groupData) {
-          const mapped = (groupData as any[]).map(g => ({
-            ...g,
-            createdAt: g.created_at
-          }));
-          setAcademicGroups(mapped as AcademicGroup[]);
-        }
-      } catch (err) {
-        console.error("Error fetching academic data:", err);
+      // Filter out any inactive or older classes
+      const activeDbClasses = (classData || []).filter((c: any) => {
+        if (!c.active) return false;
+        const n = (c.name || '').trim().toLowerCase();
+        return !['class 9', 'class 10', 'class 11', 'class 12'].includes(n) &&
+               !n.includes('class 9') &&
+               !n.includes('class 10') &&
+               !n.includes('class 11') &&
+               !n.includes('class 12');
+      });
+
+      const finalClasses = activeDbClasses.map((c: any) => ({
+        id: c.id?.toString() || c.name,
+        name: c.name,
+        has_groups: c.has_groups ?? false,
+        active: c.active ?? true,
+        order: c.order || 99,
+        createdAt: c.created_at || new Date().toISOString(),
+        updatedAt: c.updated_at || new Date().toISOString()
+      }));
+
+      finalClasses.sort((a, b) => a.order - b.order);
+      setDynamicClasses(finalClasses);
+
+      // Fetch Academic Groups
+      const groupData = await supabaseService.fetchAcademicGroups();
+      const activeDbGroups = (groupData || []).filter((g: any) => g.active);
+
+      const finalGroups = activeDbGroups.map((g: any) => ({
+        id: g.id?.toString() || g.name,
+        name: g.name,
+        active: g.active ?? true,
+        order: g.order || 99,
+        createdAt: g.created_at || new Date().toISOString(),
+        updatedAt: g.updated_at || new Date().toISOString()
+      }));
+
+      finalGroups.sort((a, b) => a.order - b.order);
+      setAcademicGroups(finalGroups);
+    } catch (err) {
+      console.error("Error fetching academic data:", err);
+    }
+  };
+
+  const fetchSubjects = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('subjects')
+        .select('*')
+        .eq('active', true)
+        .order('order', { ascending: true });
+
+      if (data) {
+        const mapped = (data as any[]).map(s => ({
+          ...s,
+          classId: s.class_id,
+          academicGroup: s.academic_group,
+          createdAt: s.created_at,
+          updatedAt: s.updated_at
+        }));
+        setDynamicSubjects(mapped as AcademicSubject[]);
       }
-    };
+    } catch (err) {
+      console.error("Error fetching subjects:", err);
+    }
+  };
+
+  const fetchChapters = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('chapters')
+        .select('*')
+        .eq('active', true)
+        .order('order', { ascending: true });
+
+      if (data) {
+        const mapped = (data as any[]).map(ch => ({
+          ...ch,
+          subjectId: ch.subject_id,
+          classId: ch.class_id,
+          createdAt: ch.created_at,
+          updatedAt: ch.updated_at
+        }));
+        setDynamicChapters(mapped as AcademicChapter[]);
+      }
+    } catch (err) {
+      console.error("Error fetching chapters:", err);
+    }
+  };
+
+  const fetchAllTopics = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('topics')
+        .select('*')
+        .eq('active', true)
+        .order('order', { ascending: true });
+      if (data) {
+        const mapped = (data as any[]).map(t => ({
+          ...t,
+          chapterId: t.chapter_id,
+          subjectId: t.subject_id,
+          classId: t.class_id
+        }));
+        setDynamicTopics(mapped as AcademicTopic[]);
+      }
+    } catch (err) {
+      console.error("Error fetching all topics globally:", err);
+    }
+  };
+
+  const refreshAcademicData = async () => {
+    console.log("--- Refreshing Global Academic Data ---");
+    await fetchClassesAndGroups();
+    await fetchSubjects();
+    await fetchChapters();
+    await fetchAllTopics();
+  };
+
+  useEffect(() => {
     fetchClassesAndGroups();
   }, []);
 
   useEffect(() => {
-    const fetchSubjects = async () => {
-      try {
-        let query = supabase
-          .from('subjects')
-          .select('*')
-          .eq('active', true)
-          .order('order', { ascending: true });
-
-        if (classFilter !== 'All') {
-          const matchedClass = dynamicClasses.find(c => c.name === classFilter);
-          if (matchedClass) {
-            query = query.eq('class_id', matchedClass.id);
-          } else if (dynamicClasses.length > 0) {
-            // Class filter set but not found in loaded classes
-            setDynamicSubjects([]);
-            return;
-          }
-        }
-
-        const { data, error } = await query;
-        if (data) {
-          const mapped = (data as any[]).map(s => ({
-            ...s,
-            classId: s.class_id,
-            createdAt: s.created_at,
-            updatedAt: s.updated_at
-          }));
-          setDynamicSubjects(mapped as AcademicSubject[]);
-        }
-      } catch (err) {
-        console.error("Error fetching subjects:", err);
-      }
-    };
-
-    // Always fetch if we have classes or if it's "All"
-    if (classFilter === 'All' || dynamicClasses.length > 0) {
-      fetchSubjects();
-    }
-  }, [classFilter, dynamicClasses]);
+    fetchSubjects();
+  }, []);
 
   useEffect(() => {
-    const fetchChapters = async () => {
-      try {
-        let query = supabase
-          .from('chapters')
-          .select('*')
-          .eq('active', true)
-          .order('order', { ascending: true });
-
-        const matchedClass = dynamicClasses.find(c => c.name === classFilter);
-        if (classFilter !== 'All' && matchedClass) {
-          query = query.eq('class_id', matchedClass.id);
-        }
-
-        if (subjectFilter !== 'All') {
-          const matchedSubject = dynamicSubjects.find(s => 
-            s.name === subjectFilter && 
-            (matchedClass ? s.classId === matchedClass.id : true)
-          );
-          if (matchedSubject) {
-            query = query.eq('subject_id', matchedSubject.id);
-          } else if (dynamicSubjects.length > 0) {
-             // Subject selected but not found in current subjects list
-             setDynamicChapters([]);
-             return;
-          }
-        }
-
-        const { data, error } = await query;
-        if (data) {
-          const mapped = (data as any[]).map(ch => ({
-            ...ch,
-            subjectId: ch.subject_id,
-            classId: ch.class_id,
-            createdAt: ch.created_at,
-            updatedAt: ch.updated_at
-          }));
-          setDynamicChapters(mapped as AcademicChapter[]);
-        }
-      } catch (err) {
-        console.error("Error fetching chapters:", err);
-      }
-    };
-
-    if (dynamicClasses.length > 0 || classFilter === 'All') {
-      fetchChapters();
-    }
-  }, [subjectFilter, classFilter, dynamicSubjects, dynamicClasses]);
+    fetchChapters();
+  }, []);
 
   // Reset subject filter if it's no longer valid for the selected class
   useEffect(() => {
@@ -1478,76 +2852,15 @@ export default function App() {
     }
   }, [classFilter, currentSubjects, subjectFilter]);
 
-  // For Exam Chapters
+  // Fetch All Active Topics globally to support filters, badges, and all exam/question/content builders
   useEffect(() => {
-    if (!examSetup.academicClass || !examSetup.subject) return;
-    
-    const matchedClass = dynamicClasses.find(c => c.name === examSetup.academicClass);
-    const matchedSubject = dynamicSubjects.find(s => s.name === examSetup.subject && (matchedClass ? s.classId === matchedClass.id : true));
-    
-    if (matchedSubject) {
-      const fetchChapters = async () => {
-        try {
-          const { data, error } = await supabase
-            .from('chapters')
-            .select('*')
-            .eq('subject_id', matchedSubject.id)
-            .eq('active', true)
-            .order('order', { ascending: true });
-          if (data) {
-            const mapped = (data as any[]).map(ch => ({
-              ...ch,
-              subjectId: ch.subject_id,
-              classId: ch.class_id
-            }));
-            setDynamicChapters(mapped as AcademicChapter[]);
-          }
-        } catch (err) {
-          console.error("Error fetching chapters for exam:", err);
-        }
-      };
-      fetchChapters();
-    }
-  }, [examSetup.academicClass, examSetup.subject, dynamicClasses, dynamicSubjects]);
-
-  // Fetch Topics when chapter changes in Exam setup
-  useEffect(() => {
-    if (!examSetup.chapter || examSetup.chapter === 'All Chapters') {
-      setDynamicTopics([]);
-      return;
-    }
-
-    const matchedChapter = dynamicChapters.find(c => c.name === examSetup.chapter);
-    if (!matchedChapter) return;
-
-    const fetchTopics = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('topics')
-          .select('*')
-          .eq('chapter_id', matchedChapter.id)
-          .eq('active', true)
-          .order('order', { ascending: true });
-        if (data) {
-          const mapped = (data as any[]).map(t => ({
-            ...t,
-            chapterId: t.chapter_id,
-            subjectId: t.subject_id,
-            classId: t.class_id
-          }));
-          setDynamicTopics(mapped as AcademicTopic[]);
-        }
-      } catch (err) {
-        console.error("Error fetching topics:", err);
-      }
-    };
-    fetchTopics();
-  }, [examSetup.chapter, dynamicChapters]);
+    fetchAllTopics();
+  }, []);
 
   // Set default leaderboard filter when classes load
   useEffect(() => {
-    if (dynamicClasses.length > 0 && !leaderboardClassFilter) {
-      setLeaderboardClassFilter(dynamicClasses[0].name);
+    if (dynamicClasses && dynamicClasses.length > 0 && !leaderboardClassFilter) {
+      setLeaderboardClassFilter(dynamicClasses[0]?.name || 'SSC');
     }
   }, [dynamicClasses, leaderboardClassFilter]);
 
@@ -1642,43 +2955,15 @@ export default function App() {
     };
   }, [userRole, fetchAllPlaylists]);
 
+  const fetchFeedback = useCallback(async () => {
+    queryClient.invalidateQueries({ queryKey: ['feedbacks'] });
+  }, [queryClient]);
+
   useEffect(() => {
     if (userRole !== 'admin') return;
     
-    // For feedback, we'll just fetch for now. We can add real-time later if needed.
-    const fetchFeedback = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('feedback')
-          .select('*')
-          .order('created_at', { ascending: false });
-        
-        if (data) {
-          const mapped = data.map(f => ({
-            ...f,
-            userId: f.user_id,
-            userEmail: f.user_email,
-            userName: f.user_name,
-            text: f.content,
-            createdAt: f.created_at
-          }));
-          setAllFeedback(mapped as Feedback[]);
-        }
-        if (error) {
-          if (error.message.includes('schema cache')) {
-            console.warn("Feedback table missing in schema cache.");
-          } else {
-            console.error("Feedback fetch error:", error);
-          }
-        }
-      } catch (err) {
-        console.warn("Soft error in feedback fetch:", err);
-      }
-    };
-    
     fetchFeedback();
     
-    // Optional: Real-time
     const channel = supabase
       .channel('public:feedback')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, () => {
@@ -1689,7 +2974,7 @@ export default function App() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [userRole]);
+  }, [userRole, fetchFeedback]);
 
   const [userContents, setUserContents] = useState<ContentItem[]>([]);
   const [userPlaylists, setUserPlaylists] = useState<Playlist[]>([]);
@@ -1797,55 +3082,52 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     
-    const fetchLeaderboards = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('leaderboards')
-          .select('*')
-          .order('best_score', { ascending: false })
-          .order('time_taken', { ascending: true })
-          .limit(200);
-        
-        if (data) setAllLeaderboards(data as LeaderboardEntry[]);
-        if (error) {
-          if (error.message.includes('schema cache')) {
-            console.warn("Leaderboards table missing in schema cache.");
-          } else {
-            console.error("Leaderboards fetch error:", error);
-          }
-        }
-      } catch (err) {
-        console.warn("Soft error in leaderboards fetch:", err);
-      }
-    };
-
     fetchLeaderboards();
     
     const channel = supabase
-      .channel('public:leaderboards')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leaderboards' }, () => fetchLeaderboards())
+      .channel('public:leaderboards-and-stats')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leaderboards' }, () => {
+        console.log("Realtime DB update detected on leaderboards, reloading...");
+        fetchLeaderboards();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_stats' }, () => {
+        console.log("Realtime DB update detected on user_stats, reloading...");
+        fetchLeaderboards();
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [user, fetchLeaderboards]);
 
   useEffect(() => {
     if (userRole !== 'admin') return;
     
     const fetchQuestions = async () => {
-      let query = supabase.from('questions').select('*').order('created_at', { ascending: false });
-      
-      if (questionBankExamId !== 'global') {
-        query = query.eq('exam_id', questionBankExamId);
-      } else {
-        query = query.limit(100);
+      try {
+        let qs: Question[] = [];
+        if (questionBankExamId !== 'global') {
+          qs = await supabaseService.fetchQuestions(questionBankExamId);
+        } else {
+          const { data, error } = await supabase.from('questions').select('*').order('created_at', { ascending: false }).limit(200);
+          if (error) throw error;
+          
+          const [{ data: dbClasses }, { data: dbSubjects }, { data: dbChapters }] = await Promise.all([
+            supabase.from('academic_classes').select('id, name'),
+            supabase.from('subjects').select('id, name'),
+            supabase.from('chapters').select('id, name')
+          ]);
+          const classLookup = new Map((dbClasses || []).map(c => [c.id, c.name]));
+          const subjectLookup = new Map((dbSubjects || []).map(s => [s.id, s.name]));
+          const chapterLookup = new Map((dbChapters || []).map(ch => [ch.id, ch.name]));
+
+          qs = (data || []).map(q => supabaseService.mapQuestionDBToFrontend(q, classLookup, subjectLookup, chapterLookup));
+        }
+        setAllQuestions(qs);
+      } catch (error: any) {
+        handleSupabaseError(error, OperationType.LIST, 'questions');
       }
-      
-      const { data, error } = await query;
-      if (data) setAllQuestions(data as Question[]);
-      if (error) handleSupabaseError(error, OperationType.LIST, 'questions');
     };
 
     fetchQuestions();
@@ -1862,10 +3144,12 @@ export default function App() {
 
   useEffect(() => {
     const fetchExams = async () => {
-      let query = supabase.from('exams').select('*').order('created_at', { ascending: false });
-      const { data, error } = await query;
-      if (data) setAllExams(data as Exam[]);
-      if (error) handleSupabaseError(error, OperationType.LIST, 'exams', setGlobalError);
+      try {
+        const exams = await supabaseService.fetchExams();
+        setAllExams(exams);
+      } catch (error: any) {
+        handleSupabaseError(error, OperationType.LIST, 'exams', setGlobalError);
+      }
     };
 
     fetchExams();
@@ -1888,7 +3172,7 @@ export default function App() {
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
-        table: 'attempts',
+        table: 'exam_attempts',
         filter: `user_id=eq.${user.id}`
       }, (payload) => {
         console.log('Attempt change detected:', payload);
@@ -1906,7 +3190,7 @@ export default function App() {
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
-        table: 'answers'
+        table: 'exam_answers'
         // Filtering by attempt_id would be better if we had it in the filter string
       }, (payload) => {
         console.log('Answer change detected:', payload);
@@ -2018,16 +3302,36 @@ export default function App() {
 
         const merged = profiles.map(p => {
           const roleRec = userRoles.find(r => r.user_id === p.id || r.id === p.id);
+          const isExpired = p.premium_expiry && new Date(p.premium_expiry).getTime() < Date.now();
+          const basePremium = isExpired ? false : (roleRec ? (roleRec.is_premium ?? p.has_premium_access) : p.has_premium_access);
+          
+          // Silently trigger a Supabase DB cleanup if database says premium but user is expired
+          if (isExpired && (p.has_premium_access || roleRec?.is_premium)) {
+            (async () => {
+              try {
+                await supabase.from('profiles').update({ has_premium_access: false }).eq('id', p.id);
+                if (roleRec) {
+                  await supabase.from('user_roles').update({ is_premium: false }).eq('user_id', p.id);
+                }
+              } catch (cleanErr) {
+                console.warn("Soft error: failed to clean expired subscription in DB for user:", p.id, cleanErr);
+              }
+            })();
+          }
+
           return {
             ...p,
-            name: p.display_name,
+            name: p.full_name || p.display_name || 'Anonymous User',
+            photoURL: p.avatar_url || p.photo_url || '',
+            academicClass: p.academic_class,
+            academicGroup: p.academic_group,
             canUpload: roleRec ? (roleRec.can_upload ?? p.can_upload) : p.can_upload,
-            hasPremiumAccess: roleRec ? (roleRec.is_premium ?? p.has_premium_access) : p.has_premium_access,
+            hasPremiumAccess: basePremium,
             role: roleRec ? (roleRec.role ?? p.role) : p.role,
             canManageExams: roleRec ? (roleRec.can_manage_exams ?? false) : false,
             canManageQuestions: roleRec ? (roleRec.can_manage_questions ?? false) : false,
             canManageResources: roleRec ? (roleRec.can_manage_resources ?? false) : false,
-            isPremium: roleRec ? (roleRec.is_premium ?? p.has_premium_access) : p.has_premium_access
+            isPremium: basePremium
           };
         });
         setAllUsers(merged);
@@ -2052,6 +3356,57 @@ export default function App() {
       };
     }
   }, [userRole, fetchUsersInfo]);
+
+  // Automatic background DB & State updates for Expired subscriptions (Admin-side & general check on tick state update)
+  useEffect(() => {
+    if (userRole !== 'admin' || !allUsers || allUsers.length === 0) return;
+
+    const autoCleanExpired = async () => {
+      let databaseUpdated = false;
+      for (const u of allUsers) {
+        const isExpired = u.premium_expiry && new Date(u.premium_expiry).getTime() < Date.now();
+        const currentlyPremiumInDBRec = u.hasPremiumAccess || u.isPremium;
+        if (isExpired && currentlyPremiumInDBRec) {
+          try {
+            console.log(`[Admin Auto-Expiry] Deactivating expired subscription for user ${u.name} (${u.id})`);
+            await supabase.from('profiles').update({ has_premium_access: false }).eq('id', u.id);
+            await supabase.from('user_roles').update({ is_premium: false }).eq('user_id', u.id);
+            databaseUpdated = true;
+          } catch (e) {
+            console.warn("Soft error deactivating expired subscription in background:", e);
+          }
+        }
+      }
+      if (databaseUpdated) {
+        fetchUsersInfo();
+      }
+    };
+    autoCleanExpired();
+  }, [userRole, allUsers, tick, fetchUsersInfo]);
+
+  // Client-side real-time auto-deactivation of currently logged-in user's subscription
+  useEffect(() => {
+    if (!user || userRole === 'admin') return;
+
+    const isExpired = firestoreUser?.premiumExpiry && new Date(firestoreUser.premiumExpiry).getTime() < Date.now();
+    const currentlyActive = isPremium || firestoreUser?.hasPremiumAccess === true;
+
+    if (isExpired && currentlyActive) {
+      console.log("[Client Auto-Expiry] Current user subscription expired. Lock active.");
+      setIsPremium(false);
+      setFirestoreUser((prev: any) => prev ? { ...prev, hasPremiumAccess: false } : null);
+
+      const deactivateInDB = async () => {
+        try {
+          await supabase.from('profiles').update({ has_premium_access: false }).eq('id', user.id);
+          await supabase.from('user_roles').update({ is_premium: false }).eq('user_id', user.id);
+        } catch (err) {
+          console.warn("Client failed to update database with expired subscription:", err);
+        }
+      };
+      deactivateInDB();
+    }
+  }, [user, userRole, firestoreUser?.premiumExpiry, isPremium, firestoreUser?.hasPremiumAccess, tick]);
 
   const handleLogin = async () => {
     if (isAuthLoading) return;
@@ -2255,7 +3610,7 @@ export default function App() {
   };
 
   const classes: (string | 'All')[] = useMemo(() => {
-    return ['All', ...dynamicClasses.map(c => c.name)];
+    return ['All', ...Array.from(new Set(dynamicClasses.map(c => c.name)))];
   }, [dynamicClasses]);
   
   const subjectIcons: Record<string, any> = {
@@ -2399,7 +3754,7 @@ export default function App() {
                     {item.category.toUpperCase()}
                   </Badge>
                   <Badge className="bg-zinc-900/80 text-white text-[9px] px-2 py-1 shadow-lg backdrop-blur-md border-none">
-                    {item.academicClass === 'Class 10' ? 'SSC' : item.academicClass === 'Class 12' ? 'HSC' : item.academicClass}
+                    {item.academicClass}
                   </Badge>
                 </div>
                 {item.isPremium && (
@@ -2411,13 +3766,28 @@ export default function App() {
             </div>
 
             <div className={`p-4 flex-1 flex flex-col ${isLocked ? 'opacity-60' : ''}`}>
-              <div className="flex items-center gap-2 mb-4">
+              <div className="flex flex-wrap items-center gap-2 mb-4">
                 <Badge className="bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20 text-[9px]">
-                  {item.academicClass === 'Class 10' ? 'SSC' : item.academicClass === 'Class 12' ? 'HSC' : item.academicClass}
+                  {item.academicClass}
                 </Badge>
                 <Badge className="bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400 border border-orange-100 dark:border-orange-500/20 text-[9px]">
                   {item.subject}
                 </Badge>
+                {item.chapter && (
+                  <Badge className="bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-500/20 text-[9px] max-w-[120px] truncate">
+                    {item.chapter}
+                  </Badge>
+                )}
+                {(() => {
+                  const tId = item.topicId || item.topic_id;
+                  const matched = tId ? dynamicTopics.find(t => t.id === tId) : null;
+                  if (!matched) return null;
+                  return (
+                    <Badge className="bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400 border border-purple-100 dark:border-purple-500/20 text-[9px] max-w-[124px] truncate">
+                      {matched.name}
+                    </Badge>
+                  );
+                })()}
               </div>
               <h4 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white mb-2 line-clamp-1 leading-tight tracking-tight">{item.title}</h4>
               <p className="text-zinc-500 dark:text-zinc-400 text-[10px] sm:text-xs mb-4 line-clamp-2 leading-relaxed font-bold italic">
@@ -2429,9 +3799,14 @@ export default function App() {
                   className={`flex-1 text-xs sm:text-sm py-2 sm:py-2.5 rounded-xl ${isLocked ? 'bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500' : ''}`} 
                   size="sm" 
                   icon={isLocked ? Lock : (item.category === 'YouTube Classes' ? Youtube : (item.category === 'Books' ? Download : (item.category === 'Practice Sheet' ? Eye : FileText)))} 
+                  onMouseEnter={() => {
+                    if (!isLocked && item.category !== 'YouTube Classes' && item.url) {
+                      prefetchPdfUrl(ensureFullUrl(item.url));
+                    }
+                  }}
                   onClick={() => {
                     if (isLocked) {
-                      setGlobalError("🔒 Locked! Please upgrade to premium to access this specific content.");
+                      setShowPremiumPromptModal(true);
                       return;
                     }
                     if (item.category === 'YouTube Classes') setActiveVideo(getYouTubeId(item.url));
@@ -2471,7 +3846,7 @@ export default function App() {
           className="cursor-pointer relative overflow-visible h-full"
           onClick={() => {
             if (isLocked) {
-              setGlobalError("🔒 This Playlist is for Premium users only. Join parodorshhi PRO for access!");
+              setShowPremiumPromptModal(true);
               return;
             }
             setActiveVideo(null);
@@ -2763,7 +4138,7 @@ export default function App() {
                   type: 'youtube',
                   youtubePlaylistId: '',
                   videoIds: [],
-                  academicClass: classFilter === 'All' ? (dynamicClasses[0]?.name || 'Class 9') : classFilter as AcademicClass,
+                  academicClass: classFilter === 'All' ? (dynamicClasses?.[0]?.name || 'SSC') : classFilter as AcademicClass,
                   subject: subjectFilter === 'All' ? '' : subjectFilter,
                   thumbnail: ''
                 });
@@ -2798,7 +4173,7 @@ export default function App() {
                       type: 'youtube',
                       youtubePlaylistId: '',
                       videoIds: [],
-                      academicClass: classFilter === 'All' ? (dynamicClasses[0]?.name || 'Class 9') : classFilter as AcademicClass,
+                      academicClass: classFilter === 'All' ? (dynamicClasses?.[0]?.name || 'SSC') : classFilter as AcademicClass,
                       subject: subjectFilter === 'All' ? '' : subjectFilter,
                       thumbnail: ''
                     });
@@ -2893,10 +4268,15 @@ export default function App() {
                   </div>
                   <h3 className="font-bold text-zinc-900 dark:text-white mb-2 line-clamp-1">{resource.title}</h3>
                   <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mb-6 line-clamp-2 leading-relaxed font-medium">{resource.description}</p>
-                  <Button 
+                   <Button 
                     variant="outline" 
                     size="sm" 
                     className="w-full mt-auto rounded-xl group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600 transition-all duration-300"
+                    onMouseEnter={() => {
+                      if (resource.url && (resource.url.toLowerCase().endsWith('.pdf') || resource.url.includes('/storage/v1/object/public/') || resource.url.includes('drive.google.com'))) {
+                        prefetchPdfUrl(resource.url);
+                      }
+                    }}
                     onClick={() => {
                       if (resource.url.toLowerCase().endsWith('.pdf') || resource.url.includes('/storage/v1/object/public/')) {
                         setActivePdf({ url: resource.url, isRestricted: false });
@@ -2947,83 +4327,83 @@ export default function App() {
       {/* Ambient background for filter section */}
       <div className="absolute inset-0 bg-blue-50/20 dark:bg-zinc-900/10 blur-3xl -z-10 rounded-full scale-90" />
       
-      <div className="space-y-10 w-full max-w-6xl px-4">
-        <div className="flex flex-col items-center justify-center gap-4 w-full">
+      <div className="space-y-4 w-full max-w-6xl px-4">
+        <div className="flex flex-col items-center justify-center gap-1.5 w-full">
           <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
             Academic Level
           </Badge>
-          <div className="flex sm:flex-wrap gap-2 justify-start sm:justify-center w-full max-w-4xl mx-auto px-2 overflow-x-auto no-scrollbar pb-2 sm:pb-0">
+          <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
             {classes.map(c => (
               <motion.button 
                 key={c}
-                whileHover={{ scale: 1.05, y: -1 }}
-                whileTap={{ scale: 0.95 }}
+                whileHover={{ scale: 1.02, y: -0.5 }}
+                whileTap={{ scale: 0.98 }}
                 onClick={() => setClassFilter(c as any)}
-                className={`px-4 sm:px-8 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl text-[10px] sm:text-sm font-bold transition-all duration-300 shadow-sm border shrink-0 ${
+                className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center text-center py-1.5 sm:py-2 px-1 text-[9px] xs:text-[10px] sm:text-xs font-semibold rounded-lg sm:rounded-xl transition-all duration-300 shadow-sm border ${
                   classFilter === c 
-                  ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-xl shadow-zinc-900/10 dark:shadow-white/10' 
+                  ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-md shadow-zinc-900/10 dark:shadow-white/10' 
                   : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
                 }`}
               >
-                <span className="whitespace-nowrap">{c}</span>
+                <span className="leading-tight truncate max-w-full">{c}</span>
               </motion.button>
             ))}
           </div>
         </div>
 
         {isGroupNeeded(classFilter) && (
-          <div className="flex flex-col items-center justify-center gap-4 w-full animate-in fade-in slide-in-from-top-2">
+          <div className="flex flex-col items-center justify-center gap-1.5 w-full animate-in fade-in slide-in-from-top-2">
             <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
               Academic Group / Stream
             </Badge>
-            <div className="flex sm:flex-wrap gap-2 justify-start sm:justify-center w-full max-w-4xl mx-auto px-2 overflow-x-auto no-scrollbar pb-2 sm:pb-0">
-              {['All', ...academicGroups.map(g => g.name)].map(g => (
+            <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
+              {['All', ...Array.from(new Set(academicGroups.map(g => g.name)))].map(g => (
                 <motion.button 
                   key={g}
-                  whileHover={{ scale: 1.05, y: -1 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: 1.02, y: -0.5 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => {
                     setGroupFilter(g);
                     setSubjectFilter('All');
                     setChapterFilter('All');
                   }}
-                  className={`px-4 sm:px-8 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl text-[10px] sm:text-sm font-bold transition-all duration-300 shadow-sm border shrink-0 ${
+                  className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center text-center py-1.5 sm:py-2 px-1 text-[9px] xs:text-[10px] sm:text-xs font-semibold rounded-lg sm:rounded-xl transition-all duration-300 shadow-sm border ${
                     groupFilter === g 
-                    ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-xl shadow-zinc-900/10 dark:shadow-white/10' 
+                    ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-md shadow-zinc-900/10 dark:shadow-white/10' 
                     : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
                   }`}
                 >
-                  <span className="whitespace-nowrap">{g}</span>
+                  <span className="leading-tight truncate max-w-full">{g}</span>
                 </motion.button>
               ))}
             </div>
           </div>
         )}
 
-        <div className="flex flex-col items-center justify-center gap-4 w-full">
-          <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
+        <div className="flex flex-col items-center justify-center gap-1 w-full">
+          <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-2 py-0.5 text-[9px] uppercase tracking-[0.25em] font-bold">
             Subject Focus
           </Badge>
-          <div className="flex sm:flex-wrap gap-2 justify-start sm:justify-center w-full max-w-4xl mx-auto px-2 overflow-x-auto no-scrollbar pb-2 sm:pb-0">
+          <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
             {subjectsFilterList.map(s => {
               const Icon = subjectIcons[s];
               return (
                 <motion.button 
                   key={s}
-                  whileHover={{ scale: 1.05, y: -1 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: 1.02, y: -0.5 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => {
                     setSubjectFilter(s);
                     setChapterFilter('All');
                   }}
-                  className={`flex items-center gap-2 sm:gap-3 px-4 sm:px-8 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl text-[10px] sm:text-sm font-bold transition-all duration-300 shadow-sm border shrink-0 ${
+                  className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center gap-0.5 sm:gap-1 px-1 py-1.5 sm:py-2 sm:px-4 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] sm:text-xs font-semibold transition-all duration-300 shadow-sm border ${
                     subjectFilter === s 
-                    ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-xl shadow-zinc-900/10 dark:shadow-white/10' 
+                    ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-md shadow-zinc-900/10 dark:shadow-white/10' 
                     : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
                   }`}
                 >
-                  {Icon && <Icon size={14} className={subjectFilter === s ? 'text-blue-400' : 'text-zinc-400'} strokeWidth={2.5} />}
-                  <span className="whitespace-nowrap">{s}</span>
+                  {Icon && <Icon size={11} className={subjectFilter === s ? 'text-blue-400 shrink-0' : 'text-zinc-400 shrink-0'} strokeWidth={2.5} />}
+                  <span className="leading-tight truncate max-w-full">{s}</span>
                 </motion.button>
               );
             })}
@@ -3031,11 +4411,11 @@ export default function App() {
         </div>
 
         {subjectFilter !== 'All' && (
-          <div className="flex flex-col items-center justify-center gap-4 w-full animate-in fade-in slide-in-from-top-2">
+          <div className="flex flex-col items-center justify-center gap-1.5 w-full animate-in fade-in slide-in-from-top-2">
             <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
               Chapter selection
             </Badge>
-            <div className="flex sm:flex-wrap gap-2 justify-start sm:justify-center w-full max-w-4xl mx-auto px-2 overflow-x-auto no-scrollbar pb-2 sm:pb-0">
+            <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
                {['All', ...Array.from(new Set(dynamicChapters.filter(ch => {
                  const matchedSubject = dynamicSubjects.find(s => s.name === subjectFilter);
                  const matchedClass = dynamicClasses.find(c => c.name === classFilter);
@@ -3046,19 +4426,19 @@ export default function App() {
                }).map(ch => ch.name)))].map(ch => (
                 <motion.button 
                   key={ch}
-                  whileHover={{ scale: 1.05, y: -1 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: 1.02, y: -0.5 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => {
                     setChapterFilter(ch);
                     setTopicFilter('All');
                   }}
-                  className={`px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold transition-all duration-300 shadow-sm border shrink-0 ${
+                  className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center text-center px-1 py-1.5 sm:py-2 sm:px-4 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] sm:text-xs font-semibold transition-all duration-300 shadow-sm border ${
                     chapterFilter === ch 
-                    ? 'bg-blue-600 text-white border-transparent shadow-lg shadow-blue-500/20' 
+                    ? 'bg-blue-600 text-white border-transparent shadow-md shadow-blue-500/20' 
                     : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
                   }`}
                 >
-                  <span className="whitespace-nowrap">{ch}</span>
+                  <span className="line-clamp-1 leading-tight max-w-full">{ch}</span>
                 </motion.button>
               ))}
             </div>
@@ -3066,34 +4446,34 @@ export default function App() {
         )}
 
         {chapterFilter !== 'All' && (
-          <div className="flex flex-col items-center justify-center gap-4 w-full animate-in fade-in slide-in-from-top-2">
+          <div className="flex flex-col items-center justify-center gap-1.5 w-full animate-in fade-in slide-in-from-top-2">
             <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
               Topic selection
             </Badge>
-            <div className="flex sm:flex-wrap gap-2 justify-start sm:justify-center w-full max-w-4xl mx-auto px-2 overflow-x-auto no-scrollbar pb-2 sm:pb-0">
+            <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
                {['All', ...dynamicTopics.filter(t => {
                  const matchedChapter = dynamicChapters.find(ch => ch.name === chapterFilter);
                  return matchedChapter && t.chapterId === matchedChapter.id;
                }).map(t => ({ id: t.id, name: t.name }))].map(t => (
                 <motion.button 
                   key={typeof t === 'string' ? t : t.id}
-                  whileHover={{ scale: 1.05, y: -1 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: 1.02, y: -0.5 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => setTopicFilter(typeof t === 'string' ? t : t.id)}
-                  className={`px-4 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold transition-all duration-300 shadow-sm border shrink-0 ${
+                  className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center text-center px-1 py-1.5 sm:py-2 sm:px-4 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] sm:text-xs font-semibold transition-all duration-300 shadow-sm border ${
                     (topicFilter === (typeof t === 'string' ? t : t.id)) 
-                    ? 'bg-indigo-600 text-white border-transparent shadow-lg shadow-indigo-500/20' 
+                    ? 'bg-indigo-600 text-white border-transparent shadow-md shadow-indigo-500/20' 
                     : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
                   }`}
                 >
-                  <span className="whitespace-nowrap">{typeof t === 'string' ? t : t.name}</span>
+                  <span className="line-clamp-1 leading-tight max-w-full">{typeof t === 'string' ? t : t.name}</span>
                 </motion.button>
               ))}
             </div>
           </div>
         )}
 
-        {(user && hasPremiumAccess) && (
+        {user && (
           <div className="flex flex-col items-center justify-center gap-6 w-full pt-4">
             <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-black">
               Content Access
@@ -3120,7 +4500,13 @@ export default function App() {
                 Free
               </button>
               <button 
-                onClick={() => setContentTypeFilter('premium')}
+                onClick={() => {
+                  if (!hasPremiumAccess) {
+                    setShowPremiumPromptModal(true);
+                  } else {
+                    setContentTypeFilter('premium');
+                  }
+                }}
                 className={`relative z-10 flex-1 py-2.5 text-xs font-black uppercase tracking-widest transition-colors duration-300 flex items-center justify-center gap-2 cursor-pointer ${
                   contentTypeFilter === 'premium' ? 'text-white' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
                 }`}
@@ -3161,7 +4547,7 @@ export default function App() {
       if (eErr) console.warn("Delete exams error:", eErr);
 
       // 3. Delete all attempts
-      const { error: aErr } = await supabase.from('attempts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const { error: aErr } = await supabase.from('exam_attempts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       if (aErr) console.warn("Delete attempts error:", aErr);
 
       alert("Cleanup complete! Legacy exams and questions have been removed.");
@@ -3171,6 +4557,361 @@ export default function App() {
     } finally {
       setIsCleaning(false);
     }
+  };
+
+  const handleDeleteSubscriber = async (id: string, email: string) => {
+    if (!window.confirm(`Are you absolutely sure you want to remove ${email} from the subscriber library?`)) return;
+    try {
+      const { error } = await supabase
+        .from('newsletter_subscribers')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['newsletter_subscribers'] });
+      queryClient.invalidateQueries({ queryKey: ['public_subscriber_count'] });
+    } catch (e: any) {
+      alert("Failed deleting subscriber: " + e.message);
+    }
+  };
+
+  const handleDispatchCampaign = async () => {
+    if (!newsletterSubject.trim() || !newsletterMsg.trim()) {
+      alert("Please provide both a subject and a message body before delivering.");
+      return;
+    }
+
+    if (!window.confirm(`CONFIRM DISPATCH: You are about to deliver this communication to all enrolled subscribers. Proceed?`)) {
+      return;
+    }
+
+    setIsSendingLogs(true);
+    setSendingStats(null);
+    setSendingStatusText('Acquiring active session signature...');
+
+    try {
+      const session = (await supabase.auth.getSession()).data.session;
+      if (!session) {
+        throw new Error("No active credentials found. Please re-login.");
+      }
+
+      setSendingStatusText('Delivering communication packets inside secure container thread...');
+      
+      const response = await fetch('/api/newsletter/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          subject: newsletterSubject.trim(),
+          message: newsletterMsg.trim()
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Server returned error status ${response.status}`);
+      }
+
+      const results = await response.json();
+      if (results.success) {
+        setSendingStats(results.stats);
+        setNewsletterSubject('');
+        setNewsletterMsg('');
+        queryClient.invalidateQueries({ queryKey: ['newsletter_email_logs'] });
+        setSendingStatusText('Dispatch Campaign Complete!');
+      } else {
+        throw new Error(results.error || "Execution terminated unexpectedly.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert("Campaign terminal error: " + err.message);
+    } finally {
+      setIsSendingLogs(false);
+    }
+  };
+
+  const renderNewsletterAdminTab = () => {
+    const subscribers = qNewsletterSubscribers || [];
+    const logs = qNewsletterEmailLogs || [];
+    
+    const filteredSubscribers = subscribers.filter((sub: any) => 
+      sub.email?.toLowerCase().includes((newsletterSearchFilter || '').toLowerCase())
+    );
+
+    const filteredLogs = logs.filter((log: any) => 
+      log.subscriber_email?.toLowerCase().includes((newsletterSearchFilter || '').toLowerCase()) ||
+      log.subject?.toLowerCase().includes((newsletterSearchFilter || '').toLowerCase())
+    );
+
+    const totalSubscribers = subscribers.length;
+    const totalDelivered = logs.filter((l: any) => l.status === 'sent' || l.status === 'success').length;
+    const totalFailed = logs.filter((l: any) => l.status === 'failed' || l.status === 'error').length;
+    const totalAttempts = logs.length;
+    const healthRate = totalAttempts > 0 ? Math.round((totalDelivered / totalAttempts) * 100) : 100;
+
+    return (
+      <div className="space-y-8 animate-fade-in text-zinc-900 dark:text-zinc-100">
+        {/* Analytics Highlights */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white dark:bg-zinc-950 border border-zinc-200/60 dark:border-zinc-800/60 rounded-3xl p-6 shadow-sm flex items-center gap-4">
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/10 text-blue-500 rounded-2xl">
+              <Users size={24} />
+            </div>
+            <div>
+              <p className="text-xs text-zinc-400 font-bold uppercase tracking-wider">Registered Enrollees</p>
+              <h3 className="text-2xl font-black text-zinc-900 dark:text-white font-mono">{totalSubscribers}</h3>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-zinc-950 border border-zinc-200/60 dark:border-zinc-800/60 rounded-3xl p-6 shadow-sm flex items-center gap-4">
+            <div className="p-4 bg-green-50 dark:bg-green-950/10 text-green-500 rounded-2xl animate-pulse">
+              <CheckCircle size={24} />
+            </div>
+            <div>
+              <p className="text-xs text-zinc-400 font-bold uppercase tracking-wider">Dispatched Emails</p>
+              <h3 className="text-2xl font-black text-zinc-900 dark:text-white font-mono">{totalDelivered}</h3>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-zinc-950 border border-zinc-200/60 dark:border-zinc-800/60 rounded-3xl p-6 shadow-sm flex items-center gap-4">
+            <div className="p-4 bg-purple-50 dark:bg-purple-950/10 text-purple-500 rounded-2xl">
+              <Activity size={24} />
+            </div>
+            <div>
+              <p className="text-xs text-zinc-400 font-bold uppercase tracking-wider">Delivery Success Rate</p>
+              <h3 className="text-2xl font-black text-zinc-900 dark:text-white font-mono">{healthRate}%</h3>
+            </div>
+          </div>
+        </div>
+
+        {/* Creator Cockpit & Live Preview Box */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Dispatch Panel */}
+          <div className="bg-white dark:bg-zinc-950 border border-zinc-200/60 dark:border-zinc-800/60 rounded-[32px] p-6 sm:p-8 shadow-sm space-y-6">
+            <div>
+              <h3 className="text-lg font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                <Send size={18} className="text-blue-500" /> Deliver Newsletter Campaign
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Draft your educational updates. All enrollees will receive responsive HTML templates instantly.</p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block font-sans">Email Subject line</label>
+                <input 
+                  type="text" 
+                  disabled={isSendingLogs}
+                  placeholder="e.g., Weekly Educational Highlights & New Mock Exams!" 
+                  value={newsletterSubject}
+                  onChange={(e) => setNewsletterSubject(e.target.value)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 text-zinc-900 dark:text-white shadow-inner"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest block font-sans">Message body content</label>
+                <textarea 
+                  rows={8}
+                  disabled={isSendingLogs}
+                  placeholder="Draft your mail. Spacing creates clean paragraphs automatically..." 
+                  value={newsletterMsg}
+                  onChange={(e) => setNewsletterMsg(e.target.value)}
+                  className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 text-zinc-900 dark:text-white font-mono resize-y shadow-inner"
+                />
+              </div>
+
+              {/* Status and Analytics recap */}
+              {isSendingLogs && (
+                <div className="p-4 bg-blue-500/10 rounded-2xl border border-blue-500/20 text-xs text-blue-600 dark:text-blue-400 space-y-2 animate-pulse font-sans">
+                  <p className="font-bold flex items-center gap-2">
+                    <RefreshCw size={12} className="animate-spin" /> {sendingStatusText}
+                  </p>
+                  <p className="text-[10px] text-zinc-500">Executing delivery loop... Bulk sending is safeguarded via anti-speed controls to completely safeguard your Resend score.</p>
+                </div>
+              )}
+
+              {sendingStats && (
+                <div className="p-5 bg-zinc-50 dark:bg-zinc-900/50 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-xs space-y-3 font-sans">
+                  <h4 className="font-black text-zinc-800 dark:text-zinc-200 uppercase tracking-wide">Last Campaign Dispatch Analytics</h4>
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    <div className="bg-zinc-100 dark:bg-zinc-900 p-2 rounded-xl">
+                      <p className="text-[10px] text-zinc-500">Audience</p>
+                      <p className="text-sm font-black font-mono text-zinc-700 dark:text-zinc-300">{sendingStats.total}</p>
+                    </div>
+                    <div className="bg-green-100 dark:bg-green-950/40 p-2 rounded-xl">
+                      <p className="text-[10px] text-green-500">Delivered</p>
+                      <p className="text-sm font-black font-mono text-green-600">{sendingStats.sent}</p>
+                    </div>
+                    <div className="bg-yellow-100 dark:bg-yellow-950/40 p-2 rounded-xl">
+                      <p className="text-[10px] text-yellow-600">Duplicates</p>
+                      <p className="text-sm font-black font-mono text-yellow-600">{sendingStats.duplicates}</p>
+                    </div>
+                    <div className="bg-red-100 dark:bg-red-950/40 p-2 rounded-xl">
+                      <p className="text-[10px] text-red-500">Errors</p>
+                      <p className="text-sm font-black font-mono text-red-600">{sendingStats.failed}</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setSendingStats(null)}
+                    className="text-[10px] text-blue-500 font-bold hover:underline"
+                  >
+                    Clear stats
+                  </button>
+                </div>
+              )}
+
+              <Button 
+                onClick={handleDispatchCampaign}
+                disabled={isSendingLogs || !newsletterSubject.trim() || !newsletterMsg.trim()}
+                className="w-full h-12 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/10 disabled:opacity-50 border-none hover:scale-[1.01] transition-transform"
+              >
+                {isSendingLogs ? <RefreshCw size={12} className="animate-spin" /> : <Send size={12} />}
+                {isSendingLogs ? 'Delivering Packets...' : 'Launch Newsletter Campaign'}
+              </Button>
+            </div>
+          </div>
+
+          {/* Device Mockup Preview */}
+          <div className="border border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-950/40 rounded-[32px] p-6 shadow-sm flex flex-col h-full min-h-[450px]">
+            <div className="flex items-center justify-between pb-4 border-b border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full bg-red-400"></span>
+                <span className="w-3 h-3 rounded-full bg-yellow-400"></span>
+                <span className="w-3 h-3 rounded-full bg-green-400"></span>
+              </div>
+              <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">Responsive Email Preview</span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto max-h-[380px] p-4 bg-white dark:bg-zinc-900 border border-zinc-200/50 dark:border-zinc-800/50 rounded-2xl mt-4 space-y-4">
+              <div className="bg-[#0f172a] p-4 rounded-xl text-center">
+                <h1 className="text-white text-lg font-black tracking-wide uppercase m-0 leading-none font-sans">Parodorshhi</h1>
+                <p className="text-zinc-400 text-[9px] uppercase font-bold tracking-widest mt-1.5 font-sans">Educational Portal</p>
+              </div>
+
+              <div className="space-y-3 font-sans">
+                <h2 className="text-sm font-bold text-zinc-800 dark:text-zinc-100 border-b border-zinc-100 dark:border-zinc-800 pb-2 leading-snug">
+                  {newsletterSubject || 'Demo Subject Title Goes Here...'}
+                </h2>
+                <div className="text-zinc-650 dark:text-zinc-300 text-xs leading-relaxed space-y-2 whitespace-pre-wrap font-sans">
+                  {newsletterMsg || 'Start drafting your newsletter campaign contents. The mockup preview will draw your communication beautifully and allow you to inspect the desktop layout instantly.'}
+                </div>
+                <div className="pt-4 text-center">
+                  <span className="bg-blue-600 text-white text-[11px] font-bold px-4 py-2 rounded-lg inline-block shadow-sm">
+                    Go to Dashboard
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-6 border-t border-zinc-100 dark:border-zinc-800 text-center text-[10px] text-zinc-400 leading-normal font-sans">
+                <p>You are receiving this update because you subscribed to our newsletter on the Parodorshhi Educational Portal.</p>
+                <p className="mt-2 font-bold uppercase tracking-wider">© 2026 Parodorshhi. All rights reserved.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Database records Lists / Archive logger */}
+        <div className="bg-white dark:bg-zinc-950 border border-zinc-200/60 dark:border-zinc-800/60 rounded-[32px] p-6 sm:p-8 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 font-sans">
+            <div className="flex items-center p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl w-fit border border-zinc-200/30 dark:border-zinc-800/30">
+              <button 
+                onClick={() => setNewsletterSubTab('subscribers')}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${newsletterSubTab === 'subscribers' ? 'bg-white dark:bg-zinc-800 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+              >
+                Subscriber Registry ({filteredSubscribers.length})
+              </button>
+              <button 
+                onClick={() => setNewsletterSubTab('logs')}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${newsletterSubTab === 'logs' ? 'bg-white dark:bg-zinc-800 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+              >
+                Delivery Archives ({filteredLogs.length})
+              </button>
+            </div>
+
+            {/* Search filter */}
+            <input 
+              type="text" 
+              placeholder={`Search ${newsletterSubTab}...`}
+              value={newsletterSearchFilter || ''}
+              onChange={(e) => setNewsletterSearchFilter(e.target.value)}
+              className="bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 text-xs outline-none focus:border-blue-500 max-w-xs text-zinc-900 dark:text-white"
+            />
+          </div>
+
+          <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-white dark:bg-zinc-950">
+            {newsletterSubTab === 'subscribers' ? (
+              <table className="w-full text-left border-collapse font-sans">
+                <thead>
+                  <tr className="bg-zinc-50 dark:bg-zinc-900 text-[10px] text-zinc-400 uppercase font-black tracking-widest border-b border-zinc-100 dark:border-zinc-800">
+                    <th className="py-3 px-4">E-mail Address</th>
+                    <th className="py-3 px-4">Enrolled Timestamp</th>
+                    <th className="py-3 px-4 text-right">Options</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-850 text-xs text-zinc-600 dark:text-zinc-300">
+                  {filteredSubscribers.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="py-12 text-center text-zinc-400 font-medium">No subscribers matched your search filter.</td>
+                    </tr>
+                  ) : (
+                    filteredSubscribers.map((sub: any, index: number) => (
+                      <tr key={sub.id || index} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/10">
+                        <td className="py-3 px-4 font-bold font-mono text-zinc-800 dark:text-zinc-100">{sub.email}</td>
+                        <td className="py-3 px-4 text-zinc-400 font-mono">{new Date(sub.created_at).toLocaleString()}</td>
+                        <td className="py-3 px-4 text-right">
+                          <button 
+                            onClick={() => handleDeleteSubscriber(sub.id, sub.email)}
+                            className="bg-red-500/10 text-red-500 font-bold px-3 py-1.5 rounded-lg text-[10px] hover:bg-red-500/20 uppercase tracking-wider"
+                          >
+                            Unsubscribe
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full text-left border-collapse font-sans">
+                <thead>
+                  <tr className="bg-zinc-50 dark:bg-zinc-900 text-[10px] text-zinc-400 uppercase font-black tracking-widest border-b border-zinc-100 dark:border-zinc-800">
+                    <th className="py-3 px-4">Subscriber E-mail</th>
+                    <th className="py-3 px-4">Bulletin Subject</th>
+                    <th className="py-3 px-4">Delivery Status</th>
+                    <th className="py-3 px-4">Dispatched At</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-850 text-xs text-zinc-600 dark:text-zinc-300">
+                  {filteredLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="py-12 text-center text-zinc-400 font-medium font-sans">No campaign dispatch logs matched your search filter.</td>
+                    </tr>
+                  ) : (
+                    filteredLogs.map((log: any, index: number) => (
+                      <tr key={log.id || index} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/10">
+                        <td className="py-3 px-4 font-mono font-bold text-zinc-800 dark:text-zinc-100">{log.subscriber_email}</td>
+                        <td className="py-3 px-4 max-w-[200px] truncate">{log.subject}</td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-widest font-sans ${
+                            log.status === 'sent' || log.status === 'success' 
+                              ? 'bg-green-500/10 text-green-600' 
+                              : 'bg-red-500/10 text-red-500'
+                          }`}>
+                            {log.status === 'sent' ? 'delivered' : log.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-zinc-400 font-mono">{new Date(log.sent_at).toLocaleString()}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const renderAdminPortal = () => {
@@ -3269,10 +5010,24 @@ export default function App() {
         >
           Academic Info
         </button>
+        <button 
+          onClick={() => setAdminTab('newsletter')}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'newsletter' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+        >
+          Newsletter Hub
+        </button>
+        <button 
+          onClick={() => setAdminTab('subscriptions')}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'subscriptions' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+        >
+          Subscription Management
+        </button>
       </div>
 
-      {adminTab === 'academics' ? (
-        <AcademicManagement />
+      {adminTab === 'newsletter' ? (
+        renderNewsletterAdminTab()
+      ) : adminTab === 'academics' ? (
+        <AcademicManagement onDataChanged={refreshAcademicData} />
       ) : adminTab === 'resources' ? (
         <div className="grid grid-cols-1 gap-4">
           {allContents.map((item, idx) => (
@@ -3379,73 +5134,254 @@ export default function App() {
           )}
         </div>
       ) : adminTab === 'users' ? (
-        <div className="grid grid-cols-1 gap-4">
-          {allUsers.map((u, uIdx) => (
-            <div key={`all-u-${u.id || uIdx}`} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 flex items-center gap-6 shadow-sm hover:shadow-md transition-all">
-              <div className="w-14 h-14 rounded-full overflow-hidden bg-zinc-100 dark:bg-zinc-800 shrink-0">
-                <img src={u.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.id}`} alt={u.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+        <div className="space-y-6">
+          <div className="flex flex-col md:flex-row gap-4 justify-between items-stretch md:items-center bg-white dark:bg-zinc-800/40 p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+            <div className="flex flex-col items-center md:items-start text-center md:text-left">
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">User Directory</span>
+              <h4 className="text-xl font-black text-zinc-950 dark:text-white">
+                {allUsers.length} Registered User{allUsers.length === 1 ? '' : 's'}
+              </h4>
+            </div>
+            
+            <div className="flex flex-wrap gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-900/60 rounded-2xl border border-zinc-200/50 dark:border-zinc-800 self-center">
+              <button
+                onClick={() => setAdminUserCategory('all')}
+                className={`px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${adminUserCategory === 'all' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'}`}
+              >
+                All ({usersWithRealtimeExpiry.length})
+              </button>
+              <button
+                onClick={() => setAdminUserCategory('normal')}
+                className={`px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${adminUserCategory === 'normal' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'}`}
+              >
+                Normal ({usersWithRealtimeExpiry.filter(u => !(u.hasPremiumAccess || u.isPremium)).length})
+              </button>
+              <button
+                onClick={() => setAdminUserCategory('premium')}
+                className={`px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${adminUserCategory === 'premium' ? 'bg-amber-500 text-zinc-950 shadow-md' : 'text-zinc-500 hover:text-amber-500 dark:hover:text-amber-400'}`}
+              >
+                Premium ({usersWithRealtimeExpiry.filter(u => u.hasPremiumAccess || u.isPremium).length})
+              </button>
+            </div>
+
+            <div className="relative w-full md:w-80">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
+              <input 
+                type="text"
+                placeholder="Search by email, name or ID..." 
+                className="w-full pl-10 pr-10 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-3xl outline-none text-sm dark:text-white focus:border-zinc-300 dark:focus:border-zinc-650 transition-all font-medium placeholder:text-zinc-400"
+                value={adminUserSearchQuery}
+                onChange={(e) => setAdminUserSearchQuery(e.target.value)}
+              />
+              {adminUserSearchQuery && (
+                <button 
+                  onClick={() => setAdminUserSearchQuery('')}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-205 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            {filteredUsers.map((u, uIdx) => (
+            <div key={`all-u-${u.id || uIdx}`} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 flex flex-col gap-6 shadow-sm hover:shadow-md transition-all">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="flex items-start md:items-center gap-6 flex-1 min-w-0">
+                  <div className="w-14 h-14 rounded-full overflow-hidden bg-zinc-100 dark:bg-zinc-800 shrink-0 border border-zinc-200/50 dark:border-zinc-800/80">
+                    <img src={u.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.id}`} alt={u.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-lg font-black text-zinc-900 dark:text-white truncate">{u.name || 'Anonymous User'}</h4>
+                      {u.role === 'admin' && <Badge className="bg-blue-500 text-white border-none text-[8px] uppercase font-black px-2">Admin</Badge>}
+                    </div>
+                    <p className="text-sm text-zinc-500 truncate">{u.email}</p>
+                    <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">ID: {u.id}</p>
+                    
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      {u.academicClass && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/10">
+                          Class: {u.academicClass}
+                        </span>
+                      )}
+                      {u.academicGroup && u.academicGroup !== 'All' && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-450 border border-amber-100 dark:border-amber-900/10">
+                          Group: {u.academicGroup}
+                        </span>
+                      )}
+                    </div>
+
+                    {(u.hasPremiumAccess || u.isPremium) && (
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400">
+                        <span className="inline-flex items-center gap-1 bg-amber-500/10 dark:bg-amber-500/5 px-2 py-0.5 rounded-lg border border-amber-500/20">
+                          ✨ Pro Gained: {u.updated_at ? new Date(u.updated_at).toLocaleDateString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Active'}
+                        </span>
+                        {u.premium_expiry && (
+                          <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-semibold bg-zinc-100 dark:bg-zinc-800/80 px-2 py-0.5 rounded border border-zinc-200/30 dark:border-zinc-700/30">
+                            Expires: {new Date(u.premium_expiry).toLocaleString('bn-BD')}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex flex-wrap items-center gap-4 shrink-0 md:justify-end border-t border-zinc-100 dark:border-zinc-800/80 pt-4 md:pt-0 md:border-none">
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Premium Access</span>
+                    <button 
+                      onClick={() => handleTogglePremiumAccess(u.id, u.hasPremiumAccess || u.isPremium)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.hasPremiumAccess || u.isPremium ? 'bg-amber-500' : 'bg-zinc-200 dark:bg-zinc-700'} cursor-pointer`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.hasPremiumAccess || u.isPremium ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Upload Permission</span>
+                    <button 
+                      onClick={() => handleToggleUpload(u.id, u.canUpload)}
+                      disabled={u.role === 'admin'}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canUpload ? 'bg-blue-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canUpload ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Resources Admin</span>
+                    <button 
+                      onClick={() => handleToggleManageResources(u.id, u.canManageResources)}
+                      disabled={u.role === 'admin'}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canManageResources ? 'bg-indigo-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canManageResources ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Exams Admin</span>
+                    <button 
+                      onClick={() => handleToggleManageExams(u.id, u.canManageExams)}
+                      disabled={u.role === 'admin'}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canManageExams ? 'bg-violet-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canManageExams ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Questions Admin</span>
+                    <button 
+                      onClick={() => handleToggleManageQuestions(u.id, u.canManageQuestions)}
+                      disabled={u.role === 'admin'}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canManageQuestions ? 'bg-purple-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canManageQuestions ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h4 className="text-lg font-black text-zinc-900 dark:text-white truncate">{u.name || 'Anonymous User'}</h4>
-                  {u.role === 'admin' && <Badge className="bg-blue-500 text-white border-none text-[8px] uppercase font-black px-2">Admin</Badge>}
+
+              {u.role !== 'admin' && (
+                <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800/80 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-500 dark:text-amber-400 flex items-center gap-1.5">
+                      📅 Subscription Validity Duration (মেয়াদ পরিবর্তন করুন)
+                    </span>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {u.premium_expiry ? (
+                        <>মেয়াদ শেষ হবে: <span className="font-extrabold text-indigo-600 dark:text-indigo-400">{new Date(u.premium_expiry).toLocaleString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span></>
+                      ) : (
+                        "আজীবন মেয়াদী (Unlimited Life Access) অথবা নন-প্রিমিয়াম ইউজার"
+                      )}
+                    </p>
+                  </div>
+                  
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2 bg-zinc-50 dark:bg-zinc-800/60 p-1.5 rounded-xl border border-zinc-200/60 dark:border-zinc-700/60 shadow-sm">
+                      <Clock size={14} className="text-zinc-400 dark:text-zinc-500 ml-1.5" />
+                      <input 
+                        type="datetime-local"
+                        value={u.premium_expiry ? new Date(new Date(u.premium_expiry).getTime() - (new Date().getTimezoneOffset() * 60 * 1000)).toISOString().slice(0, 16) : ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val) {
+                            handleSetCustomExpiry(u.id, new Date(val).toISOString());
+                          } else {
+                            handleSetCustomExpiry(u.id, null);
+                          }
+                        }}
+                        className="bg-transparent text-xs font-bold dark:text-white outline-none"
+                      />
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-1">
+                      <button
+                        onClick={() => {
+                          const date = new Date(Date.now() + 1 * 60 * 60 * 1000).toISOString();
+                          handleSetCustomExpiry(u.id, date);
+                        }}
+                        className="px-2.5 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-[10px] font-extrabold rounded-lg transition-all dark:text-zinc-300 border border-zinc-200/40 dark:border-zinc-700/30"
+                        title="Set for 1 hour for testing or instant trial"
+                      >
+                        ১ ঘন্টা
+                      </button>
+                      <button
+                        onClick={() => {
+                          const date = new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString();
+                          handleSetCustomExpiry(u.id, date);
+                        }}
+                        className="px-2.5 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-[10px] font-extrabold rounded-lg transition-all dark:text-zinc-300 border border-zinc-200/40 dark:border-zinc-700/30"
+                      >
+                        ১ দিন
+                      </button>
+                      <button
+                        onClick={() => {
+                          const date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+                          handleSetCustomExpiry(u.id, date);
+                        }}
+                        className="px-2.5 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-[10px] font-extrabold rounded-lg transition-all dark:text-zinc-300 border border-zinc-200/40 dark:border-zinc-700/30"
+                      >
+                        ৭ দিন
+                      </button>
+                      <button
+                        onClick={() => {
+                          const date = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+                          handleSetCustomExpiry(u.id, date);
+                        }}
+                        className="px-2.5 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-[10px] font-extrabold rounded-lg transition-all dark:text-zinc-300 border border-zinc-200/40 dark:border-zinc-700/30"
+                      >
+                        ৩০ দিন
+                      </button>
+                      <button
+                        onClick={() => {
+                          const date = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+                          handleSetCustomExpiry(u.id, date);
+                        }}
+                        className="px-2.5 py-1.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-[10px] font-extrabold rounded-lg transition-all dark:text-zinc-300 border border-zinc-200/40 dark:border-zinc-700/30"
+                      >
+                        ১ বছর
+                      </button>
+                      <button
+                        onClick={() => handleSetCustomExpiry(u.id, null)}
+                        className="px-2.5 py-1.5 bg-amber-500/10 dark:bg-amber-500/5 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 text-[10px] font-bold rounded-lg transition-all border border-amber-500/20"
+                      >
+                        আজীবন
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-sm text-zinc-500 truncate">{u.email}</p>
-                <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">ID: {u.id}</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-6 shrink-0 md:justify-end">
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Premium Access</span>
-                  <button 
-                    onClick={() => handleTogglePremiumAccess(u.id, u.hasPremiumAccess || u.isPremium)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.hasPremiumAccess || u.isPremium ? 'bg-amber-500' : 'bg-zinc-200 dark:bg-zinc-700'} cursor-pointer`}
-                  >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.hasPremiumAccess || u.isPremium ? 'translate-x-6' : 'translate-x-1'}`} />
-                  </button>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Upload Permission</span>
-                  <button 
-                    onClick={() => handleToggleUpload(u.id, u.canUpload)}
-                    disabled={u.role === 'admin'}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canUpload ? 'bg-blue-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                  >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canUpload ? 'translate-x-6' : 'translate-x-1'}`} />
-                  </button>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Resources Admin</span>
-                  <button 
-                    onClick={() => handleToggleManageResources(u.id, u.canManageResources)}
-                    disabled={u.role === 'admin'}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canManageResources ? 'bg-indigo-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                  >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canManageResources ? 'translate-x-6' : 'translate-x-1'}`} />
-                  </button>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Exams Admin</span>
-                  <button 
-                    onClick={() => handleToggleManageExams(u.id, u.canManageExams)}
-                    disabled={u.role === 'admin'}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canManageExams ? 'bg-violet-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                  >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canManageExams ? 'translate-x-6' : 'translate-x-1'}`} />
-                  </button>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Questions Admin</span>
-                  <button 
-                    onClick={() => handleToggleManageQuestions(u.id, u.canManageQuestions)}
-                    disabled={u.role === 'admin'}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${u.canManageQuestions ? 'bg-purple-600' : 'bg-zinc-200 dark:bg-zinc-700'} ${u.role === 'admin' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                  >
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${u.canManageQuestions ? 'translate-x-6' : 'translate-x-1'}`} />
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
           ))}
+          {filteredUsers.length === 0 && (
+            <div className="py-20 text-center space-y-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full">
+              <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
+                <Search size={40} />
+              </div>
+              <p className="text-zinc-500 font-bold">No users match your search query.</p>
+            </div>
+          )}
+          </div>
         </div>
       ) : adminTab === 'exams' ? (
         <div className="space-y-6">
@@ -3463,7 +5399,7 @@ export default function App() {
                   timeLimit: 30,
                   mcqCount: 25,
                   writtenCount: 1,
-                  class: dynamicClasses[0]?.name || 'Class 9',
+                  class: dynamicClasses?.[0]?.name || 'SSC',
                   subject: 'General',
                   status: 'approved'
                 });
@@ -3656,18 +5592,18 @@ export default function App() {
                       { type: 'mcq', questionText: 'What is the capital of Bangladesh?', options: ['Dhaka', 'Chittagong', 'Sylhet', 'Rajshahi'], correctAnswer: 0, points: 1, class: 'General', subject: 'General Knowledge', chapter: 'Geography', createdAt: Date.now() },
                       { type: 'mcq', questionText: 'In which year did Bangladesh gain independence?', options: ['1970', '1971', '1972', '1975'], correctAnswer: 1, points: 1, class: 'General', subject: 'General Knowledge', chapter: 'History', createdAt: Date.now() },
                       
-                      // Physics Class 9
-                      { type: 'mcq', questionText: 'Which unit is used to measure force?', options: ['Watt', 'Joule', 'Newton', 'Pascal'], correctAnswer: 2, points: 1, class: 'Class 9', subject: 'Physics', chapter: 'Force', createdAt: Date.now() },
-                      { type: 'mcq', questionText: 'What is the acceleration due to gravity on Earth?', options: ['8.8 ms^-2', '9.8 ms^-2', '10.8 ms^-2', '7.8 ms^-2'], correctAnswer: 1, points: 1, class: 'Class 9', subject: 'Physics', chapter: 'Motion', createdAt: Date.now() },
+                      // Physics SSC
+                      { type: 'mcq', questionText: 'Which unit is used to measure force?', options: ['Watt', 'Joule', 'Newton', 'Pascal'], correctAnswer: 2, points: 1, class: 'SSC', subject: 'Physics', chapter: 'Force', createdAt: Date.now() },
+                      { type: 'mcq', questionText: 'What is the acceleration due to gravity on Earth?', options: ['8.8 ms^-2', '9.8 ms^-2', '10.8 ms^-2', '7.8 ms^-2'], correctAnswer: 1, points: 1, class: 'SSC', subject: 'Physics', chapter: 'Motion', createdAt: Date.now() },
                       
-                      // Math Class 9
-                      { type: 'mcq', questionText: 'Solve: 5x + 10 = 30. What is x?', options: ['2', '4', '6', '8'], correctAnswer: 1, points: 2, class: 'Class 9', subject: 'Math', chapter: 'Algebra', createdAt: Date.now() },
-                      { type: 'mcq', questionText: 'What is the sum of angles in a triangle?', options: ['90°', '180°', '270°', '360°'], correctAnswer: 1, points: 1, class: 'Class 9', subject: 'Math', chapter: 'Geometry', createdAt: Date.now() },
-                      { type: 'mcq', questionText: 'What is the value of pi (π) up to two decimal places?', options: ['3.12', '3.14', '3.16', '3.18'], correctAnswer: 1, points: 1, class: 'Class 9', subject: 'Math', chapter: 'Geometry', createdAt: Date.now() },
+                      // Math SSC
+                      { type: 'mcq', questionText: 'Solve: 5x + 10 = 30. What is x?', options: ['2', '4', '6', '8'], correctAnswer: 1, points: 2, class: 'SSC', subject: 'Math', chapter: 'Algebra', createdAt: Date.now() },
+                      { type: 'mcq', questionText: 'What is the sum of angles in a triangle?', options: ['90°', '180°', '270°', '360°'], correctAnswer: 1, points: 1, class: 'SSC', subject: 'Math', chapter: 'Geometry', createdAt: Date.now() },
+                      { type: 'mcq', questionText: 'What is the value of pi (π) up to two decimal places?', options: ['3.12', '3.14', '3.16', '3.18'], correctAnswer: 1, points: 1, class: 'SSC', subject: 'Math', chapter: 'Geometry', createdAt: Date.now() },
                       
-                      // Biology Class 9
-                      { type: 'mcq', questionText: 'What is the powerhouse of the cell?', options: ['Nucleus', 'Mitochondria', 'Ribosome', 'Golgi Apparatus'], correctAnswer: 1, points: 1, class: 'Class 9', subject: 'Biology', chapter: 'Cell', createdAt: Date.now() },
-                      { type: 'written', questionText: 'Explain the three laws of Newton.', points: 10, class: 'Class 9', subject: 'Physics', chapter: 'Laws of Motion', createdAt: Date.now() },
+                      // Biology SSC
+                      { type: 'mcq', questionText: 'What is the powerhouse of the cell?', options: ['Nucleus', 'Mitochondria', 'Ribosome', 'Golgi Apparatus'], correctAnswer: 1, points: 1, class: 'SSC', subject: 'Biology', chapter: 'Cell', createdAt: Date.now() },
+                      { type: 'written', questionText: 'Explain the three laws of Newton.', points: 10, class: 'SSC', subject: 'Physics', chapter: 'Laws of Motion', createdAt: Date.now() },
 
                       // Medical Admission Samples
                       { type: 'mcq', questionText: 'Which vitamin is synthesized by the human skin in sunlight?', options: ['Vit A', 'Vit B12', 'Vit C', 'Vit D'], correctAnswer: 3, points: 1, class: 'Medical Admission-science', subject: 'General', chapter: 'Biology', createdAt: Date.now() },
@@ -3708,7 +5644,7 @@ export default function App() {
                     options: ['', '', '', ''],
                     correctAnswer: 0,
                     points: 1,
-                    class: dynamicClasses[0]?.name || 'Class 9',
+                    class: dynamicClasses?.[0]?.name || 'SSC',
                     subject: 'Math',
                     chapter: ''
                   });
@@ -3752,7 +5688,7 @@ export default function App() {
                   <Badge className="bg-amber-500/10 text-amber-600 border-none">{questionGroupFilter}</Badge>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {['All', ...academicGroups.map(g => g.name)].map(g => (
+                  {['All', ...Array.from(new Set(academicGroups.map(g => g.name)))].map(g => (
                     <button
                       key={g}
                       onClick={() => {
@@ -3835,10 +5771,20 @@ export default function App() {
                   {q.type === 'mcq' ? <HelpCircle size={24} /> : <FileText size={24} />}
                 </div>
                 <div className="flex-1 min-w-0 space-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-2 py-0.5 text-[8px] uppercase font-black">{q.class}</Badge>
                     <Badge className="bg-blue-100 dark:bg-blue-900/30 text-blue-600 border-none px-2 py-0.5 text-[8px] uppercase font-black">{q.subject}</Badge>
                     <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{q.chapter}</span>
+                    {(() => {
+                      const tId = q.topicId || (q as any).topic_id;
+                      const matched = tId ? dynamicTopics.find(t => t.id === tId) : null;
+                      if (!matched) return null;
+                      return (
+                        <Badge className="bg-purple-100 dark:bg-purple-900/30 text-purple-600 border-none px-2 py-0.5 text-[8px] uppercase font-black">
+                          {matched.name}
+                        </Badge>
+                      );
+                    })()}
                   </div>
                   <h4 className="text-sm font-bold text-zinc-900 dark:text-white line-clamp-2 leading-relaxed">
                     {q.questionText}
@@ -3876,7 +5822,7 @@ export default function App() {
       ) : adminTab === 'leaderboards' ? (
         <div className="space-y-6">
           <div className="flex items-center gap-4 p-4 bg-white dark:bg-zinc-900 rounded-[32px] border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-x-auto no-scrollbar">
-            {dynamicClasses.map(c => c.name).map(group => (
+            {Array.from(new Set(dynamicClasses.map(c => c.name))).map(group => (
               <button
                 key={group}
                 onClick={() => setLeaderboardClassFilter(group)}
@@ -3913,12 +5859,24 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {allLeaderboards
-                    .filter(entry => getClassGroup(entry.class) === leaderboardClassFilter)
+                  {(Array.isArray(allLeaderboards) ? allLeaderboards : [])
+                    .filter(entry => entry && getClassGroup(entry.class) === getClassGroup(leaderboardClassFilter))
                     .sort((a, b) => {
-                      if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
-                      if (a.timeTaken !== b.timeTaken) return a.timeTaken - b.timeTaken;
-                      return new Date(a.firstSubmissionAt).getTime() - new Date(b.firstSubmissionAt).getTime();
+                      if ((b.bestScore ?? 0) !== (a.bestScore ?? 0)) {
+                        return (b.bestScore ?? 0) - (a.bestScore ?? 0);
+                      }
+                      if ((a.timeTaken ?? 0) !== (b.timeTaken ?? 0)) {
+                        return (a.timeTaken ?? 0) - (b.timeTaken ?? 0);
+                      }
+                      const accA = a.accuracy ?? 0;
+                      const accB = b.accuracy ?? 0;
+                      if (accB !== accA) return accB - accA;
+                      if ((b.totalAttempts ?? 0) !== (a.totalAttempts ?? 0)) {
+                        return (b.totalAttempts ?? 0) - (a.totalAttempts ?? 0);
+                      }
+                      const timeA = new Date(a.firstSubmissionAt || a.lastUpdated || 0).getTime();
+                      const timeB = new Date(b.firstSubmissionAt || b.lastUpdated || 0).getTime();
+                      return timeA - timeB;
                     })
                     .map((entry, idx) => (
                       <tr key={`${entry.id}-${idx}`} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors group">
@@ -3930,7 +5888,16 @@ export default function App() {
                         <td className="px-8 py-5">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-2xl bg-zinc-100 dark:bg-zinc-800 overflow-hidden border border-zinc-200 dark:border-zinc-700">
-                              <img src={entry.userPhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${entry.userName}`} alt="" className="w-full h-full object-cover" />
+                              <img 
+                                src={entry.userPhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${entry.userName}`} 
+                                alt="" 
+                                className="w-full h-full object-cover" 
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                onError={(e) => {
+                                  e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${entry.userName}`;
+                                }}
+                              />
                             </div>
                             <div>
                               <p className="text-sm font-bold text-zinc-900 dark:text-white capitalize">{entry.userName}</p>
@@ -3965,7 +5932,7 @@ export default function App() {
                     ))}
                 </tbody>
               </table>
-              {allLeaderboards.filter(entry => getClassGroup(entry.class) === leaderboardClassFilter).length === 0 && (
+              {(Array.isArray(allLeaderboards) ? allLeaderboards : []).filter(entry => entry && getClassGroup(entry.class) === getClassGroup(leaderboardClassFilter)).length === 0 && (
                 <div className="py-20 text-center space-y-3">
                   <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
                     <Trophy size={32} />
@@ -3976,26 +5943,12 @@ export default function App() {
             </div>
           </Card>
         </div>
+      ) : adminTab === 'subscriptions' ? (
+        <AdminSubscriptionManager adminUser={user} allUsers={allUsers} fetchUsersInfo={fetchUsersInfo} />
       ) : (
-        <div className="grid grid-cols-1 gap-4">
+        <div className="grid grid-cols-1 gap-6">
           {allFeedback.map(f => (
-            <div key={f.id} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 space-y-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-600 font-bold">
-                    {f.userName.charAt(0)}
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-black text-zinc-900 dark:text-white">{f.userName}</h4>
-                    <p className="text-[10px] text-zinc-500 font-medium">{f.userEmail}</p>
-                  </div>
-                </div>
-                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{formatDate(f.createdAt)}</span>
-              </div>
-              <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed bg-zinc-50 dark:bg-zinc-800/50 p-4 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                {f.text}
-              </p>
-            </div>
+            <FeedbackCard key={f.id} feedback={f} onUpdate={fetchFeedback} />
           ))}
           {allFeedback.length === 0 && (
             <div className="py-20 text-center space-y-4">
@@ -4011,111 +5964,356 @@ export default function App() {
   );
 };
 
-  const renderLeaderboard = () => (
-    <ScrollSection className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">Active Leaderboard</h2>
-          <p className="text-sm sm:text-base text-zinc-500 font-medium">Global rankings across all subjects and exams.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 border border-zinc-200/50 dark:border-zinc-800/50 rounded-2xl p-1 bg-white/50 dark:bg-zinc-900/50 max-w-full overflow-x-auto no-scrollbar">
-          {classes.filter(c => c !== 'All').map(group => (
-            <button
-              key={group}
-              onClick={() => setLeaderboardClassFilter(group as any)}
-              className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${leaderboardClassFilter === group ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
-            >
-              {group}
-            </button>
-          ))}
-        </div>
-      </div>
+  const renderLeaderboard = () => {
+    const filteredExams = Array.isArray(allExams) ? allExams : [];
+    const activeExamId = leaderboardExamId || (filteredExams[0]?.id || null);
+    const activeExamObj = filteredExams.find(e => e && e.id === activeExamId);
 
-      <TiltContainer>
-        <Card className="rounded-[40px] border-zinc-200/50 dark:border-zinc-800/50 overflow-hidden shadow-2xl">
-        <div className="p-8 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-800/30">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-indigo-500 text-white rounded-2xl shadow-lg shadow-indigo-500/20">
-              <Trophy size={24} />
+    const leadEntriesForExam = (Array.isArray(allLeaderboards) ? allLeaderboards : [])
+      .filter(entry => entry && entry.examId === activeExamId)
+      .filter(entry => {
+        if (!entry) return false;
+        if (!leaderboardClassFilter) return true;
+        return getClassGroup(entry.class) === getClassGroup(leaderboardClassFilter);
+      })
+      .sort((a, b) => {
+        if ((b.bestScore ?? 0) !== (a.bestScore ?? 0)) {
+          return (b.bestScore ?? 0) - (a.bestScore ?? 0);
+        }
+        if ((a.timeTaken ?? 0) !== (b.timeTaken ?? 0)) {
+          return (a.timeTaken ?? 0) - (b.timeTaken ?? 0);
+        }
+        const accA = a.accuracy ?? 0;
+        const accB = b.accuracy ?? 0;
+        if (accB !== accA) return accB - accA;
+        if ((b.totalAttempts ?? 0) !== (a.totalAttempts ?? 0)) {
+          return (b.totalAttempts ?? 0) - (a.totalAttempts ?? 0);
+        }
+        const timeA = new Date(a.firstSubmissionAt || a.lastUpdated || 0).getTime();
+        const timeB = new Date(b.firstSubmissionAt || b.lastUpdated || 0).getTime();
+        return timeA - timeB;
+      });
+
+    const filteredUserStats = (Array.isArray(allUserStats) ? allUserStats : []).slice(0, 100);
+
+    return (
+      <ScrollSection className="space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-zinc-900 p-6 sm:p-8 rounded-[32px] border border-zinc-200/50 dark:border-zinc-800/50 shadow-sm">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                🏆 Live Competition
+              </span>
             </div>
-            <div>
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Active Rankings</h3>
-              <p className="text-xs text-zinc-500">Ranking strictly by Score &gt; Time &gt; Early Submission.</p>
-            </div>
+            <h2 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight mt-1">
+              Top Performers
+            </h2>
+            <p className="text-sm text-zinc-500 font-medium mt-1">
+              Real-time rankings powered by authentic database submissions.
+            </p>
+          </div>
+
+          <div className="flex items-center bg-zinc-100 dark:bg-zinc-800/80 p-1.5 rounded-2xl">
+            <button
+              onClick={() => setLeaderboardTab('global')}
+              className={`px-5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 ${
+                leaderboardTab === 'global'
+                  ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-white shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white_80'
+              }`}
+            >
+              <Crown size={14} />
+              Hall of Fame
+            </button>
+            <button
+              onClick={() => {
+                setLeaderboardTab('exam');
+                if (!leaderboardExamId && filteredExams.length > 0) {
+                  setLeaderboardExamId(filteredExams[0].id);
+                }
+              }}
+              className={`px-5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 ${
+                leaderboardTab === 'exam'
+                  ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-white shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white_80'
+              }`}
+            >
+              <BookOpen size={14} />
+              Exam Stands
+            </button>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-zinc-50/50 dark:bg-zinc-800/50">
-                <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400">Rank</th>
-                <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400">Student</th>
-                <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400">Exam</th>
-                <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-center">Score</th>
-                <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-center">Time</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {allLeaderboards
-                .filter(entry => getClassGroup(entry.class) === leaderboardClassFilter)
-                .sort((a, b) => {
-                  if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
-                  if (a.timeTaken !== b.timeTaken) return a.timeTaken - b.timeTaken;
-                  return new Date(a.firstSubmissionAt).getTime() - new Date(b.firstSubmissionAt).getTime();
-                })
-                .map((entry, idx) => (
-                  <tr key={`${entry.id}-${idx}`} className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors group ${entry.userId === user?.id ? 'bg-blue-50/30 dark:bg-blue-500/5' : ''}`}>
-                    <td className="px-8 py-5">
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${idx === 0 ? 'bg-yellow-400 text-yellow-900' : idx === 1 ? 'bg-zinc-300 text-zinc-700' : idx === 2 ? 'bg-orange-300 text-orange-900' : (entry.userId === user?.id ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500')}`}>
-                        {idx + 1}
-                      </div>
-                    </td>
-                    <td className="px-8 py-5">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-zinc-100 dark:bg-zinc-800 overflow-hidden border border-zinc-200 dark:border-zinc-700">
-                          <img src={entry.userPhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${entry.userName}`} alt="" className="w-full h-full object-cover" />
-                        </div>
-                        <div>
-                          <p className={`text-sm font-bold ${entry.userId === user?.id ? 'text-blue-600' : 'text-zinc-900 dark:text-white'} capitalize`}>{entry.userId === user?.id ? (firestoreUser?.display_name || user?.user_metadata?.full_name || entry.userName) : entry.userName} {entry.userId === user?.id && '(You)'}</p>
-                          <p className="text-[10px] text-zinc-400 font-medium">Attempts: {entry.totalAttempts}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-8 py-5 text-sm font-medium text-zinc-500">{entry.examTitle}</td>
-                    <td className="px-8 py-5 text-center">
-                      <span className="text-sm font-black text-indigo-600 bg-indigo-50 dark:bg-indigo-500/10 px-3 py-1 rounded-full">
-                        {entry.bestScore}
-                      </span>
-                    </td>
-                    <td className="px-8 py-5 text-center">
-                      <span className="text-xs font-bold text-zinc-500 tabular-nums">
-                        {Math.floor(entry.timeTaken / 60)}:{(entry.timeTaken % 60).toString().padStart(2, '0')}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-          {allLeaderboards.filter(entry => getClassGroup(entry.class) === leaderboardClassFilter).length === 0 && (
-            <div className="py-20 text-center space-y-3 font-medium">
-              <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
-                <Trophy size={32} />
+        {leaderboardTab === 'exam' && (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-zinc-50 dark:bg-zinc-900/40 p-5 rounded-3xl border border-zinc-200/40 dark:border-zinc-800/40">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-[10px] font-black uppercase text-zinc-400 tracking-wider mb-1.5">
+                Select Particular Exam
+              </label>
+              <div className="relative">
+                <select
+                  value={activeExamId || ''}
+                  onChange={(e) => setLeaderboardExamId(e.target.value)}
+                  className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl px-4 py-3 text-sm font-bold text-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all appearance-none cursor-pointer"
+                >
+                  {filteredExams.map((exam) => (
+                    <option key={exam.id} value={exam.id}>
+                      [{exam.class}] {exam.title}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-zinc-400">
+                  <ChevronDown size={16} />
+                </div>
               </div>
-              <p className="text-sm text-zinc-500">No participants ranked for {leaderboardClassFilter} yet.</p>
             </div>
-          )}
+
+            <div>
+              <label className="block text-[10px] font-black uppercase text-zinc-400 tracking-wider mb-1.5">
+                Academic Class Filter
+              </label>
+              <div className="flex items-center gap-1.5 bg-white dark:bg-zinc-900 p-1 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-x-auto max-w-full">
+                {['All', ...(Array.isArray(dynamicClasses) ? dynamicClasses : []).map(c => c && c.name).filter(Boolean)].map((cls) => (
+                  <button
+                    key={cls}
+                    onClick={() => setLeaderboardClassFilter(cls === 'All' ? '' : cls)}
+                    className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
+                      (cls === 'All' && !leaderboardClassFilter) || leaderboardClassFilter === cls
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-white'
+                    }`}
+                  >
+                    {cls}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {leaderboardTab === 'global' && (
+          <TiltContainer>
+            <Card className="rounded-[40px] border-zinc-200/50 dark:border-zinc-800/50 overflow-hidden shadow-2xl bg-white dark:bg-zinc-900">
+              <div className="p-6 sm:p-8 border-b border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-gradient-to-r from-indigo-500/5 via-transparent to-transparent">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-indigo-500 text-white rounded-2xl shadow-lg">
+                    <Crown size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Global Student Hall of Fame</h3>
+                    <p className="text-xs text-zinc-500">Ranked by Lifetime XP, Trophy Badges, and Activity Streaks.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-zinc-50/50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800">
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 w-24">Rank</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400">Student Name</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-center">Badge Tier</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-center">Streak</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-center">Exams Done</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-center">Avg Score</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-right pr-12">Total XP</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    {filteredUserStats.map((entry, idx) => {
+                      const isCurrentUser = entry.userId === user?.id;
+                      return (
+                        <tr key={`${entry.userId}-${idx}`} className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors group ${isCurrentUser ? 'bg-indigo-50/30 dark:bg-indigo-500/5 font-semibold' : ''}`}>
+                          <td className="px-8 py-5">
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${idx === 0 ? 'bg-yellow-400 text-yellow-900 shadow-md' : idx === 1 ? 'bg-zinc-300 text-zinc-700' : idx === 2 ? 'bg-orange-300 text-orange-900' : (isCurrentUser ? 'bg-indigo-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500')}`}>
+                              {idx + 1}
+                            </div>
+                          </td>
+                          <td className="px-8 py-5">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-2xl bg-zinc-100 dark:bg-zinc-800 overflow-hidden border border-zinc-200 dark:border-zinc-700">
+                                <img 
+                                  src={entry.userPhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${entry.userName}`} 
+                                  alt="" 
+                                  className="w-full h-full object-cover" 
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer"
+                                  onError={(e) => {
+                                    e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${entry.userName}`;
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <p className={`text-sm font-bold ${isCurrentUser ? 'text-indigo-600' : 'text-zinc-900 dark:text-white'} capitalize`}>
+                                  {isCurrentUser ? (firestoreUser?.display_name || user?.user_metadata?.full_name || entry.userName) : entry.userName}
+                                  {isCurrentUser && ' (You)'}
+                                </p>
+                                <p className="text-[10px] text-zinc-400 font-medium">Student Member</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-8 py-5 text-center">
+                            <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${
+                              entry.badge === 'Master' ? 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300' :
+                              entry.badge === 'Gold' ? 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300' :
+                              entry.badge === 'Silver' ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300' :
+                              'bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-300'
+                            }`}>
+                              <Sparkles size={10} />
+                              {entry.badge}
+                            </span>
+                          </td>
+                          <td className="px-8 py-5 text-center font-bold text-zinc-800 dark:text-zinc-100">
+                            {entry.streak > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-orange-600 bg-orange-50 dark:bg-orange-950 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase">
+                                <Zap size={11} className="fill-current" />
+                                {entry.streak} Day{entry.streak > 1 ? 's' : ''}
+                              </span>
+                            ) : (
+                              <span className="text-zinc-400 text-xs font-bold">-</span>
+                            )}
+                          </td>
+                          <td className="px-8 py-5 text-center text-sm font-bold text-zinc-500 tabular-nums">{entry.totalExams}</td>
+                          <td className="px-8 py-5 text-center text-sm font-black text-zinc-600 dark:text-zinc-400 tabular-nums">{entry.averageScore.toFixed(1)}</td>
+                          <td className="px-8 py-5 text-right pr-12">
+                            <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950 px-3.5 py-1.5 rounded-2xl shadow-sm">
+                              {entry.totalXp} XP
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {filteredUserStats.length === 0 && (
+                  <div className="py-24 text-center space-y-3">
+                    <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
+                      <Crown size={32} />
+                    </div>
+                    <p className="text-sm text-zinc-500 font-medium">No system statistics compiled yet. Complete an exam to register!</p>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </TiltContainer>
+        )}
+
+        {leaderboardTab === 'exam' && (
+          <TiltContainer>
+            <Card className="rounded-[40px] border-zinc-200/50 dark:border-zinc-800/50 overflow-hidden shadow-2xl bg-white dark:bg-zinc-900">
+              <div className="p-6 sm:p-8 border-b border-zinc-100 dark:border-zinc-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-gradient-to-r from-blue-500/5 via-transparent to-transparent">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-blue-500 text-white rounded-2xl shadow-lg">
+                    <Trophy size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
+                      {activeExamObj?.title || 'Practice Match Leaderboard'}
+                    </h3>
+                    <p className="text-xs text-zinc-500">
+                      Academic stand: Best Score &gt; Speed Completion &gt; Accuracy Ratio &gt; Total Attempts.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-zinc-50/50 dark:bg-zinc-800/50 border-b border-zinc-100 dark:border-zinc-800">
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 w-24">Rank</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400">Student Name</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-center">Accuracy</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-center">Attempts</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-center">Time Taken</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-center">XP Earned</th>
+                      <th className="px-8 py-5 text-[10px] font-black uppercase tracking-widest text-zinc-400 text-right pr-12">Best Score</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    {leadEntriesForExam.map((entry, idx) => {
+                      const isCurrentUser = entry.userId === user?.id;
+                      return (
+                        <tr key={`${entry.id}-${idx}`} className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors group ${isCurrentUser ? 'bg-blue-50/30 dark:bg-blue-500/5 font-semibold' : ''}`}>
+                          <td className="px-8 py-5">
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${idx === 0 ? 'bg-yellow-400 text-yellow-900 shadow-md' : idx === 1 ? 'bg-zinc-300 text-zinc-700' : idx === 2 ? 'bg-orange-300 text-orange-900' : (isCurrentUser ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500')}`}>
+                              {idx + 1}
+                            </div>
+                          </td>
+                          <td className="px-8 py-5">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-2xl bg-zinc-100 dark:bg-zinc-800 overflow-hidden border border-zinc-200 dark:border-zinc-700">
+                                <img 
+                                  src={entry.userPhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${entry.userName}`} 
+                                  alt="" 
+                                  className="w-full h-full object-cover" 
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer"
+                                  onError={(e) => {
+                                    e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${entry.userName}`;
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <p className={`text-sm font-bold ${isCurrentUser ? 'text-blue-600' : 'text-zinc-900 dark:text-white'} capitalize`}>
+                                  {isCurrentUser ? (firestoreUser?.display_name || user?.user_metadata?.full_name || entry.userName) : entry.userName}
+                                  {isCurrentUser && ' (You)'}
+                                </p>
+                                <p className="text-[10px] text-zinc-400">{entry.class}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-8 py-5 text-center">
+                            {entry.accuracy !== undefined ? (
+                              <span className="text-xs font-extrabold text-blue-600 bg-blue-50 dark:bg-blue-950 px-2.5 py-1 rounded-lg">
+                                {entry.accuracy}%
+                              </span>
+                            ) : (
+                              <span className="text-zinc-400 text-xs">-</span>
+                            )}
+                          </td>
+                          <td className="px-8 py-5 text-center text-sm font-bold text-zinc-500 tabular-nums">{entry.totalAttempts}</td>
+                          <td className="px-8 py-5 text-center">
+                            <span className="text-xs font-bold text-zinc-500 tabular-nums">
+                              {Math.floor(entry.timeTaken / 60)}:{(entry.timeTaken % 60).toString().padStart(2, '0')}
+                            </span>
+                          </td>
+                          <td className="px-8 py-5 text-center">
+                            <span className="text-xs font-bold text-amber-600 bg-amber-50 dark:bg-amber-950 px-2.5 py-1 rounded-lg">
+                              +{entry.xp || 50} XP
+                            </span>
+                          </td>
+                          <td className="px-8 py-5 text-right pr-12">
+                            <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950 px-3.5 py-1.5 rounded-2xl">
+                              {entry.bestScore}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {leadEntriesForExam.length === 0 && (
+                  <div className="py-24 text-center space-y-3">
+                    <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
+                      <Trophy size={32} />
+                    </div>
+                    <p className="text-sm text-zinc-500 font-medium">No student submissions found for this exam group yet.</p>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </TiltContainer>
+        )}
+
+        <div className="bg-zinc-50 dark:bg-zinc-800/80 p-6 rounded-[32px] text-center border border-zinc-100 dark:border-zinc-800">
+          <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest leading-relaxed">
+            All leaderboard entries shown are pulled in real-time from Supabase. Submitting an exam updates your status instantly!
+          </p>
         </div>
-      </Card>
-    </TiltContainer>
-      
-      <div className="bg-zinc-50 dark:bg-zinc-800/80 p-6 rounded-[32px] text-center border border-zinc-100 dark:border-zinc-800">
-        <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest leading-relaxed">
-           Ranking logic is strictly: Highest Score &gt; Lowest Time Taken &gt; Earliest First Submission
-        </p>
-      </div>
-    </ScrollSection>
-  );
+      </ScrollSection>
+    );
+  };
 
   const renderUserDashboard = () => (
     <div className="space-y-8">
@@ -4124,9 +6322,12 @@ export default function App() {
           <div className="flex items-center gap-6">
             <div className="w-20 h-20 rounded-[24px] bg-zinc-100 dark:bg-zinc-800 overflow-hidden border-2 border-blue-500/20 relative group">
               <img 
-                src={user?.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firestoreUser?.display_name || user?.user_metadata?.full_name || 'User'}`} 
+                src={firestoreUser?.avatarUrl || firestoreUser?.avatar_url || firestoreUser?.photoURL || user?.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firestoreUser?.display_name || user?.user_metadata?.full_name || 'User'}`} 
                 alt="" 
                 className="w-full h-full object-cover" 
+                onError={(e) => {
+                  e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${firestoreUser?.display_name || user?.user_metadata?.full_name || 'User'}`;
+                }}
               />
               <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                  <UserIcon size={20} className="text-white" />
@@ -4141,7 +6342,7 @@ export default function App() {
               <div className="flex items-center gap-3 mt-3">
                 <div className="flex items-center gap-2 bg-blue-500/10 text-blue-600 px-3 py-1 rounded-full">
                   <GraduationCap size={14} />
-                  <span className="text-[10px] font-black uppercase tracking-widest">{firestoreUser?.academicClass || (dynamicClasses[0]?.name || 'Student')}</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest">{firestoreUser?.academicClass || (dynamicClasses?.[0]?.name || 'Student')}</span>
                 </div>
                 <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-3 py-1 rounded-full border border-zinc-200/50 dark:border-zinc-700/50">
                   <Calendar size={14} />
@@ -4156,10 +6357,13 @@ export default function App() {
             className="rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-100 dark:border-zinc-700/30"
             onClick={() => {
               setProfileFormData({ 
-                displayName: firestoreUser?.name || user?.user_metadata?.full_name || '', 
-                academicClass: firestoreUser?.academicClass || (dynamicClasses[0]?.name || '') as any,
+                displayName: firestoreUser?.name || firestoreUser?.displayName || user?.user_metadata?.full_name || '', 
+                academicClass: firestoreUser?.academicClass || (dynamicClasses?.[0]?.name || '') as any,
                 academicGroup: firestoreUser?.academicGroup || 'All'
               });
+              setSelectedAvatarFile(null);
+              setAvatarPreviewUrl(firestoreUser?.avatarUrl || firestoreUser?.avatar_url || firestoreUser?.photoURL || user?.user_metadata?.avatar_url || null);
+              setIsAvatarRemoved(false);
               setIsEditingProfile(true);
             }}
           >
@@ -4175,14 +6379,89 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[40px] p-8 max-w-md w-full shadow-2xl space-y-6"
+              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[40px] p-8 max-w-md w-full shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">Edit Profile</h3>
                 <Button variant="ghost" size="icon" onClick={() => setIsEditingProfile(false)}><X size={20} /></Button>
               </div>
 
+              {globalError && (
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-xs font-semibold text-red-600 dark:text-red-400">
+                  {globalError}
+                </div>
+              )}
+
               <form onSubmit={handleUpdateProfile} className="space-y-6">
+                {/* Profile Picture Upload Section */}
+                <div className="flex flex-col items-center space-y-3 pb-2 border-b border-zinc-100 dark:border-zinc-800/80">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Profile Picture</span>
+                  <div className="relative w-24 h-24 rounded-full border-4 border-zinc-100 dark:border-zinc-800 shadow-md overflow-hidden group">
+                    <img
+                      src={avatarPreviewUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profileFormData.displayName || 'User'}`}
+                      alt="Avatar Preview"
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${profileFormData.displayName || 'User'}`;
+                      }}
+                    />
+                    {isUpdatingProfile && (
+                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                        <span className="text-[10px] text-white font-extrabold animate-pulse">Saving...</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs bg-zinc-100 dark:bg-zinc-800 rounded-xl"
+                      disabled={isUpdatingProfile}
+                      onClick={() => {
+                        document.getElementById('avatar-file-input')?.click();
+                      }}
+                    >
+                      Change Photo
+                    </Button>
+                    {(avatarPreviewUrl && !avatarPreviewUrl.includes('api.dicebear.com')) && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs bg-red-50 text-red-600 dark:bg-red-950/20 dark:text-red-400 rounded-xl"
+                        disabled={isUpdatingProfile}
+                        onClick={() => {
+                          setSelectedAvatarFile(null);
+                          setAvatarPreviewUrl(null);
+                          setIsAvatarRemoved(true);
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                  <input
+                    type="file"
+                    id="avatar-file-input"
+                    className="hidden"
+                    accept="image/png, image/jpeg, image/jpg, image/webp"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        if (file.size > 10 * 1024 * 1024) {
+                          setGlobalError("Profile picture must be less than 10MB. We will compress it automatically once selected.");
+                          return;
+                        }
+                        setSelectedAvatarFile(file);
+                        const previewUrl = URL.createObjectURL(file);
+                        setAvatarPreviewUrl(previewUrl);
+                        setIsAvatarRemoved(false);
+                      }
+                    }}
+                  />
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">Full Name</label>
                   <input
@@ -4268,7 +6547,7 @@ export default function App() {
           <Button variant="primary" icon={Plus} className="w-full sm:w-auto" onClick={() => {
             setIsEditing(false);
             setEditingId(null);
-            setNewItem({ category: 'Notes', academicClass: dynamicClasses[0]?.name || 'Class 9', subject: '', title: '', description: '', url: '', thumbnail: '' });
+            setNewItem({ category: 'Notes', academicClass: dynamicClasses?.[0]?.name || 'SSC', subject: '', title: '', description: '', url: '', thumbnail: '' });
             setIsAdding(true);
           }}>Upload New</Button>
         )}
@@ -4308,13 +6587,19 @@ export default function App() {
                 <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{formatDate(item.created_at)}</span>
                 <div className="flex items-center gap-2">
                   <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-zinc-400 hover:text-blue-500" onClick={() => handleEditContent(item)}><Pencil size={16} /></Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-zinc-400 hover:text-blue-500" onClick={() => {
-                    if (item.category === 'YouTube Classes') {
-                      setActiveVideo(getYouTubeId(item.url));
-                    } else {
-                      setActivePdf({ url: ensureFullUrl(item.url), isRestricted: item.category === 'Practice Sheet' });
-                    }
-                  }}><Eye size={16} /></Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-zinc-400 hover:text-blue-500" 
+                    onMouseEnter={() => {
+                      if (item.category !== 'YouTube Classes' && item.url) {
+                        prefetchPdfUrl(ensureFullUrl(item.url));
+                      }
+                    }}
+                    onClick={() => {
+                      if (item.category === 'YouTube Classes') {
+                        setActiveVideo(getYouTubeId(item.url));
+                      } else {
+                        setActivePdf({ url: ensureFullUrl(item.url), isRestricted: item.category === 'Practice Sheet' });
+                      }
+                    }}><Eye size={16} /></Button>
                 </div>
               </div>
             </div>
@@ -4391,7 +6676,9 @@ export default function App() {
   const renderExamResults = () => {
     if (!examResults || !activeExam) return null;
     
-    const percentage = (examResults.score / (examResults as any).totalMarks) * 100;
+    const score = examResults.score || 0;
+    const totalMarks = examResults.totalMarks || (examResults as any).total_marks || (activeExam.questions ? activeExam.questions.length : 1) || 1;
+    const percentage = (score / totalMarks) * 100;
     let feedback = "আরও উন্নতি প্রয়োজন";
     let colorClass = "text-red-500";
     let bgClass = "bg-red-500/10";
@@ -4406,6 +6693,34 @@ export default function App() {
       bgClass = "bg-blue-500/10";
     }
 
+    const activeQuestions = Array.isArray(activeExam?.questions) ? activeExam.questions : [];
+
+    // Calculate dynamic user rank
+    const examIdToMatch = activeExam?.id || null;
+    const sortedLeaderboardForThisExam = (Array.isArray(allLeaderboards) ? allLeaderboards : [])
+      .filter((entry: any) => {
+        if (!entry) return false;
+        const entryExamId = entry.examId ?? entry.exam_id;
+        if (examIdToMatch) {
+          return entryExamId === examIdToMatch;
+        } else {
+          return !entryExamId;
+        }
+      })
+      .sort((a: any, b: any) => {
+        const scoreA = a.bestScore ?? a.best_score ?? 0;
+        const scoreB = b.bestScore ?? b.best_score ?? 0;
+        if (scoreB !== scoreA) {
+          return scoreB - scoreA;
+        }
+        const timeA = a.timeTaken ?? a.time_taken ?? 999999;
+        const timeB = b.timeTaken ?? b.time_taken ?? 999999;
+        return timeA - timeB;
+      });
+
+    const userRankIndex = sortedLeaderboardForThisExam.findIndex((entry: any) => entry.user_id === user?.id || entry.userId === user?.id);
+    const calculatedRank = userRankIndex !== -1 ? userRankIndex + 1 : null;
+
     return (
       <div className="max-w-4xl mx-auto space-y-10 py-10">
         <div className="text-center space-y-4">
@@ -4417,81 +6732,215 @@ export default function App() {
             <Trophy size={48} />
           </motion.div>
           <h2 className="text-4xl font-black text-zinc-900 dark:text-white tracking-tight">পরীক্ষা সম্পন্ন হয়েছে!</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">{activeExam.title} সাফল্যের সাথে শেষ করার জন্য অভিনন্দন।</p>
+          <p className="text-zinc-500 dark:text-zinc-400">{(activeExam.title || "Practice Match")} সাফল্যের সাথে শেষ করার জন্য অভিনন্দন।</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="p-8 text-center space-y-2">
-            <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">স্কোর</p>
-            <h4 className="text-4xl font-black text-zinc-900 dark:text-white">{examResults.score} / {examResults.totalMarks}</h4>
+          <Card className="p-8 text-center space-y-2 relative overflow-hidden bg-white dark:bg-zinc-900/40 border border-zinc-100 dark:border-zinc-800">
+            <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">স্কোর (Score)</p>
+            <h4 className="text-4xl font-black text-zinc-900 dark:text-white">{score} / {totalMarks}</h4>
           </Card>
-          <Card className="p-8 text-center space-y-2">
-            <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">শতকরা হার</p>
+          <Card className="p-8 text-center space-y-2 bg-white dark:bg-zinc-900/40 border border-zinc-100 dark:border-zinc-800">
+            <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">নির্ভুলতার হার (Accuracy)</p>
             <h4 className="text-4xl font-black text-zinc-900 dark:text-white">{Math.round(percentage)}%</h4>
           </Card>
-          <Card className="p-8 text-center space-y-2">
-            <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">মতামত</p>
-            <div className={`px-4 py-2 rounded-xl text-xs font-bold ${bgClass} ${colorClass}`}>
-              {feedback}
-            </div>
+          <Card className="p-8 text-center space-y-2 bg-white dark:bg-zinc-900/40 border border-zinc-100 dark:border-zinc-800">
+            <p className="text-xs font-black text-zinc-400 uppercase tracking-widest">র‍্যাংক (Rank)</p>
+            <h4 className="text-4xl font-black text-blue-600 dark:text-blue-400">
+              {calculatedRank ? `#${calculatedRank}` : "N/A (১ম চেষ্টা)"}
+            </h4>
           </Card>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-zinc-900/20 p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800/80 text-center space-y-1 shadow-sm">
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-wider">সঠিক উত্তর</p>
+            <p className="text-2xl font-black text-green-500">
+              {Number((examResults as any).correct_count ?? (examResults as any).correctCount ?? 0)}
+            </p>
+          </div>
+          <div className="bg-white dark:bg-zinc-900/20 p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800/80 text-center space-y-1 shadow-sm">
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-wider">ভুল उत्तर</p>
+            <p className="text-2xl font-black text-red-500">
+              {Number((examResults as any).wrong_count ?? (examResults as any).wrongCount ?? 0)}
+            </p>
+          </div>
+          <div className="bg-white dark:bg-zinc-900/20 p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800/80 text-center space-y-1 shadow-sm">
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-wider">অনুত্তরিত</p>
+            <p className="text-2xl font-black text-zinc-500">
+              {Number((examResults as any).unanswered_count ?? (examResults as any).unansweredCount ?? 0)}
+            </p>
+          </div>
+          <div className="bg-white dark:bg-zinc-900/20 p-5 rounded-2xl border border-zinc-150 dark:border-zinc-800/80 text-center space-y-1 shadow-sm">
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-wider">সময় লেগেছে</p>
+            <p className="text-2xl font-black text-indigo-500 dark:text-indigo-400">
+              {formatTime(Number((examResults as any).time_taken ?? (examResults as any).timeTaken ?? 0))}
+            </p>
+          </div>
         </div>
 
         <div className="space-y-6">
           <h3 className="text-2xl font-bold text-zinc-900 dark:text-white px-2">সমাধান দেখুন</h3>
-          {activeExam.questions.map((q, idx) => (
-            <div key={q.id}>
-              <Card className="p-8 space-y-4 border-l-4 border-l-blue-500">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-2 py-0.5 text-[8px] uppercase font-black">{q.class}</Badge>
-                      <Badge className="bg-blue-100 dark:bg-blue-900/30 text-blue-600 border-none px-2 py-0.5 text-[8px] uppercase font-black">{q.subject}</Badge>
-                      <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{q.chapter}</span>
+          {activeQuestions.map((q, idx) => {
+            const userAnswer = (() => {
+              const answersObj = examResults.answers || (examResults as any).exam_answers;
+              if (answersObj) {
+                if (answersObj[q.id] !== undefined) return answersObj[q.id];
+                if (answersObj[idx] !== undefined) return answersObj[idx];
+              }
+              if (examAnswers) {
+                if (examAnswers[q.id] !== undefined) return examAnswers[q.id];
+                if (examAnswers[idx] !== undefined) return examAnswers[idx];
+              }
+              return undefined;
+            })();
+
+            const isUserCorrect = userAnswer === q.correctAnswer;
+
+            return (
+              <div key={q.id}>
+                <Card className="p-8 space-y-4 border-l-4 border-l-blue-500">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-2 py-0.5 text-[8px] uppercase font-black">{q.class}</Badge>
+                        <Badge className="bg-blue-100 dark:bg-blue-900/30 text-blue-600 border-none px-2 py-0.5 text-[8px] uppercase font-black">{q.subject}</Badge>
+                        <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{q.chapter}</span>
+                        {(() => {
+                          const tId = q.topicId || (q as any).topic_id;
+                          const matched = tId && Array.isArray(dynamicTopics) ? dynamicTopics.find(t => t.id === tId) : null;
+                          if (!matched) return null;
+                          return (
+                            <Badge className="bg-purple-100 dark:bg-purple-900/30 text-purple-600 border-none px-2 py-0.5 text-[8px] uppercase font-black">
+                              {matched.name}
+                            </Badge>
+                          );
+                        })()}
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => handleToggleSaveQuestion(q.id)}
+                          className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider transition-all duration-300 shadow-sm border ${
+                            savedQuestionIds.has(q.id)
+                              ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                              : 'bg-white dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 border-zinc-200/50 dark:border-zinc-700'
+                          }`}
+                        >
+                          <Bookmark 
+                            size={10} 
+                            className={`transition-transform duration-300 ${
+                              savedQuestionIds.has(q.id) ? 'fill-amber-500 text-amber-500 scale-105' : 'text-zinc-400'
+                            }`} 
+                          />
+                          <span>{savedQuestionIds.has(q.id) ? 'Saved' : 'Save Question'}</span>
+                        </motion.button>
+                      </div>
+                      <MathQuestionContent questionText={q.questionText || q.question_text || ""} questionImage={q.question_image} />
                     </div>
-                    <MathQuestionContent questionText={q.questionText || q.question_text || ""} questionImage={q.question_image} />
-                  </div>
-                  <div className="text-right shrink-0">
-                    <Badge className={examResults.answers[idx] === q.correctAnswer ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}>
-                      {q.type === 'mcq' ? (examResults.answers[idx] === q.correctAnswer ? 'সঠিক' : 'ভুল') : 'সম্পন্ন'}
-                    </Badge>
-                  </div>
-                </div>
-
-                {q.type === 'mcq' && q.options && (
-                  <div className="grid grid-cols-1 gap-2">
-                    {q.options.map((opt, oIdx) => {
-                      const isUserSelected = examResults.answers[idx] === oIdx;
-                      const isCorrect = q.correctAnswer === oIdx;
-                      let status: 'correct' | 'incorrect' | 'neutral' = 'neutral';
-                      if (isCorrect) status = 'correct';
-                      else if (isUserSelected) status = 'incorrect';
-
-                      return (
-                        <MathOptionContent
-                          key={oIdx}
-                          optionText={opt}
-                          idx={oIdx}
-                          isSelected={isUserSelected}
-                          onClick={() => {}}
-                          correctAnswerStatus={status}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-
-                {q.type === 'written' && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-black text-zinc-400 uppercase tracking-widest underline decoration-blue-500 underline-offset-4">আপনার উত্তর:</p>
-                    <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl text-sm italic text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-                      {examResults.answers[idx] || "কোনো উত্তর দেওয়া হয়নি।"}
+                    <div className="text-right shrink-0">
+                      <Badge className={isUserCorrect ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}>
+                        {q.type === 'mcq' ? (isUserCorrect ? 'সঠিক' : 'ভুল') : 'সম্পন্ন'}
+                      </Badge>
                     </div>
                   </div>
-                )}
+
+                  {q.type === 'mcq' && Array.isArray(q.options) && (
+                    <div className="grid grid-cols-1 gap-2">
+                      {q.options.map((opt, oIdx) => {
+                        const isUserSelected = userAnswer === oIdx;
+                        const isCorrect = q.correctAnswer === oIdx;
+                        let status: 'correct' | 'incorrect' | 'neutral' = 'neutral';
+                        if (isCorrect) status = 'correct';
+                        else if (isUserSelected) status = 'incorrect';
+
+                        return (
+                          <MathOptionContent
+                            key={oIdx}
+                            optionText={opt}
+                            idx={oIdx}
+                            isSelected={isUserSelected}
+                            onClick={() => {}}
+                            correctAnswerStatus={status}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {q.type === 'written' && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-black text-zinc-400 uppercase tracking-widest underline decoration-blue-500 underline-offset-4">আপনার উত্তর:</p>
+                      <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl text-sm italic text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                        {userAnswer || "কোনo উত্তর দেওয়া হয়নি।"}
+                      </div>
+                    </div>
+                  )}
+
+                {/* Meta & Solutions block */}
+                {(() => {
+                  const rawQ = q as any;
+                  const parsedExp = rawQ.explanation ? deserializeExplanation(rawQ.explanation) : { text: rawQ.explanation || rawQ.explanationText || '', difficulty: rawQ.difficulty || 'medium', is_premium: !!rawQ.isPremium, tags: rawQ.tags || [], status: rawQ.status || 'published', explanation_image: rawQ.explanation_image || null, negative_marks: rawQ.negative_marks || 0.25 };
+                  const isSolutionLocked = (rawQ.isPremium || parsedExp.is_premium) && !hasPremiumAccess;
+                  const difficultyLevel = rawQ.difficulty || parsedExp.difficulty || 'medium';
+                  const negativeValue = rawQ.negativeMarks !== undefined ? rawQ.negativeMarks : parsedExp.negative_marks;
+                  const tagsList = rawQ.tags || parsedExp.tags || [];
+
+                  return (
+                    <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800/80 space-y-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-none capitalize font-bold text-[9px]">
+                          Difficulty: {difficultyLevel}
+                        </Badge>
+                        <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-none font-bold text-[9px]">
+                          Marks: {rawQ.points || 1}
+                        </Badge>
+                        {negativeValue !== undefined && (
+                          <Badge className="bg-red-500/10 text-red-600 dark:text-red-400 border-none font-bold text-[9px]">
+                            Negative: -{negativeValue}
+                          </Badge>
+                        )}
+                        {tagsList.map((tag: string, tIdx: number) => (
+                          <Badge key={tIdx} className="bg-purple-100 dark:bg-purple-900/30 text-purple-600 border-none font-bold text-[9px]">
+                            #{tag}
+                          </Badge>
+                        ))}
+                      </div>
+
+                      {(parsedExp.text || parsedExp.explanation_image) && (
+                        <div className="space-y-3">
+                          <p className="text-xs font-black text-zinc-400 uppercase tracking-widest text-left">বিস্তারিত সমাধান ও ব্যাখ্যা:</p>
+                          {isSolutionLocked ? (
+                            <div className="p-5 border border-amber-500/20 bg-amber-500/5 rounded-2xl flex flex-col items-center justify-center text-center space-y-2">
+                              <span className="text-amber-500 text-sm font-black">🔒 প্রিমিয়ার কন্টেন্ট</span>
+                              <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm">এই প্রশ্নটির বিস্তারিত সমাধান ও ব্যাখ্যা দেখতে প্রিমিয়াম মেম্বারশিপ প্রয়োজন। দয়া করে ড্যাশবোর্ড থেকে প্রিমিয়ামে আপগ্রেড করুন।</p>
+                            </div>
+                          ) : (
+                            <div className="p-5 bg-green-500/[0.015] border border-green-500/10 rounded-2xl space-y-3 text-left">
+                              {parsedExp.text && (
+                                <p className="text-sm text-zinc-700 dark:text-zinc-300 font-medium whitespace-pre-line leading-relaxed text-left">
+                                  {parsedExp.text}
+                                </p>
+                              )}
+                              {parsedExp.explanation_image && (
+                                <div className="rounded-xl overflow-hidden border border-zinc-200/50 dark:border-zinc-800 max-w-lg">
+                                  <img 
+                                    src={parsedExp.explanation_image} 
+                                    alt="Solution derivation diagram" 
+                                    className="w-full object-contain max-h-72"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </Card>
             </div>
-          ))}
+          )})}
         </div>
 
         <div className="flex justify-center pt-10">
@@ -4588,7 +7037,7 @@ export default function App() {
                   <Badge className="bg-amber-500/10 text-amber-600 border-none">{examGroupFilter}</Badge>
                 </div>
                 <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
-                  {['All', ...academicGroups.map(g => g.name)].map(g => (
+                  {['All', ...Array.from(new Set(academicGroups.map(g => g.name)))].map(g => (
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
@@ -4741,7 +7190,11 @@ export default function App() {
                         <Button 
                           variant="outline" 
                           className="rounded-2xl flex-1 h-12 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800" 
-                          onClick={() => setLeaderboardExamId(exam.id)}
+                          onClick={() => {
+                            setLeaderboardExamId(exam.id);
+                            setLeaderboardTab('exam');
+                            setView('leaderboard');
+                          }}
                           icon={Trophy}
                         >
                           Rankings
@@ -4797,8 +7250,13 @@ export default function App() {
             <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Progress</p>
             <h4 className="text-xl font-black text-zinc-900 dark:text-white">Answered {answeredCount} / {questions.length}</h4>
           </div>
-          <Button variant="outline" className="border-red-500/30 text-red-500 hover:bg-red-500/5 px-6 rounded-xl" onClick={handleExamSubmit}>
-            Finish & Submit
+          <Button 
+            variant="outline" 
+            className="border-red-500/30 text-red-500 hover:bg-red-500/5 px-6 rounded-xl" 
+            onClick={handleExamSubmit}
+            disabled={isGeneratingExam}
+          >
+            {isGeneratingExam ? "Submitting..." : "Finish & Submit"}
           </Button>
         </div>
 
@@ -4812,44 +7270,97 @@ export default function App() {
                 id={`question-${idx}`}
                 className="w-full max-w-3xl space-y-8 pb-12 border-b border-zinc-100 dark:border-zinc-800 last:border-0 scroll-mt-32"
               >
-                <div className="space-y-4 text-left">
-                  <div className="flex items-center gap-3">
-                    <Badge className="bg-blue-600 text-white px-4 py-1">Question {idx + 1}</Badge>
-                    {examAnswers[q.id] !== undefined && examAnswers[q.id] !== '' && (
-                      <Badge className="bg-green-500/10 text-green-600 border-none">Answered</Badge>
+                {q.isPlaceholder ? (
+                  <div className="w-full bg-zinc-500/5 dark:bg-zinc-950/20 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-[32px] p-8 text-center space-y-6 relative overflow-hidden backdrop-blur-md text-left">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl" />
+                    
+                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-full text-xs font-bold uppercase tracking-widest">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                      Upcoming Question
+                    </div>
+
+                    <div className="space-y-4">
+                      <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white leading-relaxed">
+                        Question {idx + 1} Coming Soon
+                      </h2>
+                      <p className="text-zinc-500 font-bold">This question is under preparation. Answer selection is disabled.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl mx-auto pt-4">
+                      {["Option 1", "Option 2", "Option 3", "Option 4"].map((optVal, optIndex) => (
+                        <button
+                          key={optIndex}
+                          disabled
+                          className="w-full p-5 text-left rounded-2xl border-2 border-zinc-100 dark:border-zinc-900/60 bg-zinc-50/55 dark:bg-zinc-900/10 text-zinc-400 cursor-not-allowed font-bold"
+                        >
+                          <span className="w-7 h-7 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-400 inline-flex items-center justify-center mr-3 text-xs font-black">
+                            {String.fromCharCode(65 + optIndex)}
+                          </span>
+                          {optVal}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                  <div className="space-y-4 text-left">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <Badge className="bg-blue-600 text-white px-4 py-1">Question {idx + 1}</Badge>
+                      {examAnswers[q.id] !== undefined && examAnswers[q.id] !== '' && (
+                        <Badge className="bg-green-500/10 text-green-600 border-none">Answered</Badge>
+                      )}
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => handleToggleSaveQuestion(q.id)}
+                        className={`flex items-center gap-2 px-3.5 py-1 px-4 rounded-full text-[10px] font-black uppercase tracking-wider transition-all duration-300 shadow-sm border ${
+                          savedQuestionIds.has(q.id)
+                            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/40 shadow-amber-500/10'
+                            : 'bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:text-zinc-800 dark:hover:text-white border-zinc-200/80 dark:border-zinc-700/80 hover:shadow-md'
+                        }`}
+                      >
+                        <Bookmark 
+                          size={12} 
+                          className={`transition-transform duration-300 ${
+                            savedQuestionIds.has(q.id) ? 'fill-amber-500 text-amber-500 scale-110' : 'text-zinc-400 dark:text-zinc-500'
+                          }`} 
+                        />
+                        <span>{savedQuestionIds.has(q.id) ? 'Saved' : 'Save Question'}</span>
+                      </motion.button>
+                    </div>
+                    <MathQuestionContent questionText={q.question_text || q.questionText || ""} questionImage={q.question_image} />
+                  </div>
+
+                  <div className="space-y-3">
+                    {q.type === 'mcq' && q.options ? (
+                      <div className="grid grid-cols-1 gap-3">
+                        {q.options.map((option: any, optIdx: number) => {
+                          const isSelected = examAnswers[q.id] !== undefined && (examAnswers[q.id] === optIdx || String(examAnswers[q.id]) === String(optIdx));
+                          return (
+                            <MathOptionContent
+                              key={optIdx}
+                              optionText={option}
+                              idx={optIdx}
+                              isSelected={isSelected}
+                              onClick={() => handleExamAnswer(q.id, optIdx)}
+                            />
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <textarea
+                          rows={4}
+                          className="w-full bg-white dark:bg-zinc-900 border-2 border-zinc-100 dark:border-zinc-800 rounded-[24px] p-6 outline-none focus:border-blue-600 transition-all text-base leading-relaxed dark:text-white"
+                          placeholder="Write your answer here..."
+                          value={(examAnswers[q.id] as string) || ''}
+                          onChange={(e) => handleExamAnswer(q.id, e.target.value)}
+                        />
+                      </div>
                     )}
                   </div>
-                  <MathQuestionContent questionText={q.question_text || q.questionText || ""} questionImage={q.question_image} />
-                </div>
-
-                <div className="space-y-3">
-                  {q.type === 'mcq' && q.options ? (
-                    <div className="grid grid-cols-1 gap-3">
-                      {q.options.map((option: any, optIdx: number) => {
-                        const isSelected = examAnswers[q.id] !== undefined && (examAnswers[q.id] === optIdx || String(examAnswers[q.id]) === String(optIdx));
-                        return (
-                          <MathOptionContent
-                            key={optIdx}
-                            optionText={option}
-                            idx={optIdx}
-                            isSelected={isSelected}
-                            onClick={() => handleExamAnswer(q.id, optIdx)}
-                          />
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <textarea
-                        rows={4}
-                        className="w-full bg-white dark:bg-zinc-900 border-2 border-zinc-100 dark:border-zinc-800 rounded-[24px] p-6 outline-none focus:border-blue-600 transition-all text-base leading-relaxed dark:text-white"
-                        placeholder="Write your answer here..."
-                        value={(examAnswers[q.id] as string) || ''}
-                        onChange={(e) => handleExamAnswer(q.id, e.target.value)}
-                      />
-                    </div>
-                  )}
-                </div>
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -4905,8 +7416,13 @@ export default function App() {
         {/* Final Submit Button at bottom */}
         <div className="flex flex-col items-center justify-center pt-8 pb-20 border-t border-zinc-200/50 dark:border-zinc-800/50 space-y-4">
           <p className="text-zinc-500 text-sm font-medium">Have you reviewed all your answers?</p>
-          <Button onClick={handleExamSubmit} size="lg" className="rounded-2xl px-16 shadow-xl shadow-blue-500/20 bg-blue-600 hover:bg-blue-700 h-14">
-            Finish & Submit Exam
+          <Button 
+            onClick={handleExamSubmit} 
+            size="lg" 
+            className="rounded-2xl px-16 shadow-xl shadow-blue-500/20 bg-blue-600 hover:bg-blue-700 h-14"
+            disabled={isGeneratingExam}
+          >
+            {isGeneratingExam ? "Submitting Exam..." : "Finish & Submit Exam"}
           </Button>
         </div>
       </div>
@@ -4935,8 +7451,8 @@ export default function App() {
                 ✨ Made for Bangladeshi Students
               </Badge>
               <h2 className="text-lg sm:text-4xl md:text-6xl font-extrabold text-white mb-4 sm:mb-8 leading-[1.1] tracking-tight break-words px-2">
-                Free Study Materials<br />
-                <span className="text-white opacity-95">Every Student</span> 📚
+                Study Materials<br />
+                <span className="text-white opacity-95">For Every Students</span> 📚
               </h2>
               <p className="text-white/90 text-sm sm:text-lg mb-6 sm:mb-12 max-w-xl mx-auto leading-relaxed font-semibold">
                 Access notes, textbook PDFs, board question papers, and live video classes — all in one place, completely free.
@@ -5003,15 +7519,31 @@ export default function App() {
                         <Zap size={20} className="ml-2 group-hover:scale-125 transition-transform text-indigo-600" />
                       </Button>
                       <div className="flex flex-col items-center md:items-start">
-                        <div className="flex -space-x-3 mb-2">
-                          {[1, 2, 3, 4].map(i => (
-                            <div key={i} className="w-9 h-9 rounded-full border-2 border-zinc-900 bg-zinc-800 flex items-center justify-center text-[10px] font-bold overflow-hidden">
-                              <img src={`https://i.pravatar.cc/100?img=${i+10}`} alt="user" className="w-full h-full object-cover" />
-                            </div>
-                          ))}
-                          <div className="w-9 h-9 rounded-full border-2 border-zinc-900 bg-indigo-600 flex items-center justify-center text-[10px] font-bold">1k+</div>
+                        <div className="flex -space-x-3 mb-2 items-center">
+                          {premiumStudents && premiumStudents.length > 0 ? (
+                            premiumStudents.slice(0, 4).map((student: any, idx: number) => {
+                              const name = student.full_name || student.display_name || 'Pro Student';
+                              const avatar = student.avatar_url || `https://api.dicebear.com/7.x/open-peeps/svg?seed=${encodeURIComponent(name)}`;
+                              return (
+                                <div key={student.id || idx} className="w-9 h-9 rounded-full border-2 border-zinc-900 bg-zinc-800 flex items-center justify-center text-[10px] font-bold overflow-hidden" title={name}>
+                                  <img src={avatar} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                </div>
+                              );
+                            })
+                          ) : (
+                            [1, 2, 3].map(i => (
+                              <div key={i} className="w-9 h-9 rounded-full border-2 border-zinc-900 bg-zinc-800 flex items-center justify-center text-[10px] font-bold overflow-hidden">
+                                <img src={`https://i.pravatar.cc/100?img=${i+10}`} alt="user fallback" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              </div>
+                            ))
+                          )}
+                          <div className="w-12 h-9 rounded-full px-2 border-2 border-zinc-900 bg-indigo-600 flex items-center justify-center text-[11px] font-black tracking-tight shadow-md select-none">
+                            {premiumStudents ? `${premiumStudents.length}` : '0'}
+                          </div>
                         </div>
-                        <span className="text-[10px] uppercase tracking-widest font-black text-zinc-500">Active Pro Students</span>
+                        <span className="text-[10px] uppercase tracking-widest font-black text-zinc-500">
+                          {premiumStudents && premiumStudents.length > 0 ? `${premiumStudents.length} Active Pro Student${premiumStudents.length > 1 ? 's' : ''}` : 'Active Pro Students'}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -5114,7 +7646,7 @@ export default function App() {
                       <p className="text-xs sm:text-sm text-zinc-500 line-clamp-2">{exam.description}</p>
                       <div className="flex justify-end pt-2 mt-auto">
                         {exam.isPremium && !hasPremiumAccess ? (
-                          <Button size="sm" onClick={() => setGlobalError("🔒 This is a Premium Exam. Join parodorshhi PRO for access!")} className="rounded-xl px-4 sm:px-6 bg-amber-600 shadow-lg shadow-amber-500/20 text-xs" icon={Lock}>Upgrade</Button>
+                          <Button size="sm" onClick={() => setShowPremiumPromptModal(true)} className="rounded-xl px-4 sm:px-6 bg-amber-600 shadow-lg shadow-amber-500/20 text-xs" icon={Lock}>Upgrade</Button>
                         ) : (
                           <Button size="sm" onClick={() => setExamPrep(exam)} className="rounded-xl px-4 sm:px-6 bg-indigo-600 shadow-lg shadow-indigo-500/20 text-xs">Take Test</Button>
                         )}
@@ -5205,11 +7737,15 @@ export default function App() {
       if (error) throw error;
       setIsSubscribed(true);
       setNewsletterEmail('');
+      queryClient.invalidateQueries({ queryKey: ['newsletter_subscribers'] });
+      queryClient.invalidateQueries({ queryKey: ['public_subscriber_count'] });
       setTimeout(() => setIsSubscribed(false), 5000);
     } catch (error: any) {
       if (error?.code === '23505' || error?.message?.includes('duplicate key') || error?.message?.includes('already exists')) {
         setIsSubscribed(true); // Treat duplicate as subscribed to avoid annoying errors
         setNewsletterEmail('');
+        queryClient.invalidateQueries({ queryKey: ['newsletter_subscribers'] });
+        queryClient.invalidateQueries({ queryKey: ['public_subscriber_count'] });
         setTimeout(() => setIsSubscribed(false), 5000);
       } else {
         setGlobalError("Failed to subscribe: " + error.message);
@@ -5225,7 +7761,7 @@ export default function App() {
         user_id: user?.id || null,
         user_email: user?.email || 'guest@educationalportal.org',
         user_name: user?.user_metadata?.full_name || firestoreUser?.displayName || 'Guest Student',
-        content: feedbackText.trim(),
+        message: feedbackText.trim(),
       });
       setIsFeedbackOpen(false);
       setFeedbackText('');
@@ -5559,6 +8095,11 @@ export default function App() {
                 {isSubscribed ? 'Joined!' : 'Join'}
               </Button>
             </form>
+            {qPublicSubscriberCount !== undefined && qPublicSubscriberCount !== null && (
+              <p className="text-[10px] text-zinc-400 mt-2 font-medium">
+                Join <span className="text-blue-400 font-bold font-mono">{qPublicSubscriberCount}</span> active subscribers
+              </p>
+            )}
           </div>
         </div>
 
@@ -5842,7 +8383,7 @@ export default function App() {
       setEditingId(null);
       setNewItem({ 
         category: 'Notes', 
-        academicClass: dynamicClasses[0]?.name || 'Class 9', 
+        academicClass: dynamicClasses?.[0]?.name || 'SSC', 
         subject: '', 
         title: '', 
         description: '', 
@@ -5996,7 +8537,7 @@ export default function App() {
         type: 'youtube',
         youtubePlaylistId: '',
         videoIds: [],
-        academicClass: dynamicClasses[0]?.name || 'Class 9',
+        academicClass: dynamicClasses?.[0]?.name || 'SSC',
         subject: '',
         thumbnail: '',
         isPremium: false
@@ -6150,6 +8691,34 @@ export default function App() {
     }
   };
 
+  const handleSetCustomExpiry = async (userId: string, expiryIso: string | null) => {
+    if (userRole !== 'admin') return;
+    try {
+      const isPast = expiryIso ? new Date(expiryIso).getTime() < Date.now() : false;
+      const isPremiumValue = expiryIso ? !isPast : true;
+
+      await supabase.from('profiles').update({ 
+        has_premium_access: isPremiumValue,
+        premium_expiry: expiryIso
+      }).eq('id', userId);
+
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
+      if (!error && data) {
+        await supabase.from('user_roles').update({ is_premium: isPremiumValue }).eq('user_id', userId);
+      } else {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
+        if (!errorById && dataById) {
+          await supabase.from('user_roles').update({ is_premium: isPremiumValue }).eq('id', userId);
+        } else {
+          await supabase.from('user_roles').insert([{ user_id: userId, is_premium: isPremiumValue }]);
+        }
+      }
+      fetchUsersInfo();
+    } catch (error) {
+      console.error("Error setting custom subscription expiry:", error);
+    }
+  };
+
   const handleToggleManageExams = async (userId: string, currentStatus: boolean) => {
     if (userRole !== 'admin') return;
     try {
@@ -6269,6 +8838,15 @@ export default function App() {
     }
   };
 
+  // Reset video loading state when active video changes
+  useEffect(() => {
+    if (activeVideo) {
+      setIsVideoLoading(true);
+    } else {
+      setIsVideoLoading(false);
+    }
+  }, [activeVideo]);
+
   // Autoplay next video in playlist when current YouTube video ends
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -6338,7 +8916,7 @@ export default function App() {
       
       // Handle Google Drive links
       if (urlObj.hostname.includes('drive.google.com')) {
-        const fileId = urlObj.searchParams.get('id') || urlObj.pathname.split('/d/')[1]?.split('/')[0];
+        const fileId = urlObj.searchParams.get('id') || urlObj.pathname.split('/d/')?.[1]?.split('/')?.[0];
         if (fileId) {
           return `https://drive.google.com/uc?export=view&id=${fileId}`;
         }
@@ -6381,78 +8959,55 @@ export default function App() {
 
     setIsUploading(true);
     try {
-      const examData = {
+      const examPayload: Partial<Exam> = {
         title: newExam.title,
-        academic_class: newExam.class,
-        academic_group: newExam.academicGroup || 'All',
+        class: newExam.class,
+        academicGroup: newExam.academicGroup || 'All',
         subject: newExam.subject,
-        chapter: (newExam.chapter === 'All Chapters' || !newExam.chapter) ? null : newExam.chapter,
-        chapter_name_custom: newExam.chapterNameCustom || '',
-        exam_type: newExam.examType || 'mcq',
-        time_limit: newExam.timeLimit || 30,
-        total_questions_to_show: newExam.totalQuestionsToShow || 30,
-        negative_marking: newExam.negativeMarking || false,
-        negative_value: newExam.negativeValue || 0.25,
-        created_by: user?.id,
-        is_premium: newExam.isPremium || false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        chapter: (newExam.chapter === 'All Chapters' || !newExam.chapter) ? 'All' : newExam.chapter,
+        chapterNameCustom: newExam.chapterNameCustom || '',
+        examType: newExam.examType || 'mcq',
+        timeLimit: newExam.timeLimit || 30,
+        totalQuestionsToShow: newExam.totalQuestionsToShow || 30,
+        negativeMarking: newExam.negativeMarking || false,
+        negativeValue: newExam.negativeValue || 0.25,
+        createdBy: user?.id,
+        isPremium: newExam.isPremium || false,
         status: (canUpload || userRole === 'admin') ? 'approved' : 'pending'
       };
 
       let examId = editingExamId;
 
       if (editingExamId) {
-        await supabase
-          .from('exams')
-          .update(examData)
-          .eq('id', editingExamId);
+        await supabaseService.updateExam(editingExamId, examPayload);
       } else {
-        const { data: createdExam, error: examError } = await supabase
-          .from('exams')
-          .insert([examData])
-          .select()
-          .single();
-        
-        if (examError) throw examError;
+        const createdExam = await supabaseService.createExam(examPayload);
         examId = createdExam.id;
         
         // Save temporary questions
         if (temporaryQuestions.length > 0) {
-          const questionsData = temporaryQuestions.map((q: any) => ({
-            exam_id: examId,
-            question_text: q.question_text || q.questionText || serializeQuestionText(q.questionText || '', q.question_image),
-            options: q.options,
-            correct_answer: q.correctAnswer !== undefined ? q.correctAnswer : q.correct_answer,
-            explanation: q.explanation,
-            points: q.points || 1,
-            type: q.type || 'mcq',
-            academic_class: newExam.class,
-            academic_group: newExam.academicGroup || 'All',
-            subject: newExam.subject,
-            chapter: (newExam.chapter === 'All Chapters' || !newExam.chapter) ? null : newExam.chapter,
-            question_image: q.question_image || null,
-            option_a_image: q.option_a_image || null,
-            option_b_image: q.option_b_image || null,
-            option_c_image: q.option_c_image || null,
-            option_d_image: q.option_d_image || null
-          }));
-          
           try {
-            const { error: insertErr } = await supabase.from('questions').insert(questionsData);
-            if (insertErr) throw insertErr;
-          } catch (insertErr) {
-            console.warn("[DB SAVE FALLBACK] Temporary questions column insert failed. Retrying without image columns...", insertErr);
-            const fallbackQuestions = questionsData.map((qData: any) => {
-              const fallbackQ = { ...qData };
-              delete fallbackQ.question_image;
-              delete fallbackQ.option_a_image;
-              delete fallbackQ.option_b_image;
-              delete fallbackQ.option_c_image;
-              delete fallbackQ.option_d_image;
-              return fallbackQ;
-            });
-            await supabase.from('questions').insert(fallbackQuestions);
+            const batchPayloads = await Promise.all(
+              temporaryQuestions.map(async (q: any) => {
+                const formattedQ = {
+                  ...q,
+                  questionText: q.questionText || q.question_text || '',
+                  options: q.options || ['', '', '', ''],
+                  correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : (q.correct_answer !== undefined ? q.correct_answer : 0),
+                  class: newExam.class,
+                  subject: newExam.subject,
+                  chapter: (newExam.chapter === 'All Chapters' || !newExam.chapter) ? null : newExam.chapter,
+                  examId: examId
+                };
+                return supabaseService.mapQuestionFrontendToDB(formattedQ);
+              })
+            );
+
+            console.log("[Seeding Exam Questions] Seeding payload on physical schema:", batchPayloads);
+            await supabaseService.safeWrite('questions', batchPayloads, 'insert');
+          } catch (insertErr: any) {
+            console.error("[Seeding Exam Questions] Batch insertion failed physically:", insertErr);
+            throw insertErr;
           }
         }
       }
@@ -6462,7 +9017,7 @@ export default function App() {
       setTemporaryQuestions([]);
       setNewExam({
         title: '',
-        class: dynamicClasses[0]?.name || 'Class 9',
+        class: dynamicClasses?.[0]?.name || 'SSC',
         subject: 'Math',
         chapter: '',
         chapterNameCustom: '',
@@ -6507,100 +9062,87 @@ export default function App() {
         }
       }
 
-      // 3. Formulate options text/object representation
+      // 3. Process/compress and upload explanation/solution image
+      let finalExplanationImage = explanationImagePreview || '';
+      if (explanationImageFile) {
+        const compressed = await compressImage(explanationImageFile);
+        finalExplanationImage = await uploadFile(compressed, 'questions');
+      }
+
+      // 4. Formulate options text/object representation
       const rawOptionsVal = newQuestion.options || ['', '', '', ''];
       const serializedOptions = rawOptionsVal.map((optTxt, idx) => {
         const imgUrl = finalOptionImages[idx];
         if (imgUrl) {
-          return { text: optTxt, image: imgUrl };
+          return JSON.stringify({ text: optTxt || '', image: imgUrl });
         }
-        return optTxt;
+        return optTxt ? String(optTxt) : '';
       });
 
-      // 4. Formulate serialized question text
+      // 5. Formulate serialized question text
       const serializedQuestionText = serializeQuestionText(newQuestion.questionText, finalQuestionImage || undefined);
 
-      const qData: any = {
-        question_text: serializedQuestionText,
+      // 6. Build frontend matching Question payload
+      const questionPayload: Partial<Question> = {
         type: newQuestion.type || 'mcq',
-        options: serializedOptions,
-        correct_answer: newQuestion.correctAnswer,
-        points: newQuestion.points || 1,
-        academic_class: newQuestion.class,
-        academic_group: newQuestion.academicGroup || 'All',
-        subject: newQuestion.subject,
+        questionText: serializedQuestionText,
+        options: rawOptionsVal,
+        correctAnswer: newQuestion.correctAnswer !== undefined ? Number(newQuestion.correctAnswer) : 0,
+        points: newQuestion.points !== undefined ? Number(newQuestion.points) : 1,
+        class: newQuestion.class || '',
+        academicGroup: newQuestion.academicGroup || 'All',
+        subject: newQuestion.subject || '',
         chapter: (newQuestion.chapter === 'All Chapters' || !newQuestion.chapter) ? null : newQuestion.chapter,
-        topic_id: newQuestion.topicId,
-        created_at: new Date().toISOString()
+        topicId: newQuestion.topicId || null,
+        explanation: newQuestion.explanation || '',
+        difficulty: newQuestion.difficulty || 'medium',
+        isPremium: !!newQuestion.isPremium,
+        tags: newQuestion.tags || [],
+        status: newQuestion.status || 'published',
+        negativeMarks: newQuestion.negativeMarks !== undefined ? Number(newQuestion.negativeMarks) : 0.25,
       };
 
-      // Also attach the raw columns to be 100% compliant with schema update
-      qData.question_image = finalQuestionImage || null;
-      qData.option_a_image = finalOptionImages[0] || null;
-      qData.option_b_image = finalOptionImages[1] || null;
-      qData.option_c_image = finalOptionImages[2] || null;
-      qData.option_d_image = finalOptionImages[3] || null;
+      // Set internal metadata representation
+      (questionPayload as any).question_image = finalQuestionImage || null;
+      (questionPayload as any).option_a_image = finalOptionImages[0] || null;
+      (questionPayload as any).option_b_image = finalOptionImages[1] || null;
+      (questionPayload as any).option_c_image = finalOptionImages[2] || null;
+      (questionPayload as any).option_d_image = finalOptionImages[3] || null;
+      (questionPayload as any).explanation_image = finalExplanationImage || null;
 
-      try {
-        if (editingExamId) {
-          qData.exam_id = editingExamId;
-          if (editingQuestionId) {
-            const { error } = await supabase.from('questions').update(qData).eq('id', editingQuestionId);
-            if (error) throw error;
-          } else {
-            const { error } = await supabase.from('questions').insert([qData]);
-            if (error) throw error;
-          }
-        } else if (isAddingExam) {
-          const mockWithClientMeta = {
-            ...newQuestion,
-            questionText: newQuestion.questionText,
-            question_image: finalQuestionImage || undefined,
-            option_a_image: finalOptionImages[0] || undefined,
-            option_b_image: finalOptionImages[1] || undefined,
-            option_c_image: finalOptionImages[2] || undefined,
-            option_d_image: finalOptionImages[3] || undefined,
-            options: serializedOptions,
-          };
-          if (editingQuestionId) {
-            setTemporaryQuestions(prev => prev.map(q => q.id === editingQuestionId ? { ...q, ...mockWithClientMeta } as any : q));
-          } else {
-            const tempId = Math.random().toString(36).substring(7);
-            setTemporaryQuestions(prev => [...prev, { ...mockWithClientMeta, id: tempId } as any]);
-          }
+      console.log("[handleAddQuestion] Submitting payload:", questionPayload);
+
+      if (editingExamId) {
+        questionPayload.examId = editingExamId;
+        if (editingQuestionId) {
+          await supabaseService.updateQuestion(editingQuestionId, questionPayload);
         } else {
-          // Global bank
-          if (editingQuestionId) {
-            const { error } = await supabase.from('questions').update(qData).eq('id', editingQuestionId);
-            if (error) throw error;
-          } else {
-            const { error } = await supabase.from('questions').insert([qData]);
-            if (error) throw error;
-          }
+          await supabaseService.createQuestion(questionPayload);
         }
-      } catch (dbError: any) {
-        console.warn("[DB SAVE FALLBACK] Direct column save failed. Retrying with parsed fallback...", dbError);
-        
-        const fallbackData = { ...qData };
-        delete fallbackData.question_image;
-        delete fallbackData.option_a_image;
-        delete fallbackData.option_b_image;
-        delete fallbackData.option_c_image;
-        delete fallbackData.option_d_image;
-
-        if (editingExamId) {
-          fallbackData.exam_id = editingExamId;
-          if (editingQuestionId) {
-            await supabase.from('questions').update(fallbackData).eq('id', editingQuestionId);
-          } else {
-            await supabase.from('questions').insert([fallbackData]);
-          }
+      } else if (isAddingExam) {
+        // Local temporary list of active creator
+        const mockWithClientMeta = {
+          ...questionPayload,
+          options: serializedOptions,
+          question_image: finalQuestionImage || undefined,
+          option_a_image: finalOptionImages[0] || undefined,
+          option_b_image: finalOptionImages[1] || undefined,
+          option_c_image: finalOptionImages[2] || undefined,
+          option_d_image: finalOptionImages[3] || undefined,
+          explanation_image: finalExplanationImage || undefined,
+        };
+        if (editingQuestionId) {
+          setTemporaryQuestions(prev => prev.map(q => q.id === editingQuestionId ? { ...q, ...mockWithClientMeta } as any : q));
         } else {
-          if (editingQuestionId) {
-            await supabase.from('questions').update(fallbackData).eq('id', editingQuestionId);
-          } else {
-            await supabase.from('questions').insert([fallbackData]);
-          }
+          const tempId = Math.random().toString(36).substring(7);
+          setTemporaryQuestions(prev => [...prev, { ...mockWithClientMeta, id: tempId } as any]);
+        }
+      } else {
+        // Global bank
+        if (editingQuestionId) {
+          await supabaseService.updateQuestion(editingQuestionId, questionPayload);
+        } else {
+          await supabaseService.createQuestion(questionPayload);
         }
       }
 
@@ -6621,6 +9163,8 @@ export default function App() {
       setQuestionImagePreview(null);
       setOptionImageFiles([null, null, null, null]);
       setOptionImagePreviews([null, null, null, null]);
+      setExplanationImageFile(null);
+      setExplanationImagePreview(null);
     } catch (error: any) {
       console.error(error);
       setGlobalError("Failed to save question: " + error.message);
@@ -6870,90 +9414,95 @@ export default function App() {
               {isDarkMode ? <Sun size={20} strokeWidth={2.5} /> : <Moon size={20} strokeWidth={2.5} />}
             </Button>
             
-            <div className="relative group/user">
+            <div ref={userMenuRef} className="relative group/user">
               <button 
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
                 className={`flex items-center gap-2 p-1 pr-3 rounded-full transition-all duration-300 ${isUserMenuOpen ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/40 ring-4 ring-blue-500/10' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
               >
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm overflow-hidden border-2 shadow-inner transition-transform group-active/user:scale-95 ${isUserMenuOpen ? 'border-white/50 bg-white/20' : 'border-blue-500/20 bg-blue-100 dark:bg-blue-900/30 text-blue-600'}`}>
-                  {user.user_metadata?.avatar_url ? (
-                    <img src={user.user_metadata?.avatar_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  {(firestoreUser?.avatarUrl || firestoreUser?.avatar_url || firestoreUser?.photoURL || user.user_metadata?.avatar_url) ? (
+                    <img 
+                      src={firestoreUser?.avatarUrl || firestoreUser?.avatar_url || firestoreUser?.photoURL || user.user_metadata?.avatar_url} 
+                      alt="" 
+                      className="w-full h-full object-cover" 
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
                   ) : (
                     user.user_metadata?.full_name?.charAt(0) || user.email?.charAt(0)
                   )}
                 </div>
-                <span className="hidden sm:inline text-xs font-black uppercase tracking-widest">{user.user_metadata?.full_name?.split(' ')[0]}</span>
+                <span className="hidden sm:inline text-xs font-black uppercase tracking-widest">{user.user_metadata?.full_name?.split(' ')?.[0] || user.email?.split('@')?.[0]}</span>
                 <ChevronDown size={14} className={`transition-transform duration-300 ${isUserMenuOpen ? 'rotate-180' : ''}`} />
               </button>
 
               <AnimatePresence>
                 {isUserMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-[-1]" onClick={() => setIsUserMenuOpen(false)} />
-                    <motion.div 
-                      initial={{ opacity: 0, y: 6, scale: 0.97 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 6, scale: 0.97 }}
-                      transition={{ duration: 0.12, ease: "easeOut" }}
-                      className="absolute right-0 top-full mt-3 z-50 min-w-[240px]"
-                    >
-                      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] p-2 relative overflow-hidden backdrop-blur-xl">
-                        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 to-purple-600" />
-                        <div className="px-4 py-4 border-b border-zinc-100 dark:border-zinc-800 mb-2">
-                          <p className="text-sm font-black text-zinc-900 dark:text-white leading-none mb-1.5">{user.user_metadata?.full_name}</p>
-                          <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest truncate mb-3">{user.email}</p>
-                          <div className="flex items-center gap-2">
-                            {userRole === 'admin' && <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full text-[9px] font-black uppercase tracking-widest">Admin</span>}
-                            {canUpload && userRole !== 'admin' && <span className="px-2 py-0.5 bg-green-500/10 text-green-500 border border-green-500/20 rounded-full text-[9px] font-black uppercase tracking-widest">Editor</span>}
-                            <span className="px-2 py-0.5 bg-green-500/10 text-green-500 border border-green-500/20 rounded-full text-[9px] font-black uppercase tracking-widest">Verified</span>
-                          </div>
+                  <motion.div 
+                    initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 6, scale: 0.97 }}
+                    transition={{ duration: 0.12, ease: "easeOut" }}
+                    className="absolute right-0 top-full mt-3 z-50 min-w-[240px]"
+                  >
+                    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] p-2 relative overflow-hidden backdrop-blur-xl">
+                      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 to-purple-600" />
+                      <div className="px-4 py-4 border-b border-zinc-100 dark:border-zinc-800 mb-2">
+                        <p className="text-sm font-black text-zinc-900 dark:text-white leading-none mb-1.5">{user.user_metadata?.full_name}</p>
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest truncate mb-3">{user.email}</p>
+                        <div className="flex items-center gap-2">
+                          {userRole === 'admin' && <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-full text-[9px] font-black uppercase tracking-widest">Admin</span>}
+                          {canUpload && userRole !== 'admin' && <span className="px-2 py-0.5 bg-green-500/10 text-green-500 border border-green-500/20 rounded-full text-[9px] font-black uppercase tracking-widest">Editor</span>}
+                          <span className="px-2 py-0.5 bg-green-500/10 text-green-500 border border-green-500/20 rounded-full text-[9px] font-black uppercase tracking-widest">Verified</span>
                         </div>
-                        
-                        <div className="space-y-0.5">
-                          <button 
-                            onClick={() => { setView('dashboard'); setIsUserMenuOpen(false); }}
-                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 rounded-xl transition-all"
-                          >
-                            <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 transition-colors">
-                              <Monitor size={18} />
-                            </div>
-                            My Dashboard
-                          </button>
-                          <button 
-                            onClick={() => { setView('leaderboard'); setIsUserMenuOpen(false); }}
-                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 rounded-xl transition-all"
-                          >
-                            <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 transition-colors">
-                              <Trophy size={18} />
-                            </div>
-                            Leaderboard
-                          </button>
-                          {hasAdminAccess && (
-                            <button 
-                              onClick={() => { setView('admin'); setIsUserMenuOpen(false); }}
-                              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 rounded-xl transition-all"
-                            >
-                              <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 transition-colors">
-                                <Settings size={18} />
-                              </div>
-                              Admin Portal
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="h-[1px] bg-zinc-100 dark:bg-zinc-800 my-2"></div>
-                        <button 
-                          onClick={handleLogout}
-                          className="w-full flex items-center gap-3 px-4 py-3 text-sm font-black text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-all uppercase tracking-widest"
-                        >
-                          <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-500/10 flex items-center justify-center text-red-600">
-                            <LogOut size={18} />
-                          </div>
-                          Log Out
-                        </button>
                       </div>
-                    </motion.div>
-                  </>
+                      
+                      <div className="space-y-0.5">
+                        <button 
+                          onClick={() => { setView('dashboard'); setIsUserMenuOpen(false); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 rounded-xl transition-all"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 transition-colors">
+                            <Monitor size={18} />
+                          </div>
+                          My Dashboard
+                        </button>
+                        <button 
+                          onClick={() => { setView('leaderboard'); setIsUserMenuOpen(false); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 rounded-xl transition-all"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 transition-colors">
+                            <Trophy size={18} />
+                          </div>
+                          Leaderboard
+                        </button>
+                        {hasAdminAccess && (
+                          <button 
+                            onClick={() => { setView('admin'); setIsUserMenuOpen(false); }}
+                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 rounded-xl transition-all"
+                          >
+                            <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 transition-colors">
+                              <Settings size={18} />
+                            </div>
+                            Admin Portal
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="h-[1px] bg-zinc-100 dark:bg-zinc-800 my-2"></div>
+                      <button 
+                        onClick={handleLogout}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm font-black text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl transition-all uppercase tracking-widest"
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-500/10 flex items-center justify-center text-red-600">
+                          <LogOut size={18} />
+                        </div>
+                        Log Out
+                      </button>
+                    </div>
+                  </motion.div>
                 )}
               </AnimatePresence>
             </div>
@@ -7051,9 +9600,16 @@ export default function App() {
 
                 <div className="pt-8 border-t border-zinc-200 dark:border-zinc-800">
                   <div className="flex items-center gap-4 px-4 py-2">
-                    <img src={user.user_metadata?.avatar_url || ''} className="w-12 h-12 rounded-xl border-2 border-blue-500/20" alt="" />
+                    <img 
+                      src={firestoreUser?.avatarUrl || firestoreUser?.avatar_url || firestoreUser?.photoURL || user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firestoreUser?.display_name || user.user_metadata?.full_name || 'User'}`} 
+                      className="w-12 h-12 rounded-xl border-2 border-blue-500/20 object-cover container" 
+                      alt="" 
+                      onError={(e) => {
+                        e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${firestoreUser?.display_name || user.user_metadata?.full_name || 'User'}`;
+                      }}
+                    />
                     <div className="min-w-0">
-                      <p className="text-sm font-black text-zinc-900 dark:text-white truncate">{user.user_metadata?.full_name}</p>
+                      <p className="text-sm font-black text-zinc-900 dark:text-white truncate">{firestoreUser?.name || user.user_metadata?.full_name || 'Student'}</p>
                       <p className="text-xs text-zinc-500 truncate">{user.email}</p>
                     </div>
                   </div>
@@ -7103,6 +9659,15 @@ export default function App() {
               onClick={handlePremiumExamClick}
             >
               Elite Exam
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              icon={Sparkles} 
+              className={`h-11 sm:h-10 rounded-xl px-4 sm:px-4 border-none shadow-sm shrink-0 font-bold ${view === 'revision' ? 'bg-amber-600 text-white shadow-amber-500/20 shadow-md scale-105' : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300'}`} 
+              onClick={() => setView('revision')}
+            >
+              Revision Center
             </Button>
             <Button 
               variant="outline" 
@@ -7235,7 +9800,7 @@ export default function App() {
                 setEditingId(null);
                 setNewItem({ 
                   category: 'Notes', 
-                  academicClass: dynamicClasses[0]?.name || 'Class 9', 
+                  academicClass: dynamicClasses?.[0]?.name || 'SSC', 
                   subject: '', 
                   title: '', 
                   description: '', 
@@ -7252,13 +9817,32 @@ export default function App() {
       </div>
 
       <main className="w-full max-w-full px-3 sm:px-4 py-6 sm:py-10 overflow-x-hidden">
-        {(view === 'home' && !searchQuery) ? renderHome() : 
+        {view === 'premium-subscription' ? (
+          <PremiumSubscriptionPage user={user} onNavigateHome={() => setView('home')} />
+        ) : (view === 'home' && !searchQuery) ? renderHome() : 
          view === 'leaderboard' ? renderLeaderboard() :
          view === 'admin' ? renderAdminPortal() :
          view === 'dashboard' ? renderUserDashboard() :
          view === 'exam' ? renderExamMode() : 
-         view === 'premium-exam' ? <PremiumExamSection user={user} dynamicClasses={dynamicClasses} dynamicSubjects={dynamicSubjects} dynamicChapters={dynamicChapters} dynamicTopics={dynamicTopics} /> :
-         view === 'privacy' ? renderPrivacyPolicy() : 
+         view === 'premium-exam' ? (
+           hasPremiumAccess ? (
+             <PremiumExamSection user={user} dynamicClasses={dynamicClasses} dynamicSubjects={dynamicSubjects} dynamicChapters={dynamicChapters} dynamicTopics={dynamicTopics} fetchLeaderboards={fetchLeaderboards} onCustomExamFinished={handleCustomExamFinished} savedQuestionIds={savedQuestionIds} onToggleSaveQuestion={handleToggleSaveQuestion} />
+           ) : (
+             <PremiumSubscriptionPage user={user} onNavigateHome={() => setView('home')} />
+           )
+         ) :
+         view === 'revision' ? (
+            <RevisionCenter
+              user={user}
+              savedQuestions={qSavedQuestionsData || []}
+              wrongQuestions={qWrongQuestionsData || []}
+              refetchSaved={refetchSavedQuestions}
+              refetchWrong={refetchWrongQuestions}
+              savedQuestionIds={savedQuestionIds}
+              onToggleSaveQuestion={handleToggleSaveQuestion}
+            />
+          ) :
+          view === 'privacy' ? renderPrivacyPolicy() : 
          view === 'terms' ? renderTermsOfService() : 
          view === 'cookies' ? renderCookiePolicy() : (
           <div className="space-y-10">
@@ -7274,7 +9858,7 @@ export default function App() {
             onClick={() => {
               setIsEditing(false);
               setEditingId(null);
-              setNewItem({ category: 'Notes', academicClass: dynamicClasses[0]?.name || 'Class 9', subject: '', title: '', description: '', url: '', thumbnail: '' });
+              setNewItem({ category: 'Notes', academicClass: dynamicClasses?.[0]?.name || 'SSC', subject: '', title: '', description: '', url: '', thumbnail: '' });
               setIsAdding(true);
             }}
             className="fixed bottom-24 lg:bottom-8 right-6 lg:right-8 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg shadow-blue-500/40 flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-50 animate-bounce-slow"
@@ -7304,7 +9888,7 @@ export default function App() {
                   setUploadError(null); 
                   setNewItem({ 
                     category: 'Notes', 
-                    academicClass: dynamicClasses[0]?.name || 'Class 9', 
+                    academicClass: dynamicClasses?.[0]?.name || 'SSC', 
                     subject: '', 
                     title: '', 
                     description: '', 
@@ -8139,7 +10723,7 @@ export default function App() {
                   <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Options & Correct Answer</label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {newQuestion.options?.map((opt, idx) => (
-                      <div key={idx} className="flex flex-col gap-2 p-4 bg-zinc-50 dark:bg-zinc-950/20 border border-zinc-100 dark:border-zinc-800/80 rounded-[22px]">
+                      <div key={`new-opt-${idx}`} className="flex flex-col gap-2 p-4 bg-zinc-50 dark:bg-zinc-950/20 border border-zinc-100 dark:border-zinc-800/80 rounded-[22px]">
                         <div className="flex items-center gap-2">
                           <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${newQuestion.correctAnswer === idx ? 'bg-green-600 text-white' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500'}`}>
                             {String.fromCharCode(65 + idx)}
@@ -8244,6 +10828,154 @@ export default function App() {
                 </div>
               )}
 
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Marks (Points)</label>
+                  <input 
+                    type="number"
+                    step="0.5"
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white text-sm font-bold"
+                    value={newQuestion.points || 1}
+                    onChange={e => setNewQuestion({...newQuestion, points: Number(e.target.value)})}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Negative Marks</label>
+                  <input 
+                    type="number"
+                    step="0.05"
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white text-sm font-bold"
+                    value={newQuestion.negativeMarks !== undefined ? newQuestion.negativeMarks : 0.25}
+                    onChange={e => setNewQuestion({...newQuestion, negativeMarks: Number(e.target.value)})}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Difficulty</label>
+                  <select 
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white font-bold text-sm"
+                    value={newQuestion.difficulty || 'medium'}
+                    onChange={e => setNewQuestion({...newQuestion, difficulty: e.target.value})}
+                  >
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Hard</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Status</label>
+                  <select 
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white font-bold text-sm"
+                    value={newQuestion.status || 'published'}
+                    onChange={e => setNewQuestion({...newQuestion, status: e.target.value})}
+                  >
+                    <option value="published">Published</option>
+                    <option value="draft">Draft</option>
+                    <option value="hidden">Hidden</option>
+                  </select>
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Tags (Comma separated)</label>
+                  <input 
+                    type="text"
+                    placeholder="e.g. Board, SSC-2024, Important"
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white text-sm font-bold"
+                    value={Array.isArray(newQuestion.tags) ? newQuestion.tags.join(', ') : (newQuestion.tags || '')}
+                    onChange={e => setNewQuestion({...newQuestion, tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean)})}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950/20 border border-zinc-100 dark:border-zinc-800/80 rounded-2xl">
+                <div>
+                  <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 text-left">Is Premium Question</h4>
+                  <p className="text-xs text-zinc-400 text-left">Premium questions require a premium membership to view detailed solutions.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNewQuestion({...newQuestion, isPremium: !newQuestion.isPremium})}
+                  className={`w-12 h-6 rounded-full p-1 transition-all shrink-0 ${newQuestion.isPremium ? 'bg-amber-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white transition-transform ${newQuestion.isPremium ? 'translate-x-6' : 'translate-x-0'}`} />
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1 text-left block">Solution / Explanation (Text)</label>
+                <textarea 
+                  className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl outline-none dark:text-white text-sm h-24"
+                  placeholder="Explain how to solve this question..."
+                  value={newQuestion.explanation || ''}
+                  onChange={e => setNewQuestion({...newQuestion, explanation: e.target.value})}
+                />
+              </div>
+
+              <div className="space-y-2 text-left">
+                <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1 block">Solution / Explanation Image (Optional)</label>
+                {explanationImagePreview ? (
+                  <div className="relative group border border-zinc-200 dark:border-zinc-700/80 rounded-2xl bg-zinc-50 dark:bg-zinc-950/20 p-4 flex items-center gap-4">
+                    <img 
+                      src={explanationImagePreview} 
+                      alt="Solution preview" 
+                      className="w-20 h-20 object-contain rounded-xl border border-zinc-100 dark:border-zinc-800 bg-white"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 truncate">Handwritten Math / PDF / Graph image</p>
+                      <p className="text-[10px] text-zinc-400 font-bold uppercase">Ready to save</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 hover:text-blue-600 text-xs px-3 py-2 rounded-xl font-bold transition-all">
+                        Replace
+                        <input 
+                          type="file" 
+                          accept="image/png, image/jpeg, image/jpg, image/webp" 
+                          className="hidden" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setExplanationImageFile(file);
+                              setExplanationImagePreview(URL.createObjectURL(file));
+                            }
+                          }}
+                        />
+                      </label>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          setExplanationImageFile(null);
+                          setExplanationImagePreview(null);
+                        }}
+                        className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-blue-500/50 dark:hover:border-blue-500/30 rounded-2xl p-6 bg-zinc-50/50 dark:bg-zinc-950/10 cursor-pointer transition-all hover:bg-blue-50/5 dark:hover:bg-blue-950/5 group text-center block">
+                    <div className="p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-zinc-400 group-hover:text-blue-600 transition-colors shadow-sm mb-2 inline-block">
+                      <ImageIcon size={20} />
+                    </div>
+                    <span className="text-m font-bold text-zinc-600 dark:text-zinc-300 block">Upload solution diagram / derivation image</span>
+                    <span className="text-[9px] text-zinc-400 mt-1 uppercase tracking-wider block">Supports PNG, JPG, WEBP • Auto-compressed</span>
+                    <input 
+                      type="file" 
+                      accept="image/png, image/jpeg, image/jpg, image/webp" 
+                      className="hidden" 
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setExplanationImageFile(file);
+                          setExplanationImagePreview(URL.createObjectURL(file));
+                        }
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+
               <div className="flex items-center gap-4 pt-4">
                 <Button 
                   className="flex-1 py-4 bg-blue-600" 
@@ -8258,87 +10990,7 @@ export default function App() {
           </div>
         )}
 
-        {leaderboardExamId && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-[2px] z-[100] flex items-center justify-center p-4">
-             <motion.div 
-               initial={{ opacity: 0, scale: 0.9, y: 20 }}
-               animate={{ opacity: 1, scale: 1, y: 0 }}
-               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-               className="bg-white dark:bg-zinc-900 rounded-[40px] w-full max-w-2xl shadow-2xl overflow-hidden border border-zinc-200/50 dark:border-zinc-800/50"
-             >
-               <div className="p-8 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-gradient-to-br from-indigo-50 to-white dark:from-indigo-500/5 dark:to-zinc-900">
-                 <div className="flex items-center gap-4">
-                   <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-xl shadow-indigo-600/20">
-                     <Trophy size={28} />
-                   </div>
-                   <div>
-                     <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Exam Leaderboard</h3>
-                     <p className="text-xs text-zinc-500">Class {getClassGroup(firestoreUser?.class || dynamicClasses[0]?.name || 'Class 9')} Group • Top Performers</p>
-                   </div>
-                 </div>
-                 <Button variant="ghost" size="icon" onClick={() => setLeaderboardExamId(null)} className="rounded-xl"><X size={20} /></Button>
-               </div>
 
-               <div className="max-h-[60vh] overflow-y-auto no-scrollbar">
-                 <div className="p-6 space-y-3">
-                   {allLeaderboards
-                    .filter(e => e.examId === leaderboardExamId && getClassGroup(e.class) === getClassGroup(firestoreUser?.academicClass || dynamicClasses[0]?.name || 'Class 9'))
-                    .sort((a, b) => {
-                      if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
-                      if (a.timeTaken !== b.timeTaken) return a.timeTaken - b.timeTaken;
-                      return new Date(a.firstSubmissionAt).getTime() - new Date(b.firstSubmissionAt).getTime();
-                    })
-                    .slice(0, 50)
-                    .map((entry, idx) => (
-                      <div 
-                        key={`${entry.id}-${idx}`} 
-                        className={`flex items-center gap-4 p-4 rounded-3xl transition-all border ${entry.userId === user?.id ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg' : 'bg-zinc-50 dark:bg-zinc-800/50 border-transparent hover:border-zinc-200 dark:hover:border-zinc-700'}`}
-                      >
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${idx === 0 ? 'bg-yellow-400 text-yellow-900' : idx === 1 ? 'bg-zinc-300 text-zinc-700' : idx === 2 ? 'bg-orange-300 text-orange-900' : (entry.userId === user?.id ? 'bg-white/20 text-white' : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-500')}`}>
-                          {idx + 1}
-                        </div>
-                        <img 
-                          src={entry.userPhoto || `https://api.dicebear.com/7.x/avataaars/svg?seed=${entry.userName}`} 
-                          className="w-10 h-10 rounded-2xl object-cover bg-white" 
-                          alt="" 
-                        />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold truncate text-sm">{entry.userName}</p>
-                          <p className={`text-[10px] ${entry.userId === user?.id ? 'text-indigo-100' : 'text-zinc-400'}`}>
-                            {entry.totalAttempts} Attempts • Class {entry.class}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-black text-sm">{entry.bestScore}</p>
-                          <p className={`text-[10px] tabular-nums ${entry.userId === user?.id ? 'text-indigo-100' : 'text-zinc-400'}`}>
-                            {Math.floor(entry.timeTaken / 60)}:{(entry.timeTaken % 60).toString().padStart(2, '0')}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                    
-                    {allLeaderboards.filter(e => e.examId === leaderboardExamId && getClassGroup(e.class) === getClassGroup(firestoreUser?.academicClass || dynamicClasses[0]?.name || 'Class 9')).length === 0 && (
-                      <div className="py-20 text-center space-y-4">
-                        <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
-                          <Trophy size={32} />
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-sm font-bold text-zinc-900 dark:text-white">No rankings yet</p>
-                          <p className="text-xs text-zinc-500">Be the first to participate in this exam!</p>
-                        </div>
-                      </div>
-                    )}
-                 </div>
-               </div>
-               
-               <div className="p-6 bg-zinc-50 dark:bg-zinc-800/80 border-t border-zinc-100 dark:border-zinc-800 text-center">
-                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-relaxed">
-                   RANKING PRIORITY: HIGH SCORE &gt; LOWEST TIME &gt; EARLIEST SUBMISSION
-                 </p>
-               </div>
-             </motion.div>
-          </div>
-        )}
         {isAddingExam && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-start justify-center p-4 overflow-y-auto pt-10 pb-10">
             <motion.div 
@@ -8444,7 +11096,9 @@ export default function App() {
                           value={newExam.chapter || ''}
                           onChange={e => {
                             const chap = e.target.value;
-                            const topicsForChap = getTopicsForChapter(chap, newExam.subject || '', newExam.class as string);
+                            const topicsForChap = chap && chap !== 'All Chapters'
+                              ? getTopicsForChapter(chap, newExam.subject || '', newExam.class as string)
+                              : getTopicsForSubject(newExam.subject || '', newExam.class as string);
                             setNewExam({
                               ...newExam, 
                               chapter: chap,
@@ -8470,33 +11124,41 @@ export default function App() {
                       </div>
                     </div>
 
-                    {newExam.chapter && newExam.chapter !== 'All Chapters' && (
+                    {newExam.subject && (
                       <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-300">
-                        <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Target Topics (Auto-selected)</label>
+                        <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Target Topics (Select relevant topics)</label>
                         <div className="bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl max-h-48 overflow-y-auto space-y-2 custom-scrollbar">
-                          {getTopicsForChapter(newExam.chapter || '', newExam.subject || '', newExam.class as string).map(topic => (
-                             <label key={topic.id} className="flex items-center gap-3 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl cursor-pointer transition-colors">
-                               <input 
-                                 type="checkbox"
-                                 checked={(newExam.topicIds || []).includes(topic.id)}
-                                 onChange={(e) => {
-                                   const ids = [...(newExam.topicIds || [])];
-                                   if (e.target.checked) {
-                                     ids.push(topic.id);
-                                   } else {
-                                     const idx = ids.indexOf(topic.id);
-                                     if (idx > -1) ids.splice(idx, 1);
-                                   }
-                                   setNewExam({...newExam, topicIds: ids});
-                                 }}
-                                 className="w-4 h-4 rounded border-zinc-300 text-primary-palette focus:ring-primary-palette"
-                               />
-                               <span className="text-xs font-bold dark:text-zinc-300">{topic.name}</span>
-                             </label>
-                          ))}
-                          {getTopicsForChapter(newExam.chapter || '', newExam.subject || '', newExam.class as string).length === 0 && (
-                            <p className="text-[10px] text-zinc-500 italic p-2">No topics found for this chapter.</p>
-                          )}
+                          {(() => {
+                            const isSpecificChap = newExam.chapter && newExam.chapter !== 'All Chapters';
+                            const topicsList = isSpecificChap
+                              ? getTopicsForChapter(newExam.chapter || '', newExam.subject || '', newExam.class as string)
+                              : getTopicsForSubject(newExam.subject || '', newExam.class as string);
+
+                            if (topicsList.length === 0) {
+                              return <p className="text-[10px] text-zinc-500 italic p-2">No topics found for this selection.</p>;
+                            }
+
+                            return topicsList.map(topic => (
+                              <label key={topic.id} className="flex items-center gap-3 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl cursor-pointer transition-colors">
+                                <input 
+                                  type="checkbox"
+                                  checked={(newExam.topicIds || []).includes(topic.id)}
+                                  onChange={(e) => {
+                                    const ids = [...(newExam.topicIds || [])];
+                                    if (e.target.checked) {
+                                      ids.push(topic.id);
+                                    } else {
+                                      const idx = ids.indexOf(topic.id);
+                                      if (idx > -1) ids.splice(idx, 1);
+                                    }
+                                    setNewExam({...newExam, topicIds: ids});
+                                  }}
+                                  className="w-4 h-4 rounded border-zinc-300 text-primary-palette focus:ring-primary-palette"
+                                />
+                                <span className="text-xs font-bold dark:text-zinc-300">{topic.name}</span>
+                              </label>
+                            ));
+                          })()}
                         </div>
                       </div>
                     )}
@@ -8598,48 +11260,6 @@ export default function App() {
                         How many questions from the bank will be shown to the student? (e.g. "Generate 10 questions from the 100 available").
                       </p>
                     </div>
-
-                    <div className="pt-4 space-y-4">
-                      <div className="flex items-center justify-between">
-                         <h5 className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Questions in Bank</h5>
-                         <Button 
-                          variant="outline" 
-                          size="sm" 
-                          icon={Plus} 
-                          onClick={() => setIsAddingQuestion(true)}
-                          className="rounded-xl border-indigo-500/30 text-indigo-600"
-                         >
-                          Add Question
-                         </Button>
-                      </div>
-                      
-                      <div className="max-h-[300px] overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                        {allQuestions.filter(q => q.examId === editingExamId || q.examId === 'temp_new').length === 0 ? (
-                          <div className="py-12 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-2xl text-center">
-                            <p className="text-zinc-400 text-[10px] font-bold uppercase">Pool is Empty</p>
-                          </div>
-                        ) : (
-                          allQuestions
-                            .filter(q => q.examId === editingExamId || q.examId === 'temp_new')
-                            .map((q, idx) => (
-                              <div key={`pool-q-${q.id || idx}`} className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="text-[10px] font-black text-indigo-500 uppercase">Q{idx + 1} • {q.type}</p>
-                                  <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">{q.questionText}</p>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <button onClick={() => {
-                                    handleTriggerEditQuestion(q);
-                                  }} className="p-2 text-zinc-400 hover:text-blue-500"><Pencil size={14} /></button>
-                                  <button onClick={() => {
-                                    handleDeleteQuestion(q.id, editingExamId || 'temp');
-                                  }} className="p-2 text-zinc-400 hover:text-red-500"><Trash2 size={14} /></button>
-                                </div>
-                              </div>
-                            ))
-                        )}
-                      </div>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -8717,27 +11337,37 @@ export default function App() {
                   </Button>
                 </div>
                 
-                <div className="relative aspect-video w-full bg-black shadow-2xl">
+                <div className="relative aspect-video w-full bg-black shadow-2xl overflow-hidden rounded-t-2xl sm:rounded-t-none">
                   {(activeVideo || (activePlaylist && activePlaylist.type === 'youtube')) ? (
-                    <iframe 
-                      src={(() => {
-                        const videoId = getYouTubeId(activeVideo || '');
-                        let baseUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1`;
-                        if (activePlaylist) {
-                          if (activePlaylist.type === 'custom' && activePlaylist.videoIds) {
-                            const ids = contents
-                              .filter(c => activePlaylist.videoIds?.includes(c.id))
-                              .map(c => getYouTubeId(c.url))
-                              .join(',');
-                            if (ids) baseUrl += `&playlist=${ids}`;
+                    <>
+                      {isVideoLoading && (
+                        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-zinc-950/90 text-white">
+                          <div className="w-10 h-10 border-4 border-zinc-700 border-t-red-600 rounded-full animate-spin mb-3" />
+                          <p className="text-zinc-400 text-xs font-semibold tracking-wide">ভিডিও লোড হচ্ছে, সামান্য অপেক্ষা করুন...</p>
+                        </div>
+                      )}
+                      <iframe 
+                        src={(() => {
+                          const videoId = getYouTubeId(activeVideo || '');
+                          let baseUrl = `https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&autoplay=1&enablejsapi=1&iv_load_policy=3&playsinline=1`;
+                          if (activePlaylist) {
+                            if (activePlaylist.type === 'custom' && activePlaylist.videoIds) {
+                              const ids = contents
+                                .filter(c => activePlaylist.videoIds?.includes(c.id))
+                                .map(c => getYouTubeId(c.url))
+                                .join(',');
+                              if (ids) baseUrl += `&playlist=${ids}`;
+                            }
                           }
-                        }
-                        return baseUrl;
-                      })()} 
-                      className="absolute inset-0 w-full h-full border-none"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    />
+                          return baseUrl;
+                        })()} 
+                        className="absolute inset-0 w-full h-full border-none"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        loading="lazy"
+                        onLoad={() => setIsVideoLoading(false)}
+                      />
+                    </>
                   ) : (
                     <div className="text-center space-y-4 p-10">
                       <div className="w-20 h-20 bg-zinc-900 rounded-3xl flex items-center justify-center mx-auto text-zinc-700 border border-zinc-800 shadow-inner">
@@ -8880,7 +11510,7 @@ export default function App() {
                             
                             return (
                               <button
-                                key={index}
+                                key={video.id || `yt-${ytId || index}`}
                                 id={`yt-sidebar-item-${ytId}`}
                                 onClick={() => setActiveVideo(ytId)}
                                 className={`w-full flex items-center gap-3 p-2.5 rounded-2xl transition-all text-left group relative overflow-hidden ${
@@ -9186,7 +11816,36 @@ export default function App() {
                       <div className="space-y-2">
                         <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Target Chapter</label>
                         <input 
-              {isFeedbackOpen && (
+                          className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-3 rounded-xl outline-none dark:text-white"
+                          placeholder="e.g. Chapter 1 or All"
+                          value={newExternal.chapter || ''}
+                          onChange={e => setNewExternal({...newExternal, chapter: e.target.value})}
+                        />
+                      </div>
+                    </div>
+
+              <div className="flex gap-3 pt-4">
+                <Button 
+                  variant="outline" 
+                  className="flex-1 py-4 rounded-2xl" 
+                  onClick={() => setIsAddingExternal(false)}
+                  disabled={isUploadingExternal}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  className="flex-1 py-4 bg-blue-600 hover:bg-blue-700 rounded-2xl text-white font-bold" 
+                  onClick={handleAddExternal}
+                  disabled={isUploadingExternal}
+                >
+                  {isUploadingExternal ? <RefreshCcw className="animate-spin" size={20} /> : 'Save Link'}
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isFeedbackOpen && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -9222,7 +11881,7 @@ export default function App() {
                 <>
                   <p className="text-sm text-zinc-500 font-medium">Your feedback helps us improve Parodorshhi for everyone.</p>
                   <textarea 
-                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl outline-none dark:text-white min-h-[150px] text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all placeholder:text-zinc-400"
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl outline-none dark:text-white min-h-[150px] text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all placeholder:text-zinc-400 animate-in fade-in"
                     placeholder="Tell us what you think..."
                     value={feedbackText}
                     onChange={(e) => setFeedbackText(e.target.value)}
@@ -9239,27 +11898,6 @@ export default function App() {
                   </div>
                 </>
               )}
-            </motion.div>
-          </div>
-        )}iant="ghost" size="icon" onClick={() => setIsFeedbackOpen(false)}><X size={20} /></Button>
-              </div>
-              <p className="text-sm text-zinc-500 font-medium">Your feedback helps us improve Parodorshhi for everyone.</p>
-              <textarea 
-                className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl outline-none dark:text-white min-h-[150px] text-sm"
-                placeholder="Tell us what you think..."
-                value={feedbackText}
-                onChange={(e) => setFeedbackText(e.target.value)}
-              />
-              <div className="flex gap-3">
-                <Button variant="outline" className="flex-1 py-4 rounded-2xl" onClick={() => setIsFeedbackOpen(false)}>Cancel</Button>
-                <Button 
-                  className="flex-1 py-4 bg-blue-600 hover:bg-blue-700 rounded-2xl" 
-                  onClick={handleSendFeedback}
-                  disabled={isSendingFeedback || !feedbackText.trim()}
-                >
-                  {isSendingFeedback ? <RefreshCcw className="animate-spin" size={20} /> : 'Submit'}
-                </Button>
-              </div>
             </motion.div>
           </div>
         )}
@@ -9328,6 +11966,54 @@ export default function App() {
                     Cancel
                   </Button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showPremiumPromptModal && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-sm overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white dark:bg-zinc-900 rounded-[40px] shadow-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 my-auto p-8 text-center space-y-6"
+            >
+              <div className="space-y-4">
+                <div className="w-16 h-16 bg-gradient-to-br from-amber-400 to-amber-600 text-white rounded-3xl flex items-center justify-center mx-auto shadow-lg shadow-amber-500/20 animate-pulse">
+                  <Crown size={32} fill="currentColor" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">প্রিমিয়াম ফিচারে অ্যাক্সেস করুন ✨</h3>
+                  <p className="text-zinc-600 dark:text-zinc-400 text-xs leading-relaxed font-semibold">
+                    কাস্টম এলিট পরীক্ষা তৈরি, চ্যাপ্টার-ভিত্তিক অ্যাডভান্সড এনালাইটিক্স, ব্যাখ্যাসহ সলিউশন ও প্রিমিয়াম প্র্যাকটিস শিটের মতো প্রিমিয়াম শিক্ষাসেবা আনলক করতে আপনার একটি প্যারাডক্সিশি প্রিমিয়াম সাবস্ক্রিপশন প্রয়োজন।
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <Button
+                  variant="primary"
+                  className="w-full py-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-black shadow-lg shadow-amber-500/10 font-bold tracking-wider"
+                  onClick={() => {
+                    setView('premium-subscription');
+                    setShowPremiumPromptModal(false);
+                  }}
+                  icon={ChevronRight}
+                >
+                  সাবস্ক্রিপশন প্ল্যান দেখুন ৳
+                </Button>
+                
+                <Button
+                  variant="ghost"
+                  className="w-full rounded-2xl text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-all text-xs font-bold"
+                  onClick={() => {
+                    setShowPremiumPromptModal(false);
+                    setView('home');
+                  }}
+                >
+                  ফ্রি ড্যাশবোর্ডে ফিরে যান
+                </Button>
               </div>
             </motion.div>
           </div>
