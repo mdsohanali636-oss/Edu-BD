@@ -27,7 +27,7 @@ import {
 import { supabaseService } from '../../services/supabaseService';
 import { supabase } from '../../supabaseClient';
 import { SubscriptionSettings, SubscriptionPackage, SubscriptionBenefit, SubscriptionRequest, SubscriptionCoupon } from '../../types';
-import { Button } from '../ui/Base';
+import { Button, Card } from '../ui/Base';
 
 export const AdminSubscriptionManager: React.FC<{ 
   adminUser: any; 
@@ -106,6 +106,61 @@ export const AdminSubscriptionManager: React.FC<{
   }>({ code: '', discount_type: 'percentage', discount_value: 10 });
 
   // Confirmation state
+  // Live dynamic statistics counters (Feature 2)
+  const [liveStats, setLiveStats] = useState({
+    members: 0,
+    exams: 0,
+    notes: 0,
+    sheets: 0
+  });
+
+  const fetchLiveStats = async () => {
+    try {
+      const [profilesRes, rolesRes, examsRes, notesRes, sheetsRes] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id, premium_expiry, has_premium_access'),
+        supabase
+          .from('user_roles')
+          .select('user_id, id, is_premium'),
+        supabase
+          .from('exams')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_premium', true),
+        supabase
+          .from('notes')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_premium', true),
+        supabase
+          .from('practice_sheets')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_premium', true)
+      ]);
+
+      let premiumCount = 0;
+      if (profilesRes.data) {
+        const roles = rolesRes.data || [];
+        profilesRes.data.forEach(p => {
+          const roleRec = roles.find(r => r.user_id === p.id || r.id === p.id);
+          const isExpired = p.premium_expiry && new Date(p.premium_expiry).getTime() < Date.now();
+          const hasPremium = isExpired ? false : (roleRec ? (roleRec.is_premium ?? p.has_premium_access) : p.has_premium_access);
+          if (hasPremium) {
+            premiumCount++;
+          }
+        });
+      }
+
+      setLiveStats({
+        members: premiumCount,
+        exams: examsRes.count || 0,
+        notes: notesRes.count || 0,
+        sheets: sheetsRes.count || 0
+      });
+    } catch (err) {
+      console.error("[fetchLiveStats] Error loading stats counters:", err);
+    }
+  };
+
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -132,6 +187,8 @@ export const AdminSubscriptionManager: React.FC<{
   const loadAllData = async () => {
     setIsLoading(true);
     try {
+      fetchLiveStats();
+
       const [fetchedSettings, fetchedPackages, fetchedBenefits, fetchedRequests, fetchedCoupons] = await Promise.all([
         supabaseService.getSubscriptionSettings(),
         supabaseService.getSubscriptionPackages(),
@@ -171,8 +228,38 @@ export const AdminSubscriptionManager: React.FC<{
       })
       .subscribe();
 
+    // Subscribe to all changes affecting dynamic Statistics counters (Feature 2)
+    const statsChannel = supabase
+      .channel('admin-stats-realtime-global')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        console.log("[Admin Stats Realtime] profiles changed! Refetching stats...");
+        fetchLiveStats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_roles' }, () => {
+        console.log("[Admin Stats Realtime] user_roles changed! Refetching stats...");
+        fetchLiveStats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'exams' }, () => {
+        console.log("[Admin Stats Realtime] exams changed! Refetching stats...");
+        fetchLiveStats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, () => {
+        console.log("[Admin Stats Realtime] notes changed! Refetching stats...");
+        fetchLiveStats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'practice_sheets' }, () => {
+        console.log("[Admin Stats Realtime] practice_sheets changed! Refetching stats...");
+        fetchLiveStats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subscription_requests' }, () => {
+        console.log("[Admin Stats Realtime] subscription_requests changed! Refetching stats...");
+        fetchLiveStats();
+      })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(statsChannel);
     };
   }, []);
 
@@ -189,6 +276,63 @@ export const AdminSubscriptionManager: React.FC<{
       showToast("Verification failed: " + (err.message || 'Unknown network error'));
     } finally {
       setIsSavingSettings(false);
+    }
+  };
+
+  const handleToggleGlobalPremium = async () => {
+    if (!settings) return;
+    const isEnabling = !settings.global_premium_mode;
+
+    const performUpdate = async (enable: boolean) => {
+      // 5. Add console logs: Before update
+      console.log("[Global Premium Mode] Before update. Current mode: " + settings.global_premium_mode + ". Toggling to: " + enable);
+      
+      try {
+        const payload: Partial<SubscriptionSettings> = {
+          global_premium_mode: enable,
+        };
+
+        // Send actual DB update
+        await supabaseService.updateSubscriptionSettings(payload);
+        
+        // 5. Add console logs: After update
+        console.log("[Global Premium Mode] After update request sent. Payload used:", payload);
+
+        // 6. After update, refetch site_settings (subscription_settings) and sync the UI.
+        const fresh = await supabaseService.getSubscriptionSettings();
+        console.log("[Global Premium Mode] Refeteched fresh settings from DB:", fresh);
+
+        // 9. Verify that the update succeeds before showing the active toast status.
+        if (fresh.global_premium_mode !== enable) {
+          throw new Error("Value verification failed. The database is still returning global_premium_mode = " + fresh.global_premium_mode);
+        }
+
+        // 5. Add console logs: Update success
+        console.log("[Global Premium Mode] Update success. Value is successfully changed to: " + fresh.global_premium_mode);
+
+        setSettings(fresh);
+        setSettingsForm(fresh);
+
+        showToast(enable ? "🌍 Global Premium Mode Enabled!" : "Global Premium Mode Disabled.");
+      } catch (err: any) {
+        // 5. Add console logs: Update failed
+        console.error("[Global Premium Mode] Update failed:", err);
+        showToast("Error toggling Global Premium Mode: " + (err.message || 'Network error'));
+      }
+    };
+
+    if (isEnabling) {
+      setConfirmDialog({
+        isOpen: true,
+        title: "Are you sure?",
+        description: "All users will temporarily receive premium access.\n\nExisting premium subscriptions will remain unchanged.",
+        confirmText: "Enable Global Premium",
+        cancelText: "Cancel",
+        isDanger: false,
+        onConfirm: () => performUpdate(true)
+      });
+    } else {
+      await performUpdate(false);
     }
   };
 
@@ -667,7 +811,9 @@ The student will remain guest/basic tier. Are you sure you want to proceed?`,
   const activePremiumStudents = allUsers.filter(u => u.hasPremiumAccess || u.isPremium);
   const filteredPremiumStudents = activePremiumStudents.filter(u => 
     (u.name || '').toLowerCase().includes(premiumUserSearch.toLowerCase()) ||
-    (u.email || '').toLowerCase().includes(premiumUserSearch.toLowerCase())
+    (u.email || '').toLowerCase().includes(premiumUserSearch.toLowerCase()) ||
+    (u.phone_number || '').includes(premiumUserSearch) ||
+    (u.phone || '').includes(premiumUserSearch)
   );
 
   // Statistics Computations
@@ -785,6 +931,64 @@ The student will remain guest/basic tier. Are you sure you want to proceed?`,
           <Tag size={14} /> Coupons ({coupons.length})
         </button>
       </div>
+
+      {/* 🌍 Global Premium Mode Dedicated Card */}
+      {settings && (
+        <Card id="adm-global-premium-card" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 shadow-sm overflow-hidden relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+          <div className="absolute top-0 right-0 h-24 w-24 bg-gradient-to-bl from-blue-500/10 to-transparent rounded-bl-full pointer-events-none" />
+          <div className="space-y-4 max-w-2xl text-left">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <span className="text-2xl shrink-0 self-start sm:self-center">🌍</span>
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-zinc-900 dark:text-white uppercase tracking-wider font-mono flex flex-wrap items-center gap-2">
+                  Global Premium Mode
+                  {settings.global_premium_mode ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-500 animate-pulse border border-emerald-500/20">
+                      🌍 Global Premium Active
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 border border-zinc-200 dark:border-zinc-700">
+                      Global Premium Disabled
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
+                  {settings.global_premium_mode 
+                    ? "All users currently have temporary premium access. No locks, no upgrade prompts, no boundaries." 
+                    : "Only subscribed premium users have access. Standard restrictions apply."}
+                </p>
+              </div>
+            </div>
+
+            {/* Admin Analytics Panel */}
+            <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/80">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-semibold leading-relaxed">
+                Database Access Status: <span className={`font-black font-mono inline-flex items-center px-1.5 py-0.5 rounded ${settings.global_premium_mode ? 'text-emerald-500 bg-emerald-500/10' : 'text-zinc-500 bg-zinc-100 dark:bg-zinc-800'}`}>{settings.global_premium_mode ? 'OVERRIDE ON - PUBLIC' : 'STANDARD RESTRICTED'}</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-800/45 p-4 rounded-2xl border border-zinc-150 dark:border-zinc-800/55 min-w-[185px] shrink-0 self-start md:self-center">
+            <p className="text-[10px] font-black uppercase text-zinc-400 font-mono tracking-wider mb-2.5">Toggle Control</p>
+            <div className="flex items-center gap-3">
+              <span className={`text-[10px] font-black uppercase font-mono ${!settings.global_premium_mode ? 'text-zinc-600 dark:text-zinc-300' : 'text-zinc-400'}`}>OFF</span>
+              <button
+                id="global-premium-toggle-button"
+                type="button"
+                onClick={handleToggleGlobalPremium}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
+                  settings.global_premium_mode ? 'bg-emerald-500' : 'bg-zinc-200 dark:bg-zinc-700'
+                } cursor-pointer shrink-0`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition-all ${
+                  settings.global_premium_mode ? 'translate-x-6' : 'translate-x-1'
+                }`} />
+              </button>
+              <span className={`text-[10px] font-black uppercase font-mono ${settings.global_premium_mode ? 'text-emerald-500' : 'text-zinc-400'}`}>ON</span>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <AnimatePresence mode="wait">
         {/* Tab 1: Payment Verification Requests */}
@@ -1052,10 +1256,17 @@ The student will remain guest/basic tier. Are you sure you want to proceed?`,
                       return (
                         <tr key={u.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/20 transition-colors">
                           <td className="px-6 py-4">
-                            <span className="font-extrabold text-zinc-900 dark:text-white flex items-center gap-1.5">
-                              <Sparkles size={12} className="text-amber-500 fill-amber-500/25 animate-pulse shrink-0" />
-                              {u.name || 'Anonymous Student'}
-                            </span>
+                            <div className="flex flex-col gap-1">
+                              <span className="font-extrabold text-zinc-900 dark:text-white flex items-center gap-1.5 leading-snug">
+                                <Sparkles size={12} className="text-amber-500 fill-amber-500/25 animate-pulse shrink-0" />
+                                {u.name || 'Anonymous Student'}
+                              </span>
+                              {(u.phone_number || u.phone) && (
+                                <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 font-mono tracking-wider bg-indigo-50 dark:bg-indigo-950/20 px-1.5 py-0.5 rounded-md w-fit inline-flex items-center gap-1 mt-0.5 border border-indigo-100/50 dark:border-indigo-900/10">
+                                  📱 {u.phone_number || u.phone}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-6 py-4 font-mono font-medium text-zinc-500 select-all break-all">{u.email}</td>
                           <td className="px-6 py-4 text-center font-mono text-zinc-500">{startLabel}</td>
@@ -1391,51 +1602,39 @@ The student will remain guest/basic tier. Are you sure you want to proceed?`,
                     </div>
                   </div>
 
-                  {/* FEATURE 2: Premium Stats inputs */}
+                  {/* FEATURE 2: Premium Stats live overview */}
                   <div className="bg-zinc-50 dark:bg-zinc-800/20 p-5 rounded-[24px] border border-zinc-200 dark:border-zinc-800 space-y-4">
-                    <h3 className="text-xs font-black uppercase text-amber-500 tracking-wider font-mono flex items-center gap-1.5 border-b pb-2.5 border-zinc-200 dark:border-zinc-800">
-                      ⚡ PREMIUM PLATFORM STATISTICS (FEATURE 2)
+                    <h3 className="text-xs font-black uppercase text-emerald-500 tracking-wider font-mono flex items-center gap-1.5 border-b pb-2.5 border-zinc-200 dark:border-zinc-800">
+                      ⚡ LIVE PREMIUM PLATFORM STATISTICS (AUTO-COMPUTED)
                     </h3>
                     <p className="text-[10px] text-zinc-400 font-semibold leading-relaxed">
-                      Configure statistical counters shown in the Bento-grid premium platform overview list.
+                      These counts are computed automatically and updated in real-time from your active database records.
                     </p>
                     
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-black uppercase text-zinc-500 font-mono">Mock Members Count</label>
-                        <input 
-                          type="number" 
-                          value={settingsForm.stats_members || 0} 
-                          onChange={(e) => setSettingsForm({ ...settingsForm, stats_members: Number(e.target.value) })}
-                          className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-zinc-800 border-2 border-zinc-200 dark:border-zinc-800 text-xs font-semibold text-zinc-900 dark:text-white font-mono"
-                        />
+                      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-center">
+                        <span className="text-2xl font-black text-amber-500 tracking-tight block font-mono">
+                          {liveStats.members}
+                        </span>
+                        <span className="text-zinc-[700] dark:text-zinc-200 font-bold text-[10px] uppercase block mt-1">Premium Members</span>
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-black uppercase text-zinc-500 font-mono">Premium Exams</label>
-                        <input 
-                          type="number" 
-                          value={settingsForm.stats_exams || 0} 
-                          onChange={(e) => setSettingsForm({ ...settingsForm, stats_exams: Number(e.target.value) })}
-                          className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-zinc-800 border-2 border-zinc-200 dark:border-zinc-800 text-xs font-semibold text-zinc-900 dark:text-white font-mono"
-                        />
+                      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-center">
+                        <span className="text-2xl font-black text-blue-500 tracking-tight block font-mono">
+                          {liveStats.exams}
+                        </span>
+                        <span className="text-zinc-[700] dark:text-zinc-200 font-bold text-[10px] uppercase block mt-1">Premium Exams</span>
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-black uppercase text-zinc-500 font-mono">Premium Notes</label>
-                        <input 
-                          type="number" 
-                          value={settingsForm.stats_notes || 0} 
-                          onChange={(e) => setSettingsForm({ ...settingsForm, stats_notes: Number(e.target.value) })}
-                          className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-zinc-800 border-2 border-zinc-200 dark:border-zinc-800 text-xs font-semibold text-zinc-900 dark:text-white font-mono"
-                        />
+                      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-center">
+                        <span className="text-2xl font-black text-emerald-500 tracking-tight block font-mono">
+                          {liveStats.notes}
+                        </span>
+                        <span className="text-zinc-[700] dark:text-zinc-200 font-bold text-[10px] uppercase block mt-1">Premium Notes</span>
                       </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-black uppercase text-zinc-500 font-mono">Premium Sheets</label>
-                        <input 
-                          type="number" 
-                          value={settingsForm.stats_sheets || 0} 
-                          onChange={(e) => setSettingsForm({ ...settingsForm, stats_sheets: Number(e.target.value) })}
-                          className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-zinc-800 border-2 border-zinc-200 dark:border-zinc-800 text-xs font-semibold text-zinc-900 dark:text-white font-mono"
-                        />
+                      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-center">
+                        <span className="text-2xl font-black text-pink-500 tracking-tight block font-mono">
+                          {liveStats.sheets}
+                        </span>
+                        <span className="text-zinc-[700] dark:text-zinc-200 font-bold text-[10px] uppercase block mt-1">Premium Sheets</span>
                       </div>
                     </div>
                   </div>

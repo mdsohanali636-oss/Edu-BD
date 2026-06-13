@@ -517,6 +517,10 @@ export interface SubscriptionSettings {
   payment_number_nagad: string;
   is_subscription_enabled: boolean;
   updated_at?: string;
+  global_premium_mode?: boolean;
+  global_premium_last_enabled_at?: string | null;
+  global_premium_last_disabled_at?: string | null;
+  global_premium_enabled_by?: string | null;
   // Custom stats section fields (Feature 2)
   stats_members?: number;
   stats_exams?: number;

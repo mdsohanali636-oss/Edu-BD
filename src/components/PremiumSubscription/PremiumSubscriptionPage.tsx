@@ -50,6 +50,67 @@ export const PremiumSubscriptionPage: React.FC<PremiumSubscriptionPageProps> = (
   const [couponSuccess, setCouponSuccess] = useState<string | null>(null);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
 
+  // Dynamic Real-time stats fetching (Feature 2)
+  const [statsCounts, setStatsCounts] = useState({
+    members: 0,
+    exams: 0,
+    notes: 0,
+    sheets: 0
+  });
+
+  const fetchStatsCounts = async () => {
+    try {
+      const [profilesRes, rolesRes, examsRes, notesRes, sheetsRes] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id, premium_expiry, has_premium_access'),
+        supabase
+          .from('user_roles')
+          .select('user_id, id, is_premium'),
+        supabase
+          .from('exams')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_premium', true),
+        supabase
+          .from('notes')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_premium', true),
+        supabase
+          .from('practice_sheets')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_premium', true)
+      ]);
+
+      let premiumCount = 0;
+      if (profilesRes.data) {
+        const roles = rolesRes.data || [];
+        profilesRes.data.forEach(p => {
+          const roleRec = roles.find(r => r.user_id === p.id || r.id === p.id);
+          const isExpired = p.premium_expiry && new Date(p.premium_expiry).getTime() < Date.now();
+          const hasPremium = isExpired ? false : (roleRec ? (roleRec.is_premium ?? p.has_premium_access) : p.has_premium_access);
+          if (hasPremium) {
+            premiumCount++;
+          }
+        });
+      }
+
+      setStatsCounts({
+        members: premiumCount,
+        exams: examsRes.count || 0,
+        notes: notesRes.count || 0,
+        sheets: sheetsRes.count || 0
+      });
+    } catch (err) {
+      console.error("[fetchStatsCounts] Error fetching dynamic counters:", err);
+      setStatsCounts({
+        members: 0,
+        exams: 0,
+        notes: 0,
+        sheets: 0
+      });
+    }
+  };
+
   // Reference & Copy fields
   const [copiedRef, setCopiedRef] = useState(false);
 
@@ -130,6 +191,9 @@ export const PremiumSubscriptionPage: React.FC<PremiumSubscriptionPageProps> = (
   const loadSubscriptionData = async () => {
     setIsLoading(true);
     try {
+      // Fetch dynamic stats counts in parallel (Feature 2)
+      fetchStatsCounts();
+
       const [fetchedSettings, fetchedPackages, fetchedBenefits, fetchedCoupons] = await Promise.all([
         supabaseService.getSubscriptionSettings(),
         supabaseService.getSubscriptionPackages(),
@@ -177,6 +241,43 @@ export const PremiumSubscriptionPage: React.FC<PremiumSubscriptionPageProps> = (
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchStatsCounts();
+
+    // Subscribe to all changes affecting dynamic Statistics counters (Feature 2)
+    const statsChannel = supabase
+      .channel('premium-stats-realtime-global')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        console.log("[Stats Realtime] profiles updated! Refetching stats counts...");
+        fetchStatsCounts();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_roles' }, () => {
+        console.log("[Stats Realtime] user_roles updated! Refetching stats counts...");
+        fetchStatsCounts();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'exams' }, () => {
+        console.log("[Stats Realtime] exams updated! Refetching stats counts...");
+        fetchStatsCounts();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notes' }, () => {
+        console.log("[Stats Realtime] notes updated! Refetching stats counts...");
+        fetchStatsCounts();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'practice_sheets' }, () => {
+        console.log("[Stats Realtime] practice_sheets updated! Refetching stats counts...");
+        fetchStatsCounts();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subscription_requests' }, () => {
+        console.log("[Stats Realtime] subscription_requests updated! Refetching stats counts...");
+        fetchStatsCounts();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(statsChannel);
+    };
+  }, []);
 
   useEffect(() => {
     loadSubscriptionData();
@@ -346,10 +447,10 @@ export const PremiumSubscriptionPage: React.FC<PremiumSubscriptionPageProps> = (
       {/* Premium Platform Statistics Bento-Grid (Feature 2) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-left">
         {[
-          { label: "Premium Members", value: settings?.stats_members || 1250, desc: "Active Learners", color: "text-amber-500" },
-          { label: "Premium Exams", value: settings?.stats_exams || 45, desc: "Comprehensive Tests", color: "text-blue-500" },
-          { label: "Premium Notes", value: settings?.stats_notes || 180, desc: "Subject Books", color: "text-emerald-500" },
-          { label: "Premium Sheets", value: settings?.stats_sheets || 65, desc: "Diagnostic Modules", color: "text-pink-500" }
+          { label: "Premium Members", value: statsCounts.members, desc: "Active Learners", color: "text-amber-500" },
+          { label: "Premium Exams", value: statsCounts.exams, desc: "Comprehensive Tests", color: "text-blue-500" },
+          { label: "Premium Notes", value: statsCounts.notes, desc: "Subject Books", color: "text-emerald-500" },
+          { label: "Premium Sheets", value: statsCounts.sheets, desc: "Diagnostic Modules", color: "text-pink-500" }
         ].map((item, idx) => (
           <motion.div
             key={idx}
@@ -359,7 +460,7 @@ export const PremiumSubscriptionPage: React.FC<PremiumSubscriptionPageProps> = (
             className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 shadow-sm text-center flex flex-col justify-center items-center relative overflow-hidden"
           >
             <span className={`text-2xl md:text-3xl font-black ${item.color} tracking-tight block`}>
-              {item.value.toLocaleString()}+
+              {item.value.toLocaleString()}
             </span>
             <span className="text-zinc-800 dark:text-zinc-100 font-extrabold text-[11px] mt-1 block">{item.label}</span>
             <span className="text-zinc-400 text-[9px] uppercase font-bold mt-0.5 tracking-wider block">{item.desc}</span>

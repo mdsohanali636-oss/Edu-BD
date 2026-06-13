@@ -9,6 +9,7 @@ import {
   serializeQuestionText 
 } from './components/Exam/MathQuestionContent';
 import { RevisionCenter } from './components/RevisionCenter';
+import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { 
   Search, 
   BookOpen, 
@@ -502,6 +503,7 @@ export default function App() {
   const [canManageQuestions, setCanManageQuestions] = useState(false);
   const [canManageResources, setCanManageResources] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
+  const [globalPremiumMode, setGlobalPremiumMode] = useState(false);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -511,8 +513,40 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    const syncGlobalPremium = async () => {
+      try {
+        const settings = await supabaseService.getSubscriptionSettings();
+        setGlobalPremiumMode(!!settings.global_premium_mode);
+      } catch (err) {
+        console.error("Failed loading subscription settings for global premium:", err);
+      }
+    };
+
+    syncGlobalPremium();
+
+    const channel = supabase
+      .channel('public:subscription_settings_app_sync')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'subscription_settings'
+      }, (payload: any) => {
+        console.log("[SETTINGS REALTIME APP SYNC PAYLOAD]:", payload);
+        if (payload.new) {
+          setGlobalPremiumMode(!!payload.new.global_premium_mode);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   const hasPremiumAccess = useMemo(() => {
     if (userRole === 'admin') return true;
+    if (globalPremiumMode) return true;
     const basePremium = isPremium || firestoreUser?.hasPremiumAccess === true;
     if (basePremium && firestoreUser?.premiumExpiry) {
       if (new Date(firestoreUser.premiumExpiry).getTime() < Date.now()) {
@@ -520,7 +554,7 @@ export default function App() {
       }
     }
     return basePremium;
-  }, [isPremium, firestoreUser?.hasPremiumAccess, firestoreUser?.premiumExpiry, userRole, tick]);
+  }, [isPremium, firestoreUser?.hasPremiumAccess, firestoreUser?.premiumExpiry, userRole, tick, globalPremiumMode]);
 
   const hasAdminAccess = useMemo(() => {
     return userRole === 'admin' || canUpload || canManageExams || canManageQuestions || canManageResources;
@@ -558,7 +592,7 @@ export default function App() {
   }, [usersWithRealtimeExpiry, adminUserSearchQuery, adminUserCategory]);
 
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [view, setView] = useState<'home' | 'category' | 'saved' | 'admin' | 'dashboard' | 'exam' | 'leaderboard' | 'privacy' | 'terms' | 'cookies' | 'premium-exam' | 'premium-subscription' | 'revision'>('home');
+  const [view, setView] = useState<'home' | 'category' | 'saved' | 'admin' | 'dashboard' | 'exam' | 'leaderboard' | 'privacy' | 'terms' | 'cookies' | 'premium-exam' | 'premium-subscription' | 'revision' | 'reset-password'>('home');
   const [savedQuestionIds, setSavedQuestionIds] = useState<Set<string>>(new Set());
 
   const handleToggleSaveQuestion = async (questionId: string) => {
@@ -1968,6 +2002,32 @@ export default function App() {
   }, [isDarkMode]);
 
   useEffect(() => {
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const searchParams = new URLSearchParams(window.location.search);
+    const hasRecovery = hashParams.get('type') === 'recovery' || 
+                        searchParams.get('type') === 'recovery' || 
+                        window.location.hash.includes('type=recovery') || 
+                        window.location.search.includes('type=recovery') ||
+                        window.location.hash.includes('type%3Drecovery') ||
+                        window.location.search.includes('type%3Drecovery');
+
+    console.log("[App.tsx / MOUNT] Initial Route Analysis:", {
+      pathname: window.location.pathname,
+      hasRecovery,
+      hashLength: window.location.hash.length,
+      searchLength: window.location.search.length
+    });
+
+    if (window.location.pathname === '/reset-password' || window.location.pathname.startsWith('/reset-password/') || hasRecovery) {
+      console.log("[App.tsx / ROUTING] Redirecting to dedicated password reset page.");
+      setView('reset-password');
+      if (window.location.pathname !== '/reset-password') {
+        const hash = window.location.hash;
+        const search = window.location.search;
+        window.history.replaceState({}, document.title, `/reset-password${search}${hash}`);
+      }
+    }
+
     supabase.auth.getSession().then((res) => {
       const session = res?.data?.session;
       if (session?.user) {
@@ -1993,6 +2053,14 @@ export default function App() {
     });
 
     const { data: { subscription: authListener } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("[Auth Listener] Event fired:", event);
+      if (event === 'PASSWORD_RECOVERY') {
+        setView('reset-password');
+        if (window.location.pathname !== '/reset-password') {
+          window.history.replaceState({}, document.title, `/reset-password${window.location.search}${window.location.hash}`);
+        }
+      }
+
       if (session?.user) {
         const mappedUser = {
           id: session.user.id,
@@ -2035,18 +2103,16 @@ export default function App() {
         const { data, error: rError } = await supabase
           .from('user_roles')
           .select('*')
-          .eq('user_id', user.id)
-          .maybeSingle();
-        if (!rError && data) {
-          userRoleData = data;
+          .eq('user_id', user.id);
+        if (!rError && data && data.length > 0) {
+          userRoleData = data[0];
         } else {
           const { data: dataById } = await supabase
             .from('user_roles')
             .select('*')
-            .eq('id', user.id)
-            .maybeSingle();
-          if (dataById) {
-            userRoleData = dataById;
+            .eq('id', user.id);
+          if (dataById && dataById.length > 0) {
+            userRoleData = dataById[0];
           }
         }
       } catch (err) {
@@ -2141,7 +2207,6 @@ export default function App() {
         if (!rolesError && premiumRoles) {
           premiumRoles.forEach(r => {
             if (r.user_id) premiumUserIds.add(r.user_id);
-            if (r.id) premiumUserIds.add(r.id);
           });
         }
       } catch (rolesErr) {
@@ -3522,7 +3587,9 @@ export default function App() {
     }
     setIsAuthLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail);
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+        redirectTo: `${window.location.origin}/reset-password`
+      });
       if (error) throw error;
     } catch (error: any) {
       setAuthError(error.message);
@@ -5198,7 +5265,12 @@ export default function App() {
                       {u.role === 'admin' && <Badge className="bg-blue-500 text-white border-none text-[8px] uppercase font-black px-2">Admin</Badge>}
                     </div>
                     <p className="text-sm text-zinc-500 truncate">{u.email}</p>
-                    <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">ID: {u.id}</p>
+                    {(u.phone_number || u.phone) && (
+                      <p className="text-xs font-black text-indigo-600 dark:text-indigo-400 mt-0.5 flex items-center gap-1">
+                        <span>📱</span> {u.phone_number || u.phone}
+                      </p>
+                    )}
+                    <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mt-0.5">ID: {u.id}</p>
                     
                     <div className="flex flex-wrap items-center gap-1.5 mt-2">
                       {u.academicClass && (
@@ -8649,12 +8721,12 @@ export default function App() {
     if (userRole !== 'admin') return;
     try {
       await supabase.from('profiles').update({ can_upload: !currentStatus }).eq('id', userId);
-      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
-      if (!error && data) {
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId);
+      if (!error && data && data.length > 0) {
         await supabase.from('user_roles').update({ can_upload: !currentStatus }).eq('user_id', userId);
       } else {
-        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
-        if (!errorById && dataById) {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId);
+        if (!errorById && dataById && dataById.length > 0) {
           await supabase.from('user_roles').update({ can_upload: !currentStatus }).eq('id', userId);
         } else {
           await supabase.from('user_roles').insert([{ user_id: userId, can_upload: !currentStatus }]);
@@ -8674,12 +8746,12 @@ export default function App() {
         premium_expiry: !currentStatus ? new Date(Date.now() + (365 * 24 * 60 * 60 * 1000)).toISOString() : null
       }).eq('id', userId);
 
-      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
-      if (!error && data) {
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId);
+      if (!error && data && data.length > 0) {
         await supabase.from('user_roles').update({ is_premium: !currentStatus }).eq('user_id', userId);
       } else {
-        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
-        if (!errorById && dataById) {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId);
+        if (!errorById && dataById && dataById.length > 0) {
           await supabase.from('user_roles').update({ is_premium: !currentStatus }).eq('id', userId);
         } else {
           await supabase.from('user_roles').insert([{ user_id: userId, is_premium: !currentStatus }]);
@@ -8702,12 +8774,12 @@ export default function App() {
         premium_expiry: expiryIso
       }).eq('id', userId);
 
-      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
-      if (!error && data) {
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId);
+      if (!error && data && data.length > 0) {
         await supabase.from('user_roles').update({ is_premium: isPremiumValue }).eq('user_id', userId);
       } else {
-        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
-        if (!errorById && dataById) {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId);
+        if (!errorById && dataById && dataById.length > 0) {
           await supabase.from('user_roles').update({ is_premium: isPremiumValue }).eq('id', userId);
         } else {
           await supabase.from('user_roles').insert([{ user_id: userId, is_premium: isPremiumValue }]);
@@ -8722,12 +8794,12 @@ export default function App() {
   const handleToggleManageExams = async (userId: string, currentStatus: boolean) => {
     if (userRole !== 'admin') return;
     try {
-      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
-      if (!error && data) {
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId);
+      if (!error && data && data.length > 0) {
         await supabase.from('user_roles').update({ can_manage_exams: !currentStatus }).eq('user_id', userId);
       } else {
-        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
-        if (!errorById && dataById) {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId);
+        if (!errorById && dataById && dataById.length > 0) {
           await supabase.from('user_roles').update({ can_manage_exams: !currentStatus }).eq('id', userId);
         } else {
           await supabase.from('user_roles').insert([{ user_id: userId, can_manage_exams: !currentStatus }]);
@@ -8742,12 +8814,12 @@ export default function App() {
   const handleToggleManageQuestions = async (userId: string, currentStatus: boolean) => {
     if (userRole !== 'admin') return;
     try {
-      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
-      if (!error && data) {
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId);
+      if (!error && data && data.length > 0) {
         await supabase.from('user_roles').update({ can_manage_questions: !currentStatus }).eq('user_id', userId);
       } else {
-        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
-        if (!errorById && dataById) {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId);
+        if (!errorById && dataById && dataById.length > 0) {
           await supabase.from('user_roles').update({ can_manage_questions: !currentStatus }).eq('id', userId);
         } else {
           await supabase.from('user_roles').insert([{ user_id: userId, can_manage_questions: !currentStatus }]);
@@ -8762,12 +8834,12 @@ export default function App() {
   const handleToggleManageResources = async (userId: string, currentStatus: boolean) => {
     if (userRole !== 'admin') return;
     try {
-      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId).maybeSingle();
-      if (!error && data) {
+      const { data, error } = await supabase.from('user_roles').select('*').eq('user_id', userId);
+      if (!error && data && data.length > 0) {
         await supabase.from('user_roles').update({ can_manage_resources: !currentStatus }).eq('user_id', userId);
       } else {
-        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId).maybeSingle();
-        if (!errorById && dataById) {
+        const { data: dataById, error: errorById } = await supabase.from('user_roles').select('*').eq('id', userId);
+        if (!errorById && dataById && dataById.length > 0) {
           await supabase.from('user_roles').update({ can_manage_resources: !currentStatus }).eq('id', userId);
         } else {
           await supabase.from('user_roles').insert([{ user_id: userId, can_manage_resources: !currentStatus }]);
@@ -9255,6 +9327,17 @@ export default function App() {
           </div>
         </div>
       </div>
+    );
+  }
+
+  if (view === 'reset-password') {
+    return (
+      <ResetPasswordPage 
+        onSuccess={() => {
+          setView('home');
+          window.history.replaceState({}, document.title, "/");
+        }} 
+      />
     );
   }
 

@@ -242,6 +242,22 @@ BEGIN
       ALTER TABLE public.resources ALTER COLUMN "type" DROP NOT NULL;
     END IF;
   END IF;
+
+  -- Sync subscription_settings
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'subscription_settings' AND table_schema = 'public') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscription_settings' AND column_name = 'global_premium_mode') THEN
+      ALTER TABLE public.subscription_settings ADD COLUMN global_premium_mode BOOLEAN DEFAULT FALSE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscription_settings' AND column_name = 'global_premium_last_enabled_at') THEN
+      ALTER TABLE public.subscription_settings ADD COLUMN global_premium_last_enabled_at TIMESTAMPTZ;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscription_settings' AND column_name = 'global_premium_last_disabled_at') THEN
+      ALTER TABLE public.subscription_settings ADD COLUMN global_premium_last_disabled_at TIMESTAMPTZ;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscription_settings' AND column_name = 'global_premium_enabled_by') THEN
+      ALTER TABLE public.subscription_settings ADD COLUMN global_premium_enabled_by TEXT;
+    END IF;
+  END IF;
 END $$;
 
 -- SUBSCRIPTION SYSTEM TABLES
@@ -256,6 +272,10 @@ CREATE TABLE IF NOT EXISTS public.subscription_settings (
   payment_number_bkash TEXT DEFAULT '01700000000',
   payment_number_nagad TEXT DEFAULT '01900000000',
   is_subscription_enabled BOOLEAN DEFAULT TRUE,
+  global_premium_mode BOOLEAN DEFAULT FALSE,
+  global_premium_last_enabled_at TIMESTAMPTZ,
+  global_premium_last_disabled_at TIMESTAMPTZ,
+  global_premium_enabled_by TEXT,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 

@@ -1484,23 +1484,48 @@ export const supabaseService = {
   },
 
   // SUBSCRIPTION SYSTEM METHODS
-  async getSubscriptionSettings(): Promise<SubscriptionSettings> {
+  async checkColumnExists(tableName: string, columnName: string): Promise<boolean> {
     try {
-      const { data, error } = await supabase
-        .from('subscription_settings')
-        .select('*')
-        .eq('id', 'default')
-        .maybeSingle();
+      console.log(`[Schema Cache Check] Verifying if column "${columnName}" exists on table "${tableName}"...`);
+      const { error } = await supabase
+        .from(tableName)
+        .select(columnName)
+        .limit(1);
       
       if (error) {
-        if (error.code === 'PGRST205' || String(error.message).toLowerCase().includes("schema cache") || String(error.message).toLowerCase().includes("does not exist")) {
-          this.subscriptionTablesMissing.settings = true;
-          throw error;
+        console.warn(`[Schema Cache Check] Column "${columnName}" selection returned error:`, error);
+        const msg = String(error.message || "").toLowerCase();
+        if (msg.includes("could not find") || msg.includes("column") || msg.includes("does not exist") || error.code === '42703') {
+          console.log(`[Schema Cache Check] Column "${columnName}" is CONFIRMED MISSING or UNRECOGNIZED in current schema cache.`);
+          return false;
         }
-        throw error;
+      }
+      console.log(`[Schema Cache Check] Column "${columnName}" is CONFIRMED ACTIVE and ready to be used.`);
+      return true;
+    } catch (err: any) {
+      console.warn(`[Schema Cache Check] Exceptional error checking column:`, err);
+      return false;
+    }
+  },
+
+  async getSubscriptionSettings(): Promise<SubscriptionSettings> {
+    try {
+      // Fetch any existing row first to avoid assuming the ID is always 'default'
+      const { data: listData, error: listError } = await supabase
+        .from('subscription_settings')
+        .select('*')
+        .limit(1);
+      
+      if (listError) {
+        if (listError.code === 'PGRST205' || String(listError.message).toLowerCase().includes("schema cache") || String(listError.message).toLowerCase().includes("does not exist")) {
+          this.subscriptionTablesMissing.settings = true;
+          throw listError;
+        }
+        throw listError;
       }
       
       this.subscriptionTablesMissing.settings = false;
+      const data = listData && listData.length > 0 ? listData[0] : null;
       
       if (data) {
         return {
@@ -1514,11 +1539,39 @@ export const supabaseService = {
           payment_number_bkash: data.payment_number_bkash || '01712345678',
           payment_number_nagad: data.payment_number_nagad || '01912345678',
           is_subscription_enabled: data.is_subscription_enabled !== false,
-          stats_members: Number(data.stats_members || 1250),
-          stats_exams: Number(data.stats_exams || 45),
-          stats_notes: Number(data.stats_notes || 180),
-          stats_sheets: Number(data.stats_sheets || 65)
+          global_premium_mode: !!data.global_premium_mode,
+          stats_members: Number(data.stats_members || 0),
+          stats_exams: Number(data.stats_exams || 0),
+          stats_notes: Number(data.stats_notes || 0),
+          stats_sheets: Number(data.stats_sheets || 0)
         };
+      } else {
+        // Table exists but is completely empty. Let's insert the default settings row.
+        const defaultSettings: any = {
+          id: 'default',
+          current_price: 500,
+          old_price: 1000,
+          discount_percent: 50,
+          poster_image_url: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=1200&auto=format&fit=crop',
+          poster_title: 'Parodorshhi Premium',
+          poster_description: 'Get full access to all premium exams, in-depth subject-specific interactive analytics, exclusive books and notes, and automatic future premium modules.',
+          payment_number_bkash: '01712345678',
+          payment_number_nagad: '01912345678',
+          is_subscription_enabled: true,
+          global_premium_mode: false,
+          stats_members: 0,
+          stats_exams: 0,
+          stats_notes: 0,
+          stats_sheets: 0,
+          updated_at: new Date().toISOString()
+        };
+        
+        console.log("[getSubscriptionSettings] Settings table was empty. Inserting default settings row...");
+        const { error: insertError } = await supabase.from('subscription_settings').insert([defaultSettings]);
+        if (insertError) {
+          console.warn("[getSubscriptionSettings] Insert of default settings failed (likely RLS for non-admin):", insertError);
+        }
+        return defaultSettings;
       }
     } catch (err: any) {
       if (err?.code === 'PGRST205' || String(err?.message || "").toLowerCase().includes("schema cache") || String(err?.message || "").toLowerCase().includes("does not exist")) {
@@ -1545,10 +1598,11 @@ export const supabaseService = {
       payment_number_bkash: '01712345678',
       payment_number_nagad: '01912345678',
       is_subscription_enabled: true,
-      stats_members: 1250,
-      stats_exams: 45,
-      stats_notes: 180,
-      stats_sheets: 65
+      global_premium_mode: false,
+      stats_members: 0,
+      stats_exams: 0,
+      stats_notes: 0,
+      stats_sheets: 0
     };
     localStorage.setItem('fallback_subscription_settings', JSON.stringify(defaults));
     return defaults;
@@ -1564,12 +1618,104 @@ export const supabaseService = {
     }
 
     try {
-      return await this.safeWrite('subscription_settings', { ...payload, updated_at: new Date().toISOString() }, 'update', 'default');
-    } catch (err: any) {
-      if (err?.code === 'PGRST205' || String(err?.message).includes("schema cache") || String(err?.message || "").includes("does not exist")) {
-        this.subscriptionTablesMissing.settings = true;
-        return this.updateSubscriptionSettings(payload);
+      console.log("[Global Premium Debug] Fetching existing site_settings (subscription_settings) row first...");
+      // Fetch the existing site_settings row first
+      const { data: listData, error: fetchError } = await supabase
+        .from('subscription_settings')
+        .select('*');
+
+      if (fetchError) {
+        console.error("[Global Premium Debug] Get existing settings row query failed with Supabase error:", fetchError);
+        if (fetchError.code === 'PGRST205' || String(fetchError.message).toLowerCase().includes("schema cache") || String(fetchError.message || "").toLowerCase().includes("does not exist")) {
+          this.subscriptionTablesMissing.settings = true;
+          return this.updateSubscriptionSettings(payload);
+        }
+        throw fetchError;
       }
+
+      const existingRow = listData && listData.length > 0 ? listData[0] : null;
+      const rowId = existingRow ? existingRow.id : 'default';
+      const oldValue = existingRow ? existingRow.global_premium_mode : false;
+      const newValue = payload.global_premium_mode !== undefined ? payload.global_premium_mode : oldValue;
+
+      // Extract only clean database columns of subscription_settings. Avoid writing any transient or legacy metadata columns.
+      const safePayload: any = {};
+      
+      const allowedKeys = [
+        'current_price', 'old_price', 'discount_percent', 'poster_image_url',
+        'poster_title', 'poster_description', 'payment_number_bkash', 'payment_number_nagad',
+        'is_subscription_enabled', 'global_premium_mode',
+        'stats_members', 'stats_exams', 'stats_notes', 'stats_sheets'
+      ];
+
+      for (const key of allowedKeys) {
+        if (key in payload) {
+          (safePayload as any)[key] = (payload as any)[key];
+        }
+      }
+
+      // Log: row id, old value, new value (Before update)
+      console.log("[Global Premium Debug] Details BEFORE UPDATE:", {
+        rowId: rowId,
+        oldValue: oldValue,
+        newValue: newValue,
+        payloadToSend: safePayload
+      });
+
+      console.log("[Global Premium Debug] Executing Supabase update query for ID:", rowId);
+      // Update the existing row using its ID. Do not create new rows.
+      const { data: updateResult, error: updateError } = await supabase
+        .from('subscription_settings')
+        .update({
+          ...safePayload,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', rowId)
+        .select()
+        .maybeSingle();
+
+      if (updateError) {
+        // Log: update failed with Supabase errors
+        console.error("[Global Premium Debug] Supabase update query failed! Error detail:", updateError);
+        throw updateError;
+      }
+
+      // Log: update result
+      console.log("[Global Premium Debug] Update result data from Supabase:", updateResult);
+
+      console.log("[Global Premium Debug] Refetching row for post-update verification...");
+      // After updating, refetch the row and verify the returned value
+      const { data: refetchedRow, error: verifyError } = await supabase
+        .from('subscription_settings')
+        .select('*')
+        .eq('id', rowId)
+        .maybeSingle();
+
+      if (verifyError) {
+        console.error("[Global Premium Debug] Refetch verification query failed with Supabase error:", verifyError);
+        throw verifyError;
+      }
+
+      const verifiedValue = refetchedRow ? refetchedRow.global_premium_mode : null;
+      const isVerifiedOk = verifiedValue === newValue;
+
+      // Log: verification result
+      console.log("[Global Premium Debug] VERIFICATION RESULT:", {
+        rowId: rowId,
+        expectedValue: newValue,
+        actualValue: verifiedValue,
+        isSuccess: isVerifiedOk,
+        verifiedRow: refetchedRow
+      });
+
+      if (!isVerifiedOk && payload.global_premium_mode !== undefined) {
+        throw new Error(`Database verification failed: Expected global_premium_mode to be ${newValue}, but refetch returned ${verifiedValue}`);
+      }
+
+      console.log("[Global Premium Debug] UPDATE COMPLETED & FULLY VERIFIED SUCCESS!");
+      return refetchedRow || updateResult;
+    } catch (err: any) {
+      console.error("[Global Premium Debug] Error caught in updateSubscriptionSettings handler:", err);
       throw err;
     }
   },

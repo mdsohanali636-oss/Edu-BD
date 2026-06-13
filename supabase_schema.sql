@@ -396,6 +396,10 @@ CREATE TABLE IF NOT EXISTS public.subscription_settings (
   payment_number_bkash TEXT DEFAULT '01700000000',
   payment_number_nagad TEXT DEFAULT '01900000000',
   is_subscription_enabled BOOLEAN DEFAULT TRUE,
+  global_premium_mode BOOLEAN DEFAULT FALSE,
+  global_premium_last_enabled_at TIMESTAMPTZ,
+  global_premium_last_disabled_at TIMESTAMPTZ,
+  global_premium_enabled_by TEXT,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
