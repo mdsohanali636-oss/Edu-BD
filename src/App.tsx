@@ -3624,7 +3624,7 @@ export default function App() {
     setIsAuthLoading(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
-        redirectTo: `${window.location.origin}/reset-password`
+        redirectTo: "https://parodorshi.vercel.app/reset-password"
       });
       if (error) throw error;
     } catch (error: any) {

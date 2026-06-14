@@ -16,7 +16,7 @@ interface LandingPageProps {
   onGoogleLogin: () => void;
   onEmailLogin: (email: string, pass: string) => void;
   onEmailSignUp: (name: string, email: string, pass: string, academicClass: string, academicGroup: string) => void;
-  onForgotPassword: (email: string) => void;
+  onForgotPassword: (email: string) => Promise<void>;
   onPhoneSignIn: (phone: string) => void;
   onVerifyOtp: (otp: string) => void;
   error: string | null;
@@ -694,21 +694,25 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     };
   }, []);
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (formMode === 'login') {
       onEmailLogin(email.trim(), password);
     } else if (formMode === 'signup') {
       onEmailSignUp(name.trim(), email.trim(), password, academicClass, academicGroup);
     } else if (formMode === 'forgot') {
-      onForgotPassword(email.trim());
-      setFormMode('login');
-      // trigger vanilla visual notification
-      const toast = document.getElementById('toast');
-      if (toast) {
-        toast.textContent = '📬 Password recovery code has been sent!';
-        toast.classList.add('show');
-        setTimeout(() => toast.classList.remove('show'), 3500);
+      try {
+        await onForgotPassword(email.trim());
+        setFormMode('login');
+        // trigger vanilla visual notification
+        const toast = document.getElementById('toast');
+        if (toast) {
+          toast.textContent = 'Password reset email has been sent. Please check your inbox.';
+          toast.classList.add('show');
+          setTimeout(() => toast.classList.remove('show'), 5000);
+        }
+      } catch (err: any) {
+        console.error("[LandingPage / FORGOT] Failed to send forgot password email:", err);
       }
     }
   };
