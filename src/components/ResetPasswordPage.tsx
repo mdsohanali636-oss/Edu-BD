@@ -13,71 +13,147 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isValidating, setIsValidating] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isExpired, setIsExpired] = useState(false);
   const [success, setSuccess] = useState(false);
   const [isTokenValid, setIsTokenValid] = useState<boolean | null>(null);
   const [countdown, setCountdown] = useState(5);
 
   useEffect(() => {
-    // 1. Detect tokens / errors from URL
+    // 1. Detect tokens / errors from URL search & hash parameters
     const hash = window.location.hash;
     const search = window.location.search;
-    const params = new URLSearchParams(search || hash.replace('#', '?'));
     
-    const err = params.get('error');
-    const errDesc = params.get('error_description');
-    const accessToken = params.get('access_token');
-    const isRecovery = params.get('type') === 'recovery' || hash.includes('type=recovery') || hash.includes('type%3Drecovery');
+    const searchParams = new URLSearchParams(search);
+    const hashParams = new URLSearchParams(hash.replace('#', '?').replace(/^([^?])/, '?$1'));
+    
+    const accessToken = searchParams.get('access_token') || hashParams.get('access_token');
+    const refreshToken = searchParams.get('refresh_token') || hashParams.get('refresh_token');
+    const type = searchParams.get('type') || hashParams.get('type');
+    
+    const err = searchParams.get('error') || hashParams.get('error');
+    const errCode = searchParams.get('error_code') || hashParams.get('error_code');
+    const errDesc = searchParams.get('error_description') || hashParams.get('error_description');
 
-    console.log("[PasswordReset / MOUNT] URL query and hash analysis:", {
-      hash,
-      search,
-      err,
-      errDesc,
+    console.log("[PasswordReset / ROUTING] URL token detection context:", {
+      hashExist: !!hash,
+      searchExist: !!search,
+      isRecoveryEvent: type === 'recovery' || hash.includes('type=recovery') || hash.includes('type%3Drecovery'),
       hasAccessToken: !!accessToken,
-      isRecovery
+      hasRefreshToken: !!refreshToken,
+      err,
+      errCode,
+      errDesc
     });
 
     if (err || errDesc) {
-      console.error("[PasswordReset / ERROR] Recovery error detected in URL:", err, errDesc);
+      console.error("[PasswordReset / SESSION_FAILURE] URL query errors found:", err, errDesc);
+      const decodedDesc = decodeURIComponent((errDesc || err || '').replace(/\+/g, ' '));
+      const looksLikeExpired = decodedDesc.toLowerCase().includes('expired') || 
+                               decodedDesc.toLowerCase().includes('invalid') || 
+                               decodedDesc.toLowerCase().includes('bad') ||
+                               errCode === 'otp_expired';
+
       setIsTokenValid(false);
-      setErrorMsg(decodeURIComponent((errDesc || err || '').replace(/\+/g, ' ')));
-    } else if (accessToken || isRecovery) {
-      console.log("[PasswordReset / SUCCESS] Direct recovery token/type detected in URL. Token is valid.");
-      setIsTokenValid(true);
-    } else {
-      // We'll check if supabase currently has an active session
-      supabase.auth.getSession().then(({ data }) => {
-        console.log("[PasswordReset / SESSION] Checked initial Supabase auth session status:", !!data?.session);
-        if (data?.session) {
-          setIsTokenValid(true);
+      setIsValidating(false);
+      if (looksLikeExpired) {
+        setIsExpired(true);
+        setErrorMsg("Password reset link has expired. Please request a new reset email.");
+        console.warn("[PasswordReset / TOKEN_EXPIRATION] Determined token was expired via URL parameters.");
+      } else {
+        setErrorMsg(decodedDesc);
+      }
+      return;
+    }
+
+    if (accessToken) {
+      console.log("[PasswordReset / TOKEN_DETECTION] Creating authentication session from URL token parameters...");
+      
+      supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken || ""
+      }).then(({ data, error }) => {
+        if (error) {
+          console.error("[PasswordReset / SESSION_FAILURE] Supabase setSession rejected token configuration:", error);
+          const errorMsgStr = error.message || "";
+          const looksLikeExpired = errorMsgStr.toLowerCase().includes('expired') || 
+                                   errorMsgStr.toLowerCase().includes('invalid') || 
+                                   errorMsgStr.toLowerCase().includes('bad') || 
+                                   errorMsgStr.toLowerCase().includes('not found') ||
+                                   errorMsgStr.toLowerCase().includes('signature');
+          
+          setIsTokenValid(false);
+          setIsValidating(false);
+          if (looksLikeExpired) {
+            setIsExpired(true);
+            setErrorMsg("Password reset link has expired. Please request a new reset email.");
+            console.warn("[PasswordReset / TOKEN_EXPIRATION] SetSession verification flaggedexpired credentials.");
+          } else {
+            setErrorMsg(error.message);
+          }
         } else {
-          // Wait briefly in case Supabase is still parsing the hash in the background
+          console.log("[PasswordReset / SESSION_CREATION] Session registered successfully dynamically via token. Active target user:", data?.user?.email);
+          setIsTokenValid(true);
+          setIsValidating(false);
+          setErrorMsg(null);
+          
+          // Scrub token details from visual browser address bar to satisfy production hygiene and refresh resilience
+          if (window.location.hash || window.location.search) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+        }
+      }).catch(err => {
+        console.error("[PasswordReset / SESSION_FAILURE] Crash setting session parameters on mount:", err);
+        setIsTokenValid(false);
+        setIsValidating(false);
+        setErrorMsg("Password reset link has expired. Please request a new reset email.");
+      });
+    } else {
+      console.log("[PasswordReset / SESSION] No direct token present in URL. Verifying memory authorization sessions...");
+      supabase.auth.getSession().then(({ data, error }) => {
+        if (error) {
+          console.error("[PasswordReset / SESSION_FAILURE] Failed checking existing query session:", error);
+          setIsTokenValid(false);
+          setIsValidating(false);
+          setErrorMsg("পাসওয়ার্ড রিসেট সেশন খুঁজে পাওয়া যায়নি। দয়া করে আবার পাসওয়ার্ড রিসেট লিংক জেনারেট করুন।");
+        } else if (data?.session) {
+          console.log("[PasswordReset / SESSION_CREATION] Active session validated from client storage cache. Target user:", data.session.user?.email);
+          setIsTokenValid(true);
+          setIsValidating(false);
+        } else {
+          // Defer checking brief timeout period for background SDK parse latency
+          console.log("[PasswordReset / SESSION] Initiating deferred secondary session query fallback...");
           setTimeout(() => {
-            supabase.auth.getSession().then(({ data: secondaryData }) => {
-              console.log("[PasswordReset / DEFERRED_SESSION] Checked deferred Supabase auth session:", !!secondaryData?.session);
-              if (secondaryData?.session) {
+            supabase.auth.getSession().then(({ data: secondaryData, error: secondaryError }) => {
+              if (secondaryError) {
+                console.error("[PasswordReset / SESSION_FAILURE] Deferred session fallback check had error:", secondaryError);
+                setIsTokenValid(false);
+                setIsValidating(false);
+              } else if (secondaryData?.session) {
+                console.log("[PasswordReset / SESSION_CREATION] Verified deferred authorization session. Target user:", secondaryData.session.user?.email);
                 setIsTokenValid(true);
+                setIsValidating(false);
               } else {
-                // We will set this to false, but onAuthStateChange can still correct it to true if a recovery event fires later
-                setIsTokenValid((current) => {
-                  if (current === true) return true;
-                  setErrorMsg("রিসেট লিংকটি অকার্যকর অথবা মেয়াদোত্তীর্ণ। দয়া করে আবার নতুন পাসওয়ার্ড রিসেট লিংক জেনারেট করুন।");
-                  return false;
-                });
+                console.warn("[PasswordReset / SESSION_FAILURE] No authentication session could be verified.");
+                setIsTokenValid(false);
+                setIsValidating(false);
+                setIsExpired(true);
+                setErrorMsg("Password reset link has expired. Please request a new reset email.");
               }
             });
-          }, 800);
+          }, 1000);
         }
       });
     }
 
-    // Subscribe to password recovery and session events inside ResetPasswordPage to avoid race conditions
+    // Subscribe to password recovery state changes in local auth stream
     const { data: { subscription: internalAuthListener } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("[PasswordReset / AUTH_EVENT] Internal Reset Page Auth Event:", event, session ? "Session is active" : "No session");
-      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
-        console.log("[PasswordReset / SUCCESS] Valid recovery event or sign-in detected through Auth State Change.");
+      console.log("[PasswordReset / AUTH_EVENT] Internal reset hook event changed:", event, session ? "Session parsed" : "No session");
+      if (event === 'PASSWORD_RECOVERY') {
+        console.log("[PasswordReset / SUCCESS] Password recovery state event matches, setting token validity true.");
         setIsTokenValid(true);
+        setIsValidating(false);
         setErrorMsg(null);
       }
     });
@@ -87,7 +163,7 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
     };
   }, []);
 
-  // Handle countdown redirection
+  // Countdown clock handling redirecting user back upon successful update completion
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (success && countdown > 0) {
@@ -104,7 +180,6 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
     e.preventDefault();
     setErrorMsg(null);
 
-    // Form validation
     if (password.length < 6) {
       setErrorMsg("পাসওয়ার্ড অবশ্যই কমপক্ষে ৬ অক্ষরের হতে হবে।");
       return;
@@ -118,7 +193,7 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
     setIsLoading(true);
 
     try {
-      console.log("[PasswordReset] Attempting password update with Supabase Auth...");
+      console.log("[PasswordReset] Injecting new password parameters via Supabase updateUser API...");
       const { data, error } = await supabase.auth.updateUser({
         password: password
       });
@@ -127,22 +202,95 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
         throw error;
       }
 
-      console.log("[PasswordReset] Password updated successfully for user:", data?.user?.email);
+      console.log("[PasswordReset / SUCCESS] Password updated completed successfully for user:", data?.user?.email);
       setSuccess(true);
       
-      // Auto-signout to force user to login with new credentials
+      // Auto sign-out to fully purge old metadata credentials securely
       await supabase.auth.signOut();
     } catch (err: any) {
-      console.error("[PasswordReset] Error updating password:", err);
+      console.error("[PasswordReset / SESSION_FAILURE] User password update failed:", err);
       setErrorMsg(err.message || "পাসওয়ার্ড আপডেট করতে সমস্যা হয়েছে। দয়া করে আবার চেষ্টা করুন।");
     } finally {
       setIsLoading(false);
     }
   };
 
+  // 1. Loading Verification State View
+  if (isValidating) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-[#f8fafc] dark:bg-[#070d19] transition-colors duration-500">
+        <div className="absolute inset-0 bg-grid-zinc-200/40 dark:bg-grid-zinc-800/10 [mask-image:radial-gradient(ellipse_at_center,white,transparent_80%)] pointer-events-none" />
+        <div className="relative z-10 flex flex-col items-center text-center max-w-sm">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 mb-6 shadow-sm border border-blue-100 dark:border-blue-900/30 animate-pulse">
+            <KeyRound size={32} className="animate-spin-slow" />
+          </div>
+          <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-400">
+            লিংকটি যাচাই করা হচ্ছে...
+          </p>
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">
+            Validating your password reset link. Please hold on.
+          </p>
+          <div className="mt-6 flex gap-1.5 justify-center">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-bounce" style={{ animationDelay: '0ms' }} />
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-bounce" style={{ animationDelay: '150ms' }} />
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-bounce" style={{ animationDelay: '300ms' }} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Expired View State View
+  if (isTokenValid === false || isExpired) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-[#f8fafc] dark:bg-[#070d19] transition-colors duration-500">
+        <div className="absolute inset-0 bg-grid-zinc-200/40 dark:bg-grid-zinc-800/10 [mask-image:radial-gradient(ellipse_at_center,white,transparent_80%)] pointer-events-none" />
+        
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="relative w-full max-w-md bg-white dark:bg-[#0f172a] shadow-xl border border-zinc-200/80 dark:border-zinc-800/80 rounded-3xl p-8 text-center transition-colors overflow-hidden"
+        >
+          <div className="absolute -top-24 -left-24 w-48 h-48 bg-rose-500/10 dark:bg-rose-600/5 rounded-full blur-3xl pointer-events-none" />
+          <div className="relative z-10 space-y-6 py-4">
+            <div className="flex justify-center">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400">
+                <AlertTriangle size={32} />
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-xl font-black text-zinc-900 dark:text-white tracking-tight">
+                রিসেট লিংকটির মেয়াদ শেষ হয়েছে
+              </h3>
+              
+              <div className="text-xs text-rose-600 dark:text-rose-400 font-bold leading-relaxed bg-rose-50/50 dark:bg-rose-950/10 border border-rose-100 dark:border-rose-900/30 p-4 rounded-2xl text-center space-y-1">
+                <p>
+                  Password reset link has expired. Please request a new reset email.
+                </p>
+                <p className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 mt-2 border-t border-rose-100 dark:border-rose-900/20 pt-2">
+                  পাসওয়ার্ড রিসেটের লিংকটি ভুল অথবা এর মেয়াদ শেষ হয়ে গেছে। দয়া করে লগইন পেজ থেকে পুনরায় নতুন পাসওয়ার্ড রিসেট লিংক পাঠানোর জন্য অনুরোধ করুন।
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={onSuccess}
+              className="w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-white font-extrabold text-sm rounded-2xl transition-all cursor-pointer active:scale-98"
+            >
+              লগইন পেজে ফিরে যান (Return to Login)
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // 3. Form Input View
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-[#f8fafc] dark:bg-[#070d19] transition-colors duration-500">
-      <div className="absolute inset-0 bg-grid-zinc-200/40 dark:bg-grid-zinc-800/10 [mask-image:radial-gradient(ellipse_at_center,white,transparent_80%)]" />
+      <div className="absolute inset-0 bg-grid-zinc-200/40 dark:bg-grid-zinc-800/10 [mask-image:radial-gradient(ellipse_at_center,white,transparent_80%)] pointer-events-none" />
       
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
@@ -150,12 +298,10 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
         transition={{ duration: 0.4 }}
         className="relative w-full max-w-md bg-white dark:bg-[#0f172a] shadow-xl border border-zinc-200/80 dark:border-zinc-800/80 rounded-3xl p-8 text-center transition-colors overflow-hidden"
       >
-        {/* Floating background decorative blobs */}
         <div className="absolute -top-24 -left-24 w-48 h-48 bg-blue-500/10 dark:bg-blue-600/5 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-rose-500/10 dark:bg-rose-600/5 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10">
-          {/* Logo / Header */}
           <div className="mb-6">
             <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 mb-4 shadow-sm border border-blue-100 dark:border-blue-900/30">
               <KeyRound size={28} />
@@ -201,38 +347,10 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
                 <LogIn size={16} /> এখনই লগইন করুন
               </button>
             </motion.div>
-          ) : isTokenValid === false ? (
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="space-y-6 py-4"
-            >
-              <div className="flex justify-center">
-                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400">
-                  <AlertTriangle size={32} />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">
-                  লিংকটি সঠিক নয় বা মেয়াদ ফুরিয়েছে!
-                </h3>
-                <p className="text-xs text-rose-500 dark:text-rose-400 font-medium leading-relaxed bg-rose-500/5 border border-rose-500/10 p-3.5 rounded-2xl text-center">
-                  {errorMsg || "পাসওয়ার্ড রিসেট লিংকটি ভুল অথবা এর মেয়াদ শেষ হয়ে গেছে। দয়া করে লগইন পেজ থেকে আরেকটি নতুন রিকোয়েস্ট পাঠান।"}
-                </p>
-              </div>
-
-              <button
-                onClick={onSuccess}
-                className="w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-white font-bold text-sm rounded-2xl transition-all cursor-pointer active:scale-98"
-              >
-                লগইন পেজে ফিরে যান
-              </button>
-            </motion.div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5 text-left">
               {errorMsg && (
-                <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 text-xs font-bold border border-rose-100 dark:border-rose-900/40 flex items-start gap-2.5 animate-shake">
+                <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 text-xs font-bold border border-rose-100 dark:border-rose-900/40 flex items-start gap-2.5">
                   <AlertTriangle size={16} className="shrink-0 mt-0.5" />
                   <span>{errorMsg}</span>
                 </div>
@@ -315,3 +433,4 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
     </div>
   );
 };
+

@@ -2026,6 +2026,15 @@ export default function App() {
         const search = window.location.search;
         window.history.replaceState({}, document.title, `/reset-password${search}${hash}`);
       }
+    } else if (window.location.pathname === '/dashboard') {
+      console.log("[App.tsx / ROUTING] Direct path /dashboard detected.");
+      setView('dashboard');
+    } else if (window.location.pathname === '/admin') {
+      console.log("[App.tsx / ROUTING] Direct path /admin detected.");
+      setView('admin');
+    } else if (window.location.pathname === '/login') {
+      console.log("[App.tsx / ROUTING] Direct path /login detected.");
+      setView('home');
     }
 
     supabase.auth.getSession().then((res) => {
@@ -2081,6 +2090,33 @@ export default function App() {
 
     return () => authListener.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!isAuthReady) return;
+
+    const currentPath = window.location.pathname;
+    let targetPath = '/';
+
+    if (view === 'reset-password') {
+      targetPath = '/reset-password';
+    } else if (view === 'dashboard') {
+      targetPath = '/dashboard';
+    } else if (view === 'admin') {
+      targetPath = '/admin';
+    } else if (view === 'home') {
+      targetPath = user ? '/' : '/login';
+    } else {
+      targetPath = '/';
+    }
+
+    if (currentPath !== targetPath && currentPath !== '/reset-password') {
+      const isCustomExplicitPath = currentPath === '/admin' || currentPath === '/dashboard';
+      if (!(isCustomExplicitPath && !user)) {
+        console.log("[App.tsx / PATH_SYNC] Syncing path to match state:", targetPath);
+        window.history.replaceState({}, document.title, targetPath);
+      }
+    }
+  }, [view, user, isAuthReady]);
 
   // --- QUERY DEFINITIONS ---
 
