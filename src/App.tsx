@@ -3618,17 +3618,54 @@ export default function App() {
     setAuthError(null);
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      setAuthError("Please enter your email address first.");
+      setAuthError("অনুগ্রহ করে প্রথমে আপনার ইমেইল এড্রেস টাইপ করুন। (Please enter your email address first.)");
       throw new Error("Email required");
     }
+    
+    console.info("[PasswordReset / REQUEST] Reset password request started for:", trimmedEmail);
+    console.info("[PasswordReset / REQUEST] Target Redirect URI:", "https://parodorshi.vercel.app/reset-password");
+    
     setIsAuthLoading(true);
     try {
+      // Pre-flight check inside console logs to verify that Supabase client variables are correctly present
+      const envUrl = import.meta.env.VITE_SUPABASE_URL;
+      const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      console.log("[PasswordReset / DIAGNOSTICS] Configuration state on trigger:", {
+        hasEnvUrl: !!envUrl,
+        hasEnvKey: !!envKey,
+        currentOrigin: window.location.origin
+      });
+
       const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
         redirectTo: "https://parodorshi.vercel.app/reset-password"
       });
-      if (error) throw error;
+
+      if (error) {
+        console.error("[PasswordReset / REQUEST] Supabase primary response returned error:", error);
+        throw error;
+      }
+
+      console.info("[PasswordReset / REQUEST] Reset password request success - Email dispatched to:", trimmedEmail);
     } catch (error: any) {
-      setAuthError(error.message);
+      console.error("[PasswordReset / REQUEST] Reset password request failed:", error);
+      
+      let friendlyMessage = error.message || String(error);
+      
+      if (friendlyMessage.toLowerCase().includes("failed to fetch")) {
+        console.warn("[PasswordReset / DIAGNOSTIC_HELP] 'Failed to fetch' detected. This is usually caused by:");
+        console.warn("1. An ad blocker or privacy extension (e.g. uBlock Origin, Brave Shields) blocking 'supabase.co' network requests.");
+        console.warn("2. Lack of internet connection or DNS resolution failure.");
+        console.warn("3. Incorrect VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY configuration.");
+        console.warn("4. CORS restrictions in the active deployment context.");
+        
+        friendlyMessage = "নেটওয়ার্ক কানেকশন সমস্যা অথবা এড-ব্লকার এর কারণে ইমেল পাঠানো সম্ভব হচ্ছে না। অনুগ্রহ করে আপনার এড-ব্লকারটি বন্ধ করে আবার চেষ্টা করুন। (Network connection issue or active ad-blocker prevented sending the request. Please disable your browser's ad-blocker or check your internet, then try again.)";
+      } else if (friendlyMessage.includes("rate limit") || friendlyMessage.toLowerCase().includes("too many requests")) {
+        friendlyMessage = "অনুগ্রহ করে কিছুক্ষণ অপেক্ষা করে আবার চেষ্টা করুন। অনেক বেশি রিকোয়েস্ট পাঠানো হয়েছে। (Rate limit exceeded. Please wait a bit before requesting another reset email.)";
+      } else {
+        friendlyMessage = `ইমেইল পাঠাতে ব্যর্থ হয়েছে: ${friendlyMessage}`;
+      }
+      
+      setAuthError(friendlyMessage);
       throw error;
     } finally {
       setIsAuthLoading(false);
