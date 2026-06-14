@@ -17,8 +17,8 @@ interface LandingPageProps {
   onEmailLogin: (email: string, pass: string) => void;
   onEmailSignUp: (name: string, email: string, pass: string, academicClass: string, academicGroup: string) => void;
   onForgotPassword: (email: string) => Promise<void>;
-  onPhoneSignIn: (phone: string) => void;
-  onVerifyOtp: (otp: string) => void;
+  onPhoneSignIn: (phone: string, isSignUp?: boolean, name?: string, academicClass?: string, academicGroup?: string) => Promise<void>;
+  onVerifyOtp: (otp: string) => Promise<void>;
   error: string | null;
   isLoading: boolean;
   dynamicClasses?: any[];
@@ -42,6 +42,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [academicClass, setAcademicClass] = useState('');
   const [academicGroup, setAcademicGroup] = useState('All');
   const [formMode, setFormMode] = useState<'login' | 'signup' | 'forgot'>('login');
+
+  // Phone OTP Flow Local States
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [isOtpLoadingLocal, setIsOtpLoadingLocal] = useState(false);
+
+  useEffect(() => {
+    setOtpSent(false);
+    setOtpCode('');
+  }, [formMode]);
+
+  const isEmail = email.includes('@');
 
   // Set default class when dynamicClasses are populated
   useEffect(() => {
@@ -697,9 +709,67 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (formMode === 'login') {
-      onEmailLogin(email.trim(), password);
+      if (isEmail) {
+        onEmailLogin(email.trim(), password);
+      } else {
+        if (!otpSent) {
+          try {
+            setIsOtpLoadingLocal(true);
+            await onPhoneSignIn(email.trim());
+            setOtpSent(true);
+            const toast = document.getElementById('toast');
+            if (toast) {
+              toast.textContent = 'OTP verification code has been sent via SMS! 💬';
+              toast.classList.add('show');
+              setTimeout(() => toast.classList.remove('show'), 5000);
+            }
+          } catch (err) {
+            console.error("[LandingPage / PHONE_LOGIN] OTP send failed:", err);
+          } finally {
+            setIsOtpLoadingLocal(false);
+          }
+        } else {
+          try {
+            setIsOtpLoadingLocal(true);
+            await onVerifyOtp(otpCode.trim());
+          } catch (err) {
+            console.error("[LandingPage / PHONE_LOGIN] OTP verification failed:", err);
+          } finally {
+            setIsOtpLoadingLocal(false);
+          }
+        }
+      }
     } else if (formMode === 'signup') {
-      onEmailSignUp(name.trim(), email.trim(), password, academicClass, academicGroup);
+      if (isEmail) {
+        onEmailSignUp(name.trim(), email.trim(), password, academicClass, academicGroup);
+      } else {
+        if (!otpSent) {
+          try {
+            setIsOtpLoadingLocal(true);
+            await onPhoneSignIn(email.trim(), true, name.trim(), academicClass, academicGroup);
+            setOtpSent(true);
+            const toast = document.getElementById('toast');
+            if (toast) {
+              toast.textContent = 'OTP sent to complete your registration! 📱';
+              toast.classList.add('show');
+              setTimeout(() => toast.classList.remove('show'), 5000);
+            }
+          } catch (err) {
+            console.error("[LandingPage / PHONE_SIGNUP] Registration OTP send failed:", err);
+          } finally {
+            setIsOtpLoadingLocal(false);
+          }
+        } else {
+          try {
+            setIsOtpLoadingLocal(true);
+            await onVerifyOtp(otpCode.trim());
+          } catch (err) {
+            console.error("[LandingPage / PHONE_SIGNUP] Registration OTP verification failed:", err);
+          } finally {
+            setIsOtpLoadingLocal(false);
+          }
+        }
+      }
     } else if (formMode === 'forgot') {
       try {
         await onForgotPassword(email.trim());
@@ -1109,18 +1179,67 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           {(formMode === 'login' || formMode === 'signup' || formMode === 'forgot') && (
             <div className="ffield">
-              <label>Email Address</label>
-              <input 
-                type="email" 
-                placeholder="you@example.com"
-                required
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
+              <label>{formMode === 'forgot' ? 'Email Address' : 'Email Address or Phone Number'}</label>
+              {formMode === 'forgot' ? (
+                <input 
+                  type="email" 
+                  placeholder="you@example.com"
+                  required
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                />
+              ) : (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  width: '100%',
+                  padding: '0 13px',
+                  border: '2px solid rgba(150,130,100,0.18)',
+                  borderRadius: '11px',
+                  background: 'var(--inp)'
+                }}>
+                  {!isEmail && email.trim().length > 0 && (
+                    <select 
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        fontFamily: "'Nunito', sans-serif",
+                        fontSize: '0.94rem',
+                        fontWeight: 700,
+                        color: 'var(--txt)',
+                        marginRight: '8px',
+                        outline: 'none',
+                        cursor: 'default'
+                      }}
+                      disabled
+                    >
+                      <option value="+880">BD (+880)</option>
+                    </select>
+                  )}
+                  <input 
+                    type="text" 
+                    placeholder="you@example.com or 01XXXXXXXXX"
+                    required
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '13px 4px',
+                      background: 'transparent',
+                      border: 'none',
+                      outline: 'none',
+                      fontFamily: "'Nunito', sans-serif",
+                      fontSize: '0.94rem',
+                      fontWeight: 700,
+                      color: 'var(--txt)'
+                    }}
+                  />
+                </div>
+              )}
             </div>
           )}
 
-          {(formMode === 'login' || formMode === 'signup') && (
+          {((formMode === 'login' || formMode === 'signup') && isEmail) && (
             <div className="ffield">
               <label>Password</label>
               <input 
@@ -1129,6 +1248,33 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 required
                 value={password}
                 onChange={e => setPassword(e.target.value)}
+              />
+            </div>
+          )}
+
+          {((formMode === 'login' || formMode === 'signup') && !isEmail && otpSent) && (
+            <div className="ffield animate-in slide-in-from-top-1.5 duration-200">
+              <label>SMS OTP Verification Code</label>
+              <input 
+                type="text" 
+                placeholder="6-digit verification code"
+                required
+                value={otpCode}
+                onChange={e => setOtpCode(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '13px 17px',
+                  border: '2px solid rgba(150,130,100,0.18)',
+                  borderRadius: '11px',
+                  background: 'var(--inp)',
+                  fontFamily: "'Nunito', sans-serif",
+                  fontSize: '0.94rem',
+                  fontWeight: 700,
+                  color: 'var(--txt)',
+                  outline: 'none',
+                  letterSpacing: '0.2em',
+                  textAlign: 'center'
+                }}
               />
             </div>
           )}
@@ -1206,14 +1352,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           )}
 
           {/* Core submit button */}
-          <button type="submit" className="fbtn" id="fbtn" disabled={isLoading}>
-            {isLoading ? (
+          <button type="submit" className="fbtn" id="fbtn" disabled={isLoading || isOtpLoadingLocal}>
+            {(isLoading || isOtpLoadingLocal) ? (
               <span className="flex items-center justify-center gap-2">
                 <RefreshCcw className="animate-spin" size={16} /> Connecting...
               </span>
             ) : (
-              formMode === 'login' ? 'Let me in! 🚀' : 
-              formMode === 'signup' ? 'Create Account! ✨' : 'Send Reset Code 📧'
+              formMode === 'forgot' ? 'Send Reset Code 📧' :
+              isEmail ? (
+                formMode === 'login' ? 'Let me in! 🚀' : 'Create Account! ✨'
+              ) : (
+                otpSent ? 'Verify & Let me in! 🔑' : 'Send OTP 💬'
+              )
             )}
           </button>
 

@@ -1447,6 +1447,16 @@ export default function App() {
   }, [isExamActive, examTimeLeft]);
   const [authError, setAuthError] = useState<string | null>(null);
   const [pendingPhone, setPendingPhone] = useState<string>('');
+  const [pendingSignUpData, setPendingSignUpData] = useState<{ name: string; academicClass: any; academicGroup: string } | null>(null);
+  
+  // Profile phone management states
+  const [phoneModeState, setPhoneModeState] = useState<'display' | 'editing' | 'verifying'>('display');
+  const [newPhoneInput, setNewPhoneInput] = useState('');
+  const [phoneToVerify, setPhoneToVerify] = useState('');
+  const [verificationOtpCode, setVerificationOtpCode] = useState('');
+  const [isSendingPhoneCode, setIsSendingPhoneCode] = useState(false);
+  const [isVerifyingPhoneCode, setIsVerifyingPhoneCode] = useState(false);
+  const [phoneErrorState, setPhoneErrorState] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingCategory, setDeletingCategory] = useState<Category | null>(null);
   const [deleteBankId, setDeleteBankId] = useState<string | null>(null);
@@ -1758,6 +1768,124 @@ export default function App() {
     }
   };
 
+  const handleSendVerificationToCurrentPhone = async () => {
+    setIsSendingPhoneCode(true);
+    setPhoneErrorState(null);
+    try {
+      const userPhoneState = user?.phone || firestoreUser?.phoneNumber || firestoreUser?.phone_number || '';
+      if (!userPhoneState) {
+        throw new Error("No phone number to verify.");
+      }
+      console.log("[Phone Link / OTP sent] Dispatching SMS OTP for current phone:", userPhoneState);
+      const { data, error } = await supabase.auth.updateUser({ phone: userPhoneState });
+      if (error) throw error;
+
+      setPhoneToVerify(userPhoneState);
+      setPhoneModeState('verifying');
+      console.log("[Phone Link / OTP sent] Code sent to:", userPhoneState);
+    } catch (err: any) {
+      setPhoneErrorState(err.message || String(err));
+      console.error("[Phone Link / ERROR] Failed sending phone OTP:", err);
+    } finally {
+      setIsSendingPhoneCode(false);
+    }
+  };
+
+  const handleUpdateProfilePhone = async () => {
+    setIsSendingPhoneCode(true);
+    setPhoneErrorState(null);
+    try {
+      const normPhone = normalizePhone(newPhoneInput);
+      if (!isValidPhone(normPhone)) {
+        throw new Error("Invalid phone format. Please enter a valid Bangladesh mobile number (e.g. 01XXXXXXXXX).");
+      }
+
+      console.log("[Phone Link / Profiles] Checking if number is taken by another account:", normPhone);
+      const { data: existingProf, error: checkErr } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('phone_number', normPhone)
+        .neq('id', user?.id)
+        .maybeSingle();
+
+      if (existingProf) {
+        throw new Error("This phone number is already registered to another account.");
+      }
+
+      console.log("[Phone Link / OTP sent] Dispatching SMS OTP to link phone:", normPhone);
+      const { data, error } = await supabase.auth.updateUser({ phone: normPhone });
+      if (error) {
+        if (error.message.includes("provider") || error.message.includes("SMS") || error.message.includes("disabled")) {
+          throw new Error("SMS/Phone provider is not enabled in Supabase.");
+        }
+        throw error;
+      }
+
+      setPhoneToVerify(normPhone);
+      setPhoneModeState('verifying');
+      console.log("[Phone Link / OTP sent] Code successfully sent to:", normPhone);
+    } catch (err: any) {
+      setPhoneErrorState(err.message || String(err));
+      console.error("[Phone Link / ERROR] Link request failed:", err);
+    } finally {
+      setIsSendingPhoneCode(false);
+    }
+  };
+
+  const handleCompletePhoneOtpVerification = async () => {
+    setIsVerifyingPhoneCode(true);
+    setPhoneErrorState(null);
+    try {
+      console.log("[Phone Link / VERIFY] Verifying OTP for phone:", phoneToVerify);
+      const { data, error } = await supabase.auth.verifyOtp({
+        phone: phoneToVerify,
+        token: verificationOtpCode,
+        type: 'phone_change'
+      });
+      if (error) throw error;
+      
+      console.log("[Phone Link / SUCCESS] OTP verified. Updating user profile...");
+      const { error: profileUpdateErr } = await supabase
+        .from('profiles')
+        .update({ 
+           phone_number: phoneToVerify,
+           updated_at: new Date().toISOString()
+        })
+        .eq('id', user?.id);
+      
+      if (profileUpdateErr) {
+        console.error("[Profiles DB] Profiles update failed:", profileUpdateErr);
+      }
+      
+      // Update local react views
+      setUser(prev => prev ? {
+        ...prev,
+        phone: phoneToVerify,
+        phoneVerified: true,
+        user_metadata: {
+           ...prev.user_metadata,
+           phone: phoneToVerify,
+        }
+      } : null);
+
+      setFirestoreUser(prev => prev ? {
+        ...prev,
+        phoneNumber: phoneToVerify,
+        phone_number: phoneToVerify,
+      } : null);
+
+      setPhoneModeState('display');
+      setVerificationOtpCode('');
+      setNewPhoneInput('');
+      console.log("[Phone Link / LOGGED] Successfully linked and verified user phone number.");
+    } catch (err: any) {
+      setPhoneErrorState(err.message || String(err));
+      console.error("[Phone Link / ERROR] Verification failed:", err);
+    } finally {
+      setIsVerifyingPhoneCode(false);
+    }
+  };
+
   const handleUpdateProfile = async (e: FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -2044,7 +2172,9 @@ export default function App() {
           id: session.user.id,
           uid: session.user.id,
           email: session.user.email,
-          displayName: session.user.user_metadata?.full_name || session.user.email,
+          phone: session.user.phone || '',
+          phoneVerified: !!session.user.phone_confirmed_at,
+          displayName: session.user.user_metadata?.full_name || session.user.phone || session.user.email,
           photoURL: session.user.user_metadata?.avatar_url || null,
           emailVerified: !!session.user.email_confirmed_at,
           user_metadata: session.user.user_metadata
@@ -2075,7 +2205,9 @@ export default function App() {
           id: session.user.id,
           uid: session.user.id,
           email: session.user.email,
-          displayName: session.user.user_metadata.full_name || session.user.email,
+          phone: session.user.phone || '',
+          phoneVerified: !!session.user.phone_confirmed_at,
+          displayName: session.user.user_metadata.full_name || session.user.phone || session.user.email,
           photoURL: session.user.user_metadata.avatar_url || null,
           emailVerified: !!session.user.email_confirmed_at,
           user_metadata: session.user.user_metadata
@@ -3697,17 +3829,90 @@ export default function App() {
     return () => {};
   }, []);
 
-  const handlePhoneSignIn = async (phoneNumber: string) => {
+  const normalizePhone = (phone: string): string => {
+    let cleaned = phone.replace(/[\s-()]/g, '');
+    if (cleaned.startsWith('0')) {
+      cleaned = '+88' + cleaned;
+    } else if (cleaned.startsWith('880')) {
+      cleaned = '+' + cleaned;
+    } else if (!cleaned.startsWith('+') && cleaned.startsWith('1')) {
+      cleaned = '+880' + cleaned;
+    }
+    return cleaned;
+  };
+
+  const isValidPhone = (phone: string): boolean => {
+    const norm = normalizePhone(phone);
+    return /^\+8801[3-9]\d{8}$/.test(norm);
+  };
+
+  const handlePhoneSignIn = async (phoneNumber: string, isSignUp = false, name = "", academicClass = "", academicGroup = "All") => {
+    console.log("[Phone Auth] handlePhoneSignIn initiated. Number:", phoneNumber, "isSignUp:", isSignUp);
     setAuthError(null);
     setIsAuthLoading(true);
-    setPendingPhone(phoneNumber);
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: phoneNumber,
+
+    const normPhone = normalizePhone(phoneNumber);
+    if (!isValidPhone(normPhone)) {
+      const errMsg = "Invalid format. Enter a valid Bangladesh phone number (01XXXXXXXXX or +8801XXXXXXXXX).";
+      setAuthError(errMsg);
+      setIsAuthLoading(false);
+      console.warn("[Login failure] Phone number validation failed for:", phoneNumber);
+      throw new Error(errMsg);
+    }
+
+    setPendingPhone(normPhone);
+
+    if (isSignUp) {
+      setPendingSignUpData({
+        name,
+        academicClass,
+        academicGroup
       });
-      if (error) throw error;
+    } else {
+      setPendingSignUpData(null);
+    }
+
+    try {
+      if (isSignUp) {
+        // Prevent duplicate account registration with same phone
+        console.log("[Phone Auth] Checking if phone number is already registered in Profiles:", normPhone);
+        const { data: existingProf, error: checkErr } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('phone_number', normPhone)
+          .maybeSingle();
+
+        if (checkErr) {
+          console.error("[Phone Auth / Profiles] Database check failed:", checkErr);
+        }
+
+        if (existingProf) {
+          const errMsg = "This phone number is already registered. Please login instead.";
+          setAuthError(errMsg);
+          console.warn("[Login failure] Pre-authenticated duplicate phone registration blocked for:", normPhone);
+          throw new Error(errMsg);
+        }
+      }
+
+      console.log("[Phone Auth] Dispatching signInWithOtp via Supabase for normalized phone:", normPhone);
+      const { error } = await supabase.auth.signInWithOtp({
+        phone: normPhone,
+      });
+
+      if (error) {
+        if (error.message.includes("provider") || error.message.includes("SMS") || error.message.includes("disabled")) {
+          const adminErrMsg = "SMS/Phone auth is not enabled in your Supabase project.\n\nPlease enable it in your Supabase Dashboard:\nAuthentication -> Providers -> Phone (Enable provider and choose an SMS gateway).";
+          setAuthError(adminErrMsg);
+          console.error("[Login failure] Supabase SMS Provider is not active:", error);
+          throw new Error(adminErrMsg);
+        }
+        throw error;
+      }
+
+      console.log("[OTP sent] Successfully triggered OTP dispatch for:", normPhone);
     } catch (error: any) {
-      setAuthError(error.message);
+      console.error("[Login failure] Phone SignIn Error:", error.message || error);
+      setAuthError(error.message || String(error));
       throw error;
     } finally {
       setIsAuthLoading(false);
@@ -3715,17 +3920,74 @@ export default function App() {
   };
 
   const handleVerifyOtp = async (otp: string) => {
+    console.log("[Phone Auth] handleVerifyOtp initiated for key:", pendingPhone);
     setAuthError(null);
     setIsAuthLoading(true);
     try {
-      const { error } = await supabase.auth.verifyOtp({
+      const { data, error } = await supabase.auth.verifyOtp({
         phone: pendingPhone,
         token: otp,
         type: 'sms'
       });
+
       if (error) throw error;
+
+      console.log("[OTP verified] OTP verified successfully for:", pendingPhone);
+      console.log("[Login success] User authenticated successfully via Phone OTP:", data.user?.id);
+
+      if (data.user) {
+        if (pendingSignUpData) {
+          // Store/upsert phone number in profiles database on successful signup
+          console.log("[Phone Auth / Profiles] Upserting user profile record with name:", pendingSignUpData.name);
+          const { error: profileErr } = await supabase.from('profiles').upsert({
+            id: data.user.id,
+            email: data.user.email || null,
+            phone_number: pendingPhone,
+            full_name: pendingSignUpData.name,
+            academic_class: pendingSignUpData.academicClass,
+            academic_group: pendingSignUpData.academicGroup,
+            role: 'user',
+            can_upload: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+
+          if (profileErr) {
+            console.error("[Profiles] Fails to upsert signup profile:", profileErr);
+          } else {
+            console.log("[Profiles] Successfully created user profile from pending signup data.");
+          }
+        } else {
+          // It's a standard login. Double check and backfill the phone_number in user's profile table if matches
+          console.log("[Phone Auth / Profiles] Ensuring phone number exists on user profile record...");
+          const { data: profileRow } = await supabase.from('profiles').select('id, phone_number').eq('id', data.user.id).maybeSingle();
+          if (profileRow) {
+            if (!profileRow.phone_number) {
+              await supabase.from('profiles').update({ phone_number: pendingPhone }).eq('id', data.user.id);
+              console.log("[Profiles] Auto-backfilled phone number after successful login.");
+            }
+          } else {
+            // No profile row exists yet - auto-create one
+            await supabase.from('profiles').insert({
+              id: data.user.id,
+              email: data.user.email || null,
+              phone_number: pendingPhone,
+              full_name: data.user.user_metadata?.full_name || 'Student',
+              academic_class: dynamicClasses?.[0]?.name || 'SSC',
+              academic_group: 'All',
+              role: 'user',
+              can_upload: false
+            });
+            console.log("[Profiles] Auto-created user profile on phone login.");
+          }
+        }
+
+        // Successfully authenticated
+        setView('home');
+      }
     } catch (error: any) {
-      setAuthError(error.message);
+      console.error("[Login failure] OTP verification failed:", error.message || error);
+      setAuthError(error.message || String(error));
       throw error;
     } finally {
       setIsAuthLoading(false);
@@ -6657,6 +6919,179 @@ export default function App() {
                     </div>
                   </div>
                 )}
+
+                {/* Phone Number / Verification Section */}
+                <div className="space-y-3 pt-3 border-t border-zinc-100 dark:border-zinc-800/80">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-1">Phone Number Setting</span>
+                  
+                  {(user?.phone || firestoreUser?.phoneNumber || firestoreUser?.phone_number) ? (
+                    <div className="bg-zinc-100/50 dark:bg-zinc-800/50 p-4 rounded-2xl flex flex-col gap-2 relative">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-black text-zinc-900 dark:text-white">
+                            {user?.phone || firestoreUser?.phoneNumber || firestoreUser?.phone_number}
+                          </p>
+                          <p className="text-[10px] font-bold text-zinc-400 mt-0.5">
+                            Status: {' '}
+                            {((user as any)?.phoneVerified || user?.phone_confirmed_at) ? (
+                              <span className="text-emerald-500 font-extrabold uppercase bg-emerald-500/10 px-2 py-0.5 rounded-full text-[9px]">Verified</span>
+                            ) : (
+                              <span className="text-amber-500 font-extrabold uppercase bg-amber-500/10 px-2 py-0.5 rounded-full text-[9px]">Not Verified</span>
+                            )}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 rounded-xl px-3"
+                          onClick={() => {
+                            setNewPhoneInput('');
+                            setPhoneModeState('editing');
+                          }}
+                        >
+                          Change Number
+                        </Button>
+                      </div>
+
+                      {!((user as any)?.phoneVerified || user?.phone_confirmed_at) && (
+                        <div className="pt-2 border-t border-zinc-200/50 dark:border-zinc-800 mt-2 flex items-center justify-between gap-2">
+                          <p className="text-[10px] text-zinc-500 font-bold leading-normal">Verify your mobile now via secure passcode.</p>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            className="text-[10px] rounded-xl font-bold py-1 px-3 min-h-[30px]"
+                            onClick={handleSendVerificationToCurrentPhone}
+                            disabled={isSendingPhoneCode}
+                          >
+                            {isSendingPhoneCode ? 'Sending...' : 'Verify Now 📱'}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      {phoneModeState === 'display' && (
+                        <div className="bg-zinc-100/50 dark:bg-zinc-800/50 p-4 rounded-2xl flex items-center justify-between gap-2">
+                          <span className="text-xs text-zinc-500 font-bold">No mobile number linked yet.</span>
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            className="text-xs rounded-xl"
+                            onClick={() => setPhoneModeState('editing')}
+                          >
+                            Link Mobile
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {phoneModeState === 'editing' && (
+                    <div className="bg-zinc-100/50 dark:bg-zinc-800/50 p-4 rounded-2xl space-y-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-zinc-400">Mobile Number Country</label>
+                        <div className="flex gap-2">
+                          <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl px-2 py-0.5 border border-zinc-200/10">
+                            <span className="text-sm">🇧🇩</span>
+                            <select
+                              className="bg-transparent rounded-xl px-1 py-3 text-xs font-bold text-zinc-950 dark:text-white outline-none border-none cursor-default"
+                              defaultValue="+880"
+                              disabled
+                            >
+                              <option value="+880">BD (+880)</option>
+                            </select>
+                          </div>
+                          <input
+                            type="text"
+                            placeholder="01XXXXXXXXX"
+                            className="flex-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl px-4 py-3 text-xs font-bold text-zinc-950 dark:text-white outline-none border border-zinc-200/15"
+                            value={newPhoneInput}
+                            onChange={(e) => setNewPhoneInput(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      
+                      {phoneErrorState && (
+                        <p className="text-xs font-semibold text-red-500 whitespace-pre-line bg-red-500/10 p-3 rounded-xl border border-red-500/20">{phoneErrorState}</p>
+                      )}
+
+                      <div className="flex gap-2 justify-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs rounded-xl"
+                          onClick={() => {
+                            setPhoneModeState('display');
+                            setPhoneErrorState(null);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          className="text-xs rounded-xl"
+                          onClick={handleUpdateProfilePhone}
+                          disabled={isSendingPhoneCode}
+                        >
+                          {isSendingPhoneCode ? 'Sending OTP...' : 'Send OTP 💬'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {phoneModeState === 'verifying' && (
+                    <div className="bg-zinc-100/50 dark:bg-zinc-800/50 p-4 rounded-2xl space-y-4">
+                      <div className="space-y-1">
+                        <p className="text-xs text-zinc-500">
+                          We sent a verification code to <span className="font-bold text-zinc-950 dark:text-white">{phoneToVerify}</span>.
+                        </p>
+                        <label className="text-[10px] font-black uppercase text-zinc-400 mt-2 block">Enter Code OTP</label>
+                        <input
+                          type="text"
+                          placeholder="6-digit passcode"
+                          className="w-full bg-zinc-100 dark:bg-zinc-800 rounded-xl px-4 py-3 text-xs font-bold text-zinc-950 dark:text-white outline-none tracking-widest text-center"
+                          value={verificationOtpCode}
+                          onChange={(e) => setVerificationOtpCode(e.target.value)}
+                        />
+                      </div>
+
+                      {phoneErrorState && (
+                        <p className="text-xs font-semibold text-red-500 whitespace-pre-line bg-red-500/10 p-3 rounded-xl border border-red-500/20">{phoneErrorState}</p>
+                      )}
+
+                      <div className="flex gap-2 justify-end">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs rounded-xl"
+                          onClick={() => {
+                            setPhoneModeState('display');
+                            setPhoneErrorState(null);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          className="text-xs rounded-xl"
+                          onClick={handleCompletePhoneOtpVerification}
+                          disabled={isVerifyingPhoneCode}
+                        >
+                          {isVerifyingPhoneCode ? 'Verifying...' : 'Verify OTP 🔑'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 <div className="pt-4 flex gap-3">
                   <Button
