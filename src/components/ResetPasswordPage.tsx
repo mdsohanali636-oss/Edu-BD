@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import { motion } from 'motion/react';
 import { KeyRound, Eye, EyeOff, CheckCircle2, AlertTriangle, RefreshCcw, LogIn } from 'lucide-react';
@@ -20,7 +20,18 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
   const [isTokenValid, setIsTokenValid] = useState<boolean | null>(null);
   const [countdown, setCountdown] = useState(5);
 
+  const hasProcessedRecoveryRef = useRef(false);
+
   useEffect(() => {
+    // Audit Log
+    console.log("[PasswordReset / MOUNT] ResetPasswordPage mounted. Checking for recovery context...");
+
+    if (hasProcessedRecoveryRef.current) {
+      console.log("[PasswordReset / DUPLICATE] duplicate execution blocked: Recovery logic already ran once.");
+      return;
+    }
+    hasProcessedRecoveryRef.current = true;
+
     // 1. Detect tokens / errors from URL search & hash parameters
     const hash = window.location.hash;
     const search = window.location.search;
@@ -68,6 +79,8 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
     }
 
     if (accessToken) {
+      console.info("[PasswordReset / RECOVERY_LINK_DETECTED] Active recovery link detected in URL parameters.");
+      console.info("[PasswordReset / TOKEN_FOUND] Found access_token:", accessToken.substring(0, 10) + "...");
       console.log("[PasswordReset / TOKEN_DETECTION] Creating authentication session from URL token parameters...");
       
       supabase.auth.setSession({
@@ -88,7 +101,7 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
           if (looksLikeExpired) {
             setIsExpired(true);
             setErrorMsg("Password reset link has expired. Please request a new reset email.");
-            console.warn("[PasswordReset / TOKEN_EXPIRATION] SetSession verification flaggedexpired credentials.");
+            console.warn("[PasswordReset / TOKEN_EXPIRATION] SetSession verification flagged expired credentials.");
           } else {
             setErrorMsg(error.message);
           }
