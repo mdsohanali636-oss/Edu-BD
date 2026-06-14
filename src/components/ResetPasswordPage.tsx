@@ -7,6 +7,18 @@ interface ResetPasswordPageProps {
   onSuccess: () => void;
 }
 
+interface SharedRecoveryState {
+  promise: Promise<any> | null;
+  status: 'idle' | 'pending' | 'success' | 'error';
+  error: any | null;
+}
+
+let sharedRecovery: SharedRecoveryState = {
+  promise: null,
+  status: 'idle',
+  error: null
+};
+
 export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -27,7 +39,7 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
     console.log("[PasswordReset / MOUNT] ResetPasswordPage mounted. Checking for recovery context...");
 
     if (hasProcessedRecoveryRef.current) {
-      console.log("[PasswordReset / DUPLICATE] duplicate execution blocked: Recovery logic already ran once.");
+      console.log("[PasswordReset / DUPLICATE] duplicate execution blocked: Recovery logic already ran once inside this component instance.");
       return;
     }
     hasProcessedRecoveryRef.current = true;
@@ -81,47 +93,72 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
     if (accessToken) {
       console.info("[PasswordReset / RECOVERY_LINK_DETECTED] Active recovery link detected in URL parameters.");
       console.info("[PasswordReset / TOKEN_FOUND] Found access_token:", accessToken.substring(0, 10) + "...");
-      console.log("[PasswordReset / TOKEN_DETECTION] Creating authentication session from URL token parameters...");
-      
-      supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken || ""
-      }).then(({ data, error }) => {
-        if (error) {
-          console.error("[PasswordReset / SESSION_FAILURE] Supabase setSession rejected token configuration:", error);
-          const errorMsgStr = error.message || "";
-          const looksLikeExpired = errorMsgStr.toLowerCase().includes('expired') || 
-                                   errorMsgStr.toLowerCase().includes('invalid') || 
-                                   errorMsgStr.toLowerCase().includes('bad') || 
-                                   errorMsgStr.toLowerCase().includes('not found') ||
-                                   errorMsgStr.toLowerCase().includes('signature');
-          
+
+      // 2. Prevent duplicate recovery execution across all mounts by using a centralized Promise
+      if (sharedRecovery.status === 'idle') {
+        console.log("[PasswordReset / TOKEN_DETECTION] Creating authentication session from URL token parameters (Initiated FIRST call)...");
+        sharedRecovery.status = 'pending';
+        sharedRecovery.promise = supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken || ""
+        }).then(({ data, error }) => {
+          if (error) {
+            sharedRecovery.status = 'error';
+            sharedRecovery.error = error;
+            console.error("[PasswordReset / SESSION_FAILURE] Supabase setSession rejected token configuration:", error);
+            return { data, error };
+          } else {
+            sharedRecovery.status = 'success';
+            console.log("[PasswordReset / SESSION_CREATION] Session registered successfully dynamically via token. Active target user:", data?.user?.email);
+            return { data, error: null };
+          }
+        }).catch(err => {
+          sharedRecovery.status = 'error';
+          sharedRecovery.error = err;
+          console.error("[PasswordReset / SESSION_FAILURE] Crash setting session parameters on mount:", err);
+          return { data: null, error: err };
+        });
+      } else {
+        console.log(`[PasswordReset / DUPLICATE] duplicate execution prevented: Reusing existing setSession promise (current status: ${sharedRecovery.status})`);
+      }
+
+      if (sharedRecovery.promise) {
+        sharedRecovery.promise.then(({ data, error }) => {
+          if (error) {
+            const errorMsgStr = error.message || "";
+            const looksLikeExpired = errorMsgStr.toLowerCase().includes('expired') || 
+                                     errorMsgStr.toLowerCase().includes('invalid') || 
+                                     errorMsgStr.toLowerCase().includes('bad') || 
+                                     errorMsgStr.toLowerCase().includes('not found') ||
+                                     errorMsgStr.toLowerCase().includes('signature') ||
+                                     errorMsgStr.toLowerCase().includes('otp');
+            
+            setIsTokenValid(false);
+            setIsValidating(false);
+            if (looksLikeExpired) {
+              setIsExpired(true);
+              setErrorMsg("Password reset link has expired. Please request a new reset email.");
+              console.warn("[PasswordReset / TOKEN_EXPIRATION] SetSession verification flagged expired credentials.");
+            } else {
+              setErrorMsg(error.message);
+            }
+          } else {
+            setIsTokenValid(true);
+            setIsValidating(false);
+            setErrorMsg(null);
+            
+            // Scrub token details from visual browser address bar to satisfy production hygiene and refresh resilience
+            if (window.location.hash || window.location.search) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+          }
+        }).catch(err => {
+          console.error("[PasswordReset / PROMISE_CATCH] Recovery promise resolver failed:", err);
           setIsTokenValid(false);
           setIsValidating(false);
-          if (looksLikeExpired) {
-            setIsExpired(true);
-            setErrorMsg("Password reset link has expired. Please request a new reset email.");
-            console.warn("[PasswordReset / TOKEN_EXPIRATION] SetSession verification flagged expired credentials.");
-          } else {
-            setErrorMsg(error.message);
-          }
-        } else {
-          console.log("[PasswordReset / SESSION_CREATION] Session registered successfully dynamically via token. Active target user:", data?.user?.email);
-          setIsTokenValid(true);
-          setIsValidating(false);
-          setErrorMsg(null);
-          
-          // Scrub token details from visual browser address bar to satisfy production hygiene and refresh resilience
-          if (window.location.hash || window.location.search) {
-            window.history.replaceState({}, document.title, window.location.pathname);
-          }
-        }
-      }).catch(err => {
-        console.error("[PasswordReset / SESSION_FAILURE] Crash setting session parameters on mount:", err);
-        setIsTokenValid(false);
-        setIsValidating(false);
-        setErrorMsg("Password reset link has expired. Please request a new reset email.");
-      });
+          setErrorMsg("Password reset link has expired. Please request a new reset email.");
+        });
+      }
     } else {
       console.log("[PasswordReset / SESSION] No direct token present in URL. Verifying memory authorization sessions...");
       supabase.auth.getSession().then(({ data, error }) => {
@@ -218,6 +255,13 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onSuccess 
       console.log("[PasswordReset / SUCCESS] Password updated completed successfully for user:", data?.user?.email);
       setSuccess(true);
       
+      // Clear recovery state
+      sharedRecovery = {
+        promise: null,
+        status: 'idle',
+        error: null
+      };
+
       // Auto sign-out to fully purge old metadata credentials securely
       await supabase.auth.signOut();
     } catch (err: any) {
