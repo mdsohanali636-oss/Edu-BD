@@ -12,6 +12,39 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { Button, Card } from '../ui/Base';
+import parodorshhiLogo from '../../assets/images/parodorshhi_logo_1780464304136.png';
+
+const LandingLogo = ({ className = "h-14 w-auto" }: { className?: string }) => {
+  const [errorCode, setErrorCode] = useState(false);
+  const paths = [
+    parodorshhiLogo,
+    "/api/v1/files/input_file_2.png",
+    "/api/v1/files/input_file_1.png",
+    "/api/v1/files/input_file_0.png",
+    "/api/v1/files/Gemini_Generated_Image_ro03d6ro03d6ro03.png"
+  ];
+  const [pathIndex, setPathIndex] = useState(0);
+
+  if (errorCode && pathIndex >= paths.length - 1) {
+    return <span className="font-extrabold text-blue-500 tracking-tighter text-lg">Parodorshhi</span>;
+  }
+
+  return (
+    <img 
+      src={paths[pathIndex]} 
+      alt="Parodorshhi Logo" 
+      className={`${className} object-contain transition-all duration-300`}
+      referrerPolicy="no-referrer"
+      onError={() => {
+        if (pathIndex < paths.length - 1) {
+          setPathIndex(pathIndex + 1);
+        } else {
+          setErrorCode(true);
+        }
+      }}
+    />
+  );
+};
 
 interface LandingPageProps {
   onGoogleLogin: () => void;
@@ -790,6 +823,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
   return (
     <div id="scene" className="w-full h-screen overflow-hidden select-none relative bg-neutral-100 dark:bg-zinc-950">
+      {/* Absolute top-left website branding */}
+      <div className="fixed top-5 left-5 z-50 flex items-center gap-2.5 backdrop-blur-md bg-white/70 dark:bg-zinc-900/70 p-2.5 px-4 rounded-2xl border border-zinc-200/20 shadow-md pointer-events-auto">
+        <LandingLogo className="h-8 w-auto filter drop-shadow-[0_2px_6px_rgba(0,0,0,0.15)] dark:drop-shadow-[0_2px_12px_rgba(59,130,246,0.35)]" />
+        <span className="font-extrabold text-[13px] tracking-wider uppercase text-zinc-800 dark:text-zinc-200">
+          Parodorshhi
+        </span>
+      </div>
       {/* Dynamic CSS injections to preserve EXACT original rendering and styles */}
       <style dangerouslySetInnerHTML={{ __html: `
         *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -1155,6 +1195,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       <div id="formpanel">
         <div id="fbackdrop"></div>
         <form id="fcard" onSubmit={handleFormSubmit} className="space-y-4">
+          <div className="flex justify-center mb-1">
+            <LandingLogo className="h-14 sm:h-16 w-auto filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.1)] dark:drop-shadow-[0_4px_16px_rgba(59,130,246,0.3)]" />
+          </div>
           <h2 className="ftitle" id="ftitle">Welcome back!</h2>
           <p className="fsub" id="fsub">Sign in to continue your adventure</p>
           
