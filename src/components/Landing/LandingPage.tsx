@@ -8,7 +8,8 @@ import {
   Mail, 
   Lock, 
   User,
-  GraduationCap
+  GraduationCap,
+  ExternalLink
 } from 'lucide-react';
 import { Button, Card } from '../ui/Base';
 
@@ -53,7 +54,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     setOtpCode('');
   }, [formMode]);
 
-  const isEmail = email.includes('@');
+  const isEmail = true;
 
   // Set default class when dynamicClasses are populated
   useEffect(() => {
@@ -1163,7 +1164,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
           )}
 
-          {/* DYNAMIC FORM FIELDS */}
           {formMode === 'signup' && (
             <div className="ffield animate-in slide-in-from-top-1.5 duration-200">
               <label>Full Name</label>
@@ -1179,67 +1179,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           {(formMode === 'login' || formMode === 'signup' || formMode === 'forgot') && (
             <div className="ffield">
-              <label>{formMode === 'forgot' ? 'Email Address' : 'Email Address or Phone Number'}</label>
-              {formMode === 'forgot' ? (
-                <input 
-                  type="email" 
-                  placeholder="you@example.com"
-                  required
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                />
-              ) : (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  width: '100%',
-                  padding: '0 13px',
-                  border: '2px solid rgba(150,130,100,0.18)',
-                  borderRadius: '11px',
-                  background: 'var(--inp)'
-                }}>
-                  {!isEmail && email.trim().length > 0 && (
-                    <select 
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        fontFamily: "'Nunito', sans-serif",
-                        fontSize: '0.94rem',
-                        fontWeight: 700,
-                        color: 'var(--txt)',
-                        marginRight: '8px',
-                        outline: 'none',
-                        cursor: 'default'
-                      }}
-                      disabled
-                    >
-                      <option value="+880">BD (+880)</option>
-                    </select>
-                  )}
-                  <input 
-                    type="text" 
-                    placeholder="you@example.com or 01XXXXXXXXX"
-                    required
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    style={{
-                      flex: 1,
-                      padding: '13px 4px',
-                      background: 'transparent',
-                      border: 'none',
-                      outline: 'none',
-                      fontFamily: "'Nunito', sans-serif",
-                      fontSize: '0.94rem',
-                      fontWeight: 700,
-                      color: 'var(--txt)'
-                    }}
-                  />
-                </div>
-              )}
+              <label>Email Address</label>
+              <input 
+                type="email" 
+                placeholder="you@example.com"
+                required
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+              />
             </div>
           )}
 
-          {((formMode === 'login' || formMode === 'signup') && isEmail) && (
+          {(formMode === 'login' || formMode === 'signup') && (
             <div className="ffield">
               <label>Password</label>
               <input 
@@ -1248,33 +1199,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 required
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-              />
-            </div>
-          )}
-
-          {((formMode === 'login' || formMode === 'signup') && !isEmail && otpSent) && (
-            <div className="ffield animate-in slide-in-from-top-1.5 duration-200">
-              <label>SMS OTP Verification Code</label>
-              <input 
-                type="text" 
-                placeholder="6-digit verification code"
-                required
-                value={otpCode}
-                onChange={e => setOtpCode(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '13px 17px',
-                  border: '2px solid rgba(150,130,100,0.18)',
-                  borderRadius: '11px',
-                  background: 'var(--inp)',
-                  fontFamily: "'Nunito', sans-serif",
-                  fontSize: '0.94rem',
-                  fontWeight: 700,
-                  color: 'var(--txt)',
-                  outline: 'none',
-                  letterSpacing: '0.2em',
-                  textAlign: 'center'
-                }}
               />
             </div>
           )}
