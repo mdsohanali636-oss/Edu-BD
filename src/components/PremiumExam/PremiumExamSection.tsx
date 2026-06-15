@@ -552,9 +552,25 @@ export const PremiumExamSection: React.FC<Props> = ({
         } as unknown as Question;
       });
 
-      // Filter into MCQ and written types
-      const realMcqs = mappedQuestions.filter(q => q.type === 'mcq' || !q.type);
-      const realWrittens = mappedQuestions.filter(q => q.type === 'written');
+      // Filter into MCQ and written types with difficulty awareness
+      const targetDiff = settings.difficulty?.toLowerCase();
+      const needsFilter = targetDiff && targetDiff !== 'mix';
+
+      const realMcqs = mappedQuestions.filter(q => {
+        const matchesType = q.type === 'mcq' || !q.type;
+        if (!matchesType) return false;
+        if (!needsFilter) return true;
+        const qDiff = (q.difficulty || (q as any).difficulty_level || 'medium').toLowerCase();
+        return qDiff === targetDiff;
+      });
+
+      const realWrittens = mappedQuestions.filter(q => {
+        const matchesType = q.type === 'written';
+        if (!matchesType) return false;
+        if (!needsFilter) return true;
+        const qDiff = (q.difficulty || (q as any).difficulty_level || 'medium').toLowerCase();
+        return qDiff === targetDiff;
+      });
 
       if (settings.randomizeQuestions) {
         realMcqs.sort(() => Math.random() - 0.5);
@@ -852,7 +868,7 @@ export const PremiumExamSection: React.FC<Props> = ({
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50/50 dark:bg-black/50 p-4 sm:p-8 lg:p-12 font-sans relative overflow-hidden">
+    <div className="min-h-screen bg-zinc-50/50 dark:bg-black/50 p-4 sm:p-8 lg:p-12 font-sans relative overflow-x-hidden">
       {/* Premium Background Effects */}
       <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary-palette/5 rounded-full blur-3xl -z-10" />
       <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-blue-500/5 rounded-full blur-2xl -z-10" />

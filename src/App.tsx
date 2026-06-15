@@ -635,6 +635,7 @@ export default function App() {
       document.removeEventListener('touchstart', handleClickOutside);
     };
   }, [isUserMenuOpen]);
+
   const [isDarkMode, setIsDarkMode] = useLocalStorage('parodorshhi_darkmode', false);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [adminTab, setAdminTab] = useState<'resources' | 'playlists' | 'users' | 'feedback' | 'exams' | 'questions' | 'leaderboards' | 'academics' | 'newsletter' | 'subscriptions'>('resources');
@@ -734,6 +735,21 @@ export default function App() {
 
   // Exam Mode State
   const [activeExam, setActiveExam] = useState<Exam | null>(null);
+
+  // Page layout and scroll to top handler upon switching core views, topics or categories
+  useEffect(() => {
+    // Standard viewport resets
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    document.documentElement.scrollTo({ top: 0, behavior: 'instant' });
+    document.body.scrollTo({ top: 0, behavior: 'instant' });
+    
+    // Also scroll secondary layouts/containers that might hold scroll states
+    const scrollableDivs = document.querySelectorAll('.overflow-y-auto, main, #root');
+    scrollableDivs.forEach(el => {
+      el.scrollTo({ top: 0, behavior: 'instant' });
+    });
+  }, [view, selectedCategory, activeExam]);
+
   const [examAnswers, setExamAnswers] = useState<Record<string, string | number>>({});
   const [examTimeLeft, setExamTimeLeft] = useState(0);
   const [examResults, setExamResults] = useState<ExamAttempt | null>(null);

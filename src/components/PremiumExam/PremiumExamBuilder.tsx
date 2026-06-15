@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Atom, 
   FlaskConical, 
@@ -64,6 +64,37 @@ export const PremiumExamBuilder: React.FC<Props> = ({
 }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const builderRef = useRef<HTMLDivElement>(null);
+
+  // Scroll smoothly to the builder area when stepping through custom exam stages, rather than the absolute top of the page
+  useEffect(() => {
+    if (builderRef.current) {
+      // Find the position of the builder container
+      const rect = builderRef.current.getBoundingClientRect();
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      
+      // Calculate target scroll position (subtracting 100px so the user is positioned slightly above the progress header/content)
+      const targetTop = rect.top + scrollTop - 100;
+      
+      window.scrollTo({
+        top: targetTop >= 0 ? targetTop : 0,
+        behavior: 'smooth'
+      });
+      
+      // Also notify any custom scrollable main container if applicable
+      const mainContent = document.querySelector('main') || document.querySelector('#main-content');
+      if (mainContent) {
+        const mainRect = builderRef.current.getBoundingClientRect();
+        const currentMainScroll = mainContent.scrollTop;
+        const mainTarget = mainRect.top + currentMainScroll - 100;
+        mainContent.scrollTo({
+          top: mainTarget >= 0 ? mainTarget : 0,
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [currentStep]);
   
   const [settings, setSettings] = useState<CustomExamSettings>({
     classId: '',
@@ -144,11 +175,21 @@ export const PremiumExamBuilder: React.FC<Props> = ({
   }, [settings.subjects, searchQuery, dynamicChapters]);
 
   const filteredTopics = useMemo(() => {
-    return dynamicTopics.filter(t => 
+    const list = dynamicTopics.filter(t => 
       settings.chapters.includes(t.chapterId) &&
       t.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  }, [settings.chapters, searchQuery, dynamicTopics]);
+
+    // Sort topics sequentially by their chapter representation's index in dynamicChapters
+    return [...list].sort((a, b) => {
+      const idxA = dynamicChapters.findIndex(c => c.id === a.chapterId);
+      const idxB = dynamicChapters.findIndex(c => c.id === b.chapterId);
+      if (idxA !== idxB) {
+        return idxA - idxB;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [settings.chapters, searchQuery, dynamicTopics, dynamicChapters]);
 
   const stats = useMemo(() => {
     const selectedTopicsData = dynamicTopics.filter(t => settings.topics.includes(t.id));
@@ -167,7 +208,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
   }, [settings.topics, settings.chapters, dynamicTopics, dynamicChapters]);
 
   return (
-    <div className="w-full max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
+    <div ref={builderRef} className="w-full max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
       {/* Progress Header */}
       <div className="flex justify-between items-center mb-12 overflow-x-auto pb-4 no-scrollbar">
         {STEPS.map((step, idx) => {
@@ -205,7 +246,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -20 }}
           transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
-          className="min-h-[500px]"
+          className="min-h-[500px] pb-24"
         >
           {currentStep === 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -263,7 +304,9 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                     <p className="text-sm text-zinc-600 dark:text-zinc-400">এই বিষয়ে দক্ষ হয়ে উঠুন</p>
                     {isSelected && (
                       <motion.div 
-                        layoutId="check-subject"
+                        initial={{ scale: 0, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0, opacity: 0 }}
                         className="absolute top-4 right-4 w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center text-white"
                       >
                         <Check size={14} />
@@ -399,6 +442,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {filteredTopics.map((topic) => {
                     const isSelected = settings.topics.includes(topic.id);
+                    const parentChapter = dynamicChapters.find(c => c.id === topic.chapterId);
                     return (
                       <Card 
                         key={topic.id}
@@ -424,6 +468,12 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                         </div>
                         
                         <div>
+                          {parentChapter && (
+                            <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-violet-600 dark:text-violet-400 mb-1 leading-relaxed">
+                              <BookOpen size={10} className="shrink-0" />
+                              <span className="truncate max-w-full">{parentChapter.name}</span>
+                            </span>
+                          )}
                           <h4 className="font-bold text-zinc-900 dark:text-white text-sm mb-2">{topic.name}</h4>
                           {topic.tags && topic.tags.length > 0 && (
                             <div className="flex flex-wrap gap-1">
@@ -461,20 +511,39 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                 
                 <div className="space-y-4 bg-zinc-50 dark:bg-zinc-900 p-6 rounded-[28px] border border-zinc-100 dark:border-zinc-800">
                   <div>
-                    <label className="text-sm font-semibold text-zinc-600 dark:text-zinc-400 mb-2 block">প্রশ্নের সংখ্যা</label>
-                    <input 
-                      type="range" 
-                      min="5" 
-                      max={Math.min(100, stats.totalMcq)} 
-                      step="5"
-                      value={settings.mcqCount}
-                      onChange={(e) => setSettings(prev => ({ ...prev, mcqCount: parseInt(e.target.value) || 0 }))}
-                      className="w-full accent-primary-palette"
-                    />
-                    <div className="flex justify-between mt-2 text-xs font-bold text-primary-palette">
-                      <span>5</span>
-                      <span className="bg-primary-palette text-white px-3 py-1 rounded-full">{settings.mcqCount || 0}</span>
-                      <span>{Math.min(100, stats.totalMcq)}</span>
+                    <label className="text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2 block">প্রশ্নের সংখ্যা (টাইপ করুন)</label>
+                    <div className="relative flex items-center">
+                      <button 
+                        type="button"
+                        onClick={() => setSettings(prev => ({ ...prev, mcqCount: Math.max(0, prev.mcqCount - 5) }))}
+                        className="absolute left-2 w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-650 dark:text-zinc-300 font-extrabold flex items-center justify-center transition-all z-10"
+                      >
+                        -5
+                      </button>
+                      <input 
+                        type="number" 
+                        min="0"
+                        value={settings.mcqCount}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          setSettings(prev => ({ ...prev, mcqCount: isNaN(val) ? 0 : Math.max(0, val) }));
+                        }}
+                        className="w-full p-4 px-14 text-center bg-white dark:bg-zinc-800 rounded-2xl border-2 border-zinc-100 dark:border-zinc-800 focus:border-primary-palette outline-none font-black text-xl text-zinc-900 dark:text-white transition-all shadow-inner"
+                        placeholder="MCQ সংখ্যা লিখুন..."
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setSettings(prev => ({ ...prev, mcqCount: prev.mcqCount + 5 }))}
+                        className="absolute right-2 w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-650 dark:text-zinc-300 font-extrabold flex items-center justify-center transition-all z-10"
+                      >
+                        +5
+                      </button>
+                    </div>
+                    <div className="flex justify-between mt-2 px-1 text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
+                      <span>টপিকসমূহের মোট MCQ: {stats.totalMcq}টি</span>
+                      {settings.mcqCount > stats.totalMcq && (
+                        <span className="text-amber-600 dark:text-amber-400 font-semibold">বাকিগুলোর জন্য ডামি প্রশ্ন যোগ করা হবে</span>
+                      )}
                     </div>
                   </div>
 
@@ -514,20 +583,39 @@ export const PremiumExamBuilder: React.FC<Props> = ({
 
                 <div className="space-y-4 bg-zinc-50 dark:bg-zinc-900 p-6 rounded-[28px] border border-zinc-100 dark:border-zinc-800">
                   <div>
-                    <label className="text-sm font-semibold text-zinc-600 dark:text-zinc-400 mb-2 block">প্রশ্নের সংখ্যা</label>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max={Math.min(20, stats.totalWritten)} 
-                      step="1"
-                      value={settings.writtenCount}
-                      onChange={(e) => setSettings(prev => ({ ...prev, writtenCount: parseInt(e.target.value) || 0 }))}
-                      className="w-full accent-amber-500"
-                    />
-                    <div className="flex justify-between mt-2 text-xs font-bold text-amber-500">
-                      <span>0</span>
-                      <span className="bg-amber-500 text-white px-3 py-1 rounded-full">{settings.writtenCount || 0}</span>
-                      <span>{Math.min(20, stats.totalWritten)}</span>
+                    <label className="text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2 block">প্রশ্নের সংখ্যা (টাইপ করুন)</label>
+                    <div className="relative flex items-center">
+                      <button 
+                        type="button"
+                        onClick={() => setSettings(prev => ({ ...prev, writtenCount: Math.max(0, prev.writtenCount - 1) }))}
+                        className="absolute left-2 w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-650 dark:text-zinc-300 font-extrabold flex items-center justify-center transition-all z-10"
+                      >
+                        -1
+                      </button>
+                      <input 
+                        type="number" 
+                        min="0"
+                        value={settings.writtenCount}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          setSettings(prev => ({ ...prev, writtenCount: isNaN(val) ? 0 : Math.max(0, val) }));
+                        }}
+                        className="w-full p-4 px-14 text-center bg-white dark:bg-zinc-800 rounded-2xl border-2 border-zinc-100 dark:border-zinc-800 focus:border-amber-500 outline-none font-black text-xl text-zinc-900 dark:text-white transition-all shadow-inner"
+                        placeholder="লিখিত প্রশ্ন সংখ্যা..."
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setSettings(prev => ({ ...prev, writtenCount: prev.writtenCount + 1 }))}
+                        className="absolute right-2 w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-650 dark:text-zinc-300 font-extrabold flex items-center justify-center transition-all z-10"
+                      >
+                        +1
+                      </button>
+                    </div>
+                    <div className="flex justify-between mt-2 px-1 text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
+                      <span>টপিকসমূহের মোট লিখিত প্রশ্ন: {stats.totalWritten}টি</span>
+                      {settings.writtenCount > stats.totalWritten && (
+                        <span className="text-amber-600 dark:text-amber-400 font-semibold">বাকিগুলোর জন্য ডামি প্রশ্ন যোগ করা হবে</span>
+                      )}
                     </div>
                   </div>
 
@@ -552,11 +640,12 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                   <h3 className="text-xl font-bold dark:text-white">কাঠিন্য লেভেল ব্যালেন্স (Difficulty)</h3>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   {[
                     { id: 'Easy', label: 'Easy', activeClass: 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shadow-lg shadow-emerald-500/20', icon: <div className="w-2 h-2 rounded-full bg-emerald-500" /> },
                     { id: 'Medium', label: 'Medium', activeClass: 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400 shadow-lg shadow-amber-500/20', icon: <div className="w-2 h-2 rounded-full bg-amber-500" /> },
-                    { id: 'Hard', label: 'Hard', activeClass: 'border-red-500 bg-red-500/10 text-red-600 dark:text-red-400 shadow-lg shadow-red-500/20', icon: <div className="w-2 h-2 rounded-full bg-red-500" /> }
+                    { id: 'Hard', label: 'Hard', activeClass: 'border-red-500 bg-red-500/10 text-red-600 dark:text-red-400 shadow-lg shadow-red-500/20', icon: <div className="w-2 h-2 rounded-full bg-red-500" /> },
+                    { id: 'Mix', label: 'Mix', activeClass: 'border-violet-500 bg-violet-500/10 text-violet-600 dark:text-violet-400 shadow-lg shadow-violet-500/20', icon: <div className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" /> }
                   ].map((diff) => (
                     <button
                       key={diff.id}
@@ -767,26 +856,32 @@ export const PremiumExamBuilder: React.FC<Props> = ({
         </motion.div>
       </AnimatePresence>
 
-      {/* Footer Navigation */}
-      <div className="mt-12 flex justify-between items-center border-t border-zinc-100 dark:border-zinc-800 pt-8">
-        <Button 
-          variant="ghost" 
-          onClick={prevStep}
-          disabled={currentStep === 0}
-          icon={ChevronLeft}
-        >
-          পিছনে
-        </Button>
-        
-        <div className="flex gap-4">
-           {currentStep < STEPS.length - 1 && (
-             <Button 
-              onClick={nextStep}
-              className="bg-primary-palette text-white px-8"
-             >
-               পরবর্তী <ChevronRight size={18} className="ml-1" />
-             </Button>
-           )}
+      {/* Fixed bottom viewport navigation bar */}
+      <div className="fixed bottom-0 left-0 right-0 z-[40] bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md border-t border-zinc-200/50 dark:border-zinc-800/85 shadow-[0_-10px_30px_rgba(0,0,0,0.08)] py-4 transition-all duration-300">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center w-full">
+          <Button 
+            variant="ghost" 
+            onClick={prevStep}
+            disabled={currentStep === 0}
+            icon={ChevronLeft}
+            className="font-bold border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl"
+          >
+            পিছনে
+          </Button>
+          
+          <div className="flex items-center gap-4">
+            <span className="hidden sm:inline-block text-[11px] font-black uppercase text-zinc-400 dark:text-zinc-500 tracking-wider">
+              ধাপ {currentStep + 1} / {STEPS.length}: {STEPS[currentStep].name}
+            </span>
+            {currentStep < STEPS.length - 1 && (
+              <Button 
+                onClick={nextStep}
+                className="bg-primary-palette hover:bg-primary-palette/90 text-white px-8 py-3 font-bold rounded-xl shadow-lg shadow-purple-500/20 active:scale-95 transition-all"
+              >
+                পরবর্তী <ChevronRight size={18} className="ml-1" />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>

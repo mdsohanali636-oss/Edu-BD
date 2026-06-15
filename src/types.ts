@@ -364,7 +364,7 @@ export interface CustomExamSettings {
   mcqCount: number;
   writtenCount: number;
   duration: number; // in minutes
-  difficulty: 'Easy' | 'Medium' | 'Hard';
+  difficulty: 'Easy' | 'Medium' | 'Hard' | 'Mix';
   difficultyDistribution?: {
     easy: number;
     medium: number;
