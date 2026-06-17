@@ -43,8 +43,8 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
   onToggleSaveQuestion
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('wrong');
-  const [subjectFilter, setSubjectFilter] = useState<string>('All');
-  const [chapterFilter, setChapterFilter] = useState<string>('All');
+  const [subjectFilter, setSubjectFilter] = useState<string>('');
+  const [chapterFilter, setChapterFilter] = useState<string>('');
   
   // Solution disclosure state: Map of questionId -> boolean
   const [revealedSolutions, setRevealedSolutions] = useState<Record<string, boolean>>({});
@@ -78,29 +78,33 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
       const sub = item.question?.subject || item.question?.subject_name;
       if (sub) list.add(sub);
     });
-    return ['All', ...Array.from(list)];
+    return Array.from(list);
   }, [activeTab, savedQuestions, wrongQuestions]);
 
   const uniqueChapters = useMemo(() => {
+    if (!subjectFilter) return [];
     const list = new Set<string>();
     const source = activeTab === 'wrong' ? wrongQuestions : savedQuestions;
     source.forEach(item => {
+      const questionSubject = item.question?.subject || item.question?.subject_name || '';
+      if (questionSubject !== subjectFilter) return;
       const chap = item.question?.chapter || item.question?.chapter_name;
       if (chap) list.add(chap);
     });
-    return ['All', ...Array.from(list)];
+    return Array.from(list);
   }, [activeTab, savedQuestions, wrongQuestions, subjectFilter]);
 
   // Filter questions
   const filteredItems = useMemo(() => {
+    if (!subjectFilter) return [];
     const source = activeTab === 'wrong' ? wrongQuestions : savedQuestions;
     return source.filter(item => {
       if (!item.question) return false;
       const questionSubject = item.question.subject || item.question.subject_name || '';
       const questionChapter = item.question.chapter || item.question.chapter_name || '';
 
-      const matchesSubject = subjectFilter === 'All' || questionSubject === subjectFilter;
-      const matchesChapter = chapterFilter === 'All' || questionChapter === chapterFilter;
+      const matchesSubject = questionSubject === subjectFilter;
+      const matchesChapter = !chapterFilter || questionChapter === chapterFilter;
       return matchesSubject && matchesChapter;
     });
   }, [activeTab, savedQuestions, wrongQuestions, subjectFilter, chapterFilter]);
@@ -383,7 +387,7 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800 pb-6 text-left">
           <div className="flex items-center gap-2">
             <button 
-              onClick={() => { setActiveTab('wrong'); setChapterFilter('All'); setSubjectFilter('All'); }}
+              onClick={() => { setActiveTab('wrong'); setChapterFilter(''); setSubjectFilter(''); }}
               className={`px-5 py-2.5 rounded-full font-black text-xs uppercase tracking-wider transition-all duration-300 ${
                 activeTab === 'wrong' 
                   ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20' 
@@ -393,7 +397,7 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
               ❌ ভুল উত্তরের তালিকা {wrongQuestions.length > 0 && `(${wrongQuestions.length})`}
             </button>
             <button 
-              onClick={() => { setActiveTab('saved'); setChapterFilter('All'); setSubjectFilter('All'); }}
+              onClick={() => { setActiveTab('saved'); setChapterFilter(''); setSubjectFilter(''); }}
               className={`px-5 py-2.5 rounded-full font-black text-xs uppercase tracking-wider transition-all duration-300 ${
                 activeTab === 'saved' 
                   ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20' 
@@ -410,28 +414,32 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
               <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest pl-1 mb-1">বিষয় ফিল্টার</label>
               <select
                 value={subjectFilter}
-                onChange={(e) => { setSubjectFilter(e.target.value); setChapterFilter('All'); }}
+                onChange={(e) => { setSubjectFilter(e.target.value); setChapterFilter(''); }}
                 className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-300 outline-none pr-6 focus:border-zinc-400"
               >
+                <option value="">বিষয় নির্বাচন করুন</option>
                 {uniqueSubjects.map(sub => (
-                  <option key={sub} value={sub}>{sub === 'All' ? 'সব বিষয়' : sub}</option>
+                  <option key={sub} value={sub}>{sub}</option>
                 ))}
               </select>
             </div>
 
-            {/* Chapter filter dropdown */}
-            <div className="flex flex-col text-left">
-              <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest pl-1 mb-1">অধ্যায় ফিল্টার</label>
-              <select
-                value={chapterFilter}
-                onChange={(e) => setChapterFilter(e.target.value)}
-                className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-300 outline-none pr-6 focus:border-zinc-400"
-              >
-                {uniqueChapters.map(chap => (
-                  <option key={chap} value={chap}>{chap === 'All' ? 'সব অধ্যায়' : chap}</option>
-                ))}
-              </select>
-            </div>
+            {/* Chapter filter dropdown (conditionally rendered) */}
+            {subjectFilter && uniqueChapters.length > 0 && (
+              <div className="flex flex-col text-left animate-in fade-in slide-in-from-top-1">
+                <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest pl-1 mb-1">অধ্যায় ফিল্টার</label>
+                <select
+                  value={chapterFilter}
+                  onChange={(e) => setChapterFilter(e.target.value)}
+                  className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-300 outline-none pr-6 focus:border-zinc-400"
+                >
+                  <option value="">সকল অধ্যায়</option>
+                  {uniqueChapters.map(chap => (
+                    <option key={chap} value={chap}>{chap}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         </div>
 
@@ -581,10 +589,21 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
               <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
                 <Bookmark size={24} />
               </div>
-              <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200">কোনো তথ্য খুঁজে পাওয়া যায়নি</h3>
-              <p className="text-zinc-500 text-xs max-w-sm mx-auto">
-                 ফিল্টার সামঞ্জস্য করুন অথবা আপনার অনুশীলনে থাকা কোনো প্রশ্ন বুকমার্ক করুন।
-              </p>
+              {!subjectFilter ? (
+                <>
+                  <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200">অনুশীলন শুরু করতে বিষয় নির্বাচন করুন</h3>
+                  <p className="text-zinc-500 text-xs max-w-sm mx-auto">
+                    উপরে ফিল্টার সেকশন হতে বিষয় নির্বাচন করলে আপনার ভুল হওয়া অথবা সেভ করা প্রশ্নগুলো এখানে প্রদর্শিত হবে।
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200">এই বিষয়ে কোনো প্রশ্ন পাওয়া যায়নি</h3>
+                  <p className="text-zinc-500 text-xs max-w-sm mx-auto">
+                    আপনার বাছাইকৃত বিষয়ে এই মুহূর্তে কোনো বুকমার্ক বা ভুল করা প্রশ্ন নেই। অন্য কোনো বিষয় চেষ্টা করুন।
+                  </p>
+                </>
+              )}
             </div>
           )}
         </div>

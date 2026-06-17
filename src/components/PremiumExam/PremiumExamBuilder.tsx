@@ -31,7 +31,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Card, Button, Badge } from '../ui/Base';
-import { Subject, Chapter, CustomExamSettings, AcademicClassInfo, AcademicSubject, AcademicChapter, AcademicTopic } from '../../types';
+import { Subject, Chapter, CustomExamSettings, AcademicClassInfo, AcademicSubject, AcademicChapter, AcademicTopic, AcademicGroup } from '../../types';
+import { supabaseService } from '../../services/supabaseService';
 
 interface Props {
   onGenerate: (settings: CustomExamSettings) => void;
@@ -42,16 +43,6 @@ interface Props {
   dynamicChapters: AcademicChapter[];
   dynamicTopics: AcademicTopic[];
 }
-
-const STEPS = [
-  { id: 'class', name: 'শ্রেণী নির্বাচন', icon: GraduationCap },
-  { id: 'subjects', name: 'বিষয় নির্বাচন', icon: Layers },
-  { id: 'chapters', name: 'অধ্যায় নির্বাচন', icon: Target },
-  { id: 'topics', name: 'টপিক নির্বাচন', icon: BrainIcon },
-  { id: 'config', name: 'প্রশ্নের ধরন', icon: Settings },
-  { id: 'rules', name: 'পরিবেশ ও নিয়ম', icon: Shield },
-  { id: 'preview', name: 'যাচাই ও শুরু', icon: Sparkles },
-];
 
 export const PremiumExamBuilder: React.FC<Props> = ({ 
   onGenerate, 
@@ -96,8 +87,35 @@ export const PremiumExamBuilder: React.FC<Props> = ({
     }
   }, [currentStep]);
   
+  const [academicGroups, setAcademicGroups] = useState<AcademicGroup[]>([]);
+  const [isLoadingGroups, setIsLoadingGroups] = useState(false);
+
+  useEffect(() => {
+    setIsLoadingGroups(true);
+    supabaseService.fetchAcademicGroups()
+      .then(data => {
+        const activeGroups = (data || []).filter((g: any) => g.active);
+        const mappedGroups = activeGroups.map((g: any) => ({
+          id: g.id?.toString() || g.name,
+          name: g.name,
+          active: g.active ?? true,
+          order: g.order || 99,
+          createdAt: g.created_at || new Date().toISOString()
+        }));
+        mappedGroups.sort((a, b) => a.order - b.order);
+        setAcademicGroups(mappedGroups);
+      })
+      .catch(err => {
+        console.error("Error loading academic groups in builder:", err);
+      })
+      .finally(() => {
+        setIsLoadingGroups(false);
+      });
+  }, []);
+
   const [settings, setSettings] = useState<CustomExamSettings>({
     classId: '',
+    academicGroup: '',
     subjects: [],
     chapters: [],
     topics: [],
@@ -118,18 +136,80 @@ export const PremiumExamBuilder: React.FC<Props> = ({
     instantResult: true
   });
 
-  const nextStep = () => setCurrentStep(Math.min(currentStep + 1, STEPS.length - 1));
+  const activeSteps = useMemo(() => {
+    const baseSteps = [
+      { id: 'class', name: 'শ্রেণী নির্বাচন', icon: GraduationCap }
+    ];
+    
+    // Check if selected class has groups
+    const selectedClass = dynamicClasses.find(c => c.id === settings.classId);
+    const classHasGroups = selectedClass ? (selectedClass.has_groups || selectedClass.hasGroups) : false;
+    
+    if (classHasGroups) {
+      baseSteps.push({ id: 'group', name: 'গ্রুপ নির্বাচন', icon: List });
+    }
+    
+    baseSteps.push(
+      { id: 'subjects', name: 'বিষয় নির্বাচন', icon: Layers },
+      { id: 'chapters', name: 'অধ্যায় নির্বাচন', icon: Target },
+      { id: 'topics', name: 'টপিক নির্বাচন', icon: BrainIcon },
+      { id: 'config', name: 'প্রশ্নের ধরন', icon: Settings },
+      { id: 'rules', name: 'পরিবেশ ও নিয়ম', icon: Shield },
+      { id: 'preview', name: 'যাচাই ও শুরু', icon: Sparkles }
+    );
+    
+    return baseSteps;
+  }, [settings.classId, dynamicClasses]);
+
+  const canAdvanceCurrentStep = useMemo(() => {
+    const currentStepId = activeSteps[currentStep]?.id;
+    if (currentStepId === 'class') {
+      return !!settings.classId;
+    }
+    if (currentStepId === 'group') {
+      return !!settings.academicGroup;
+    }
+    if (currentStepId === 'subjects') {
+      return Array.isArray(settings.subjects) && settings.subjects.length > 0;
+    }
+    if (currentStepId === 'chapters') {
+      return Array.isArray(settings.chapters) && settings.chapters.length > 0;
+    }
+    if (currentStepId === 'topics') {
+      return Array.isArray(settings.topics) && settings.topics.length > 0;
+    }
+    return true;
+  }, [currentStep, activeSteps, settings]);
+
+  const nextStep = () => setCurrentStep(Math.min(currentStep + 1, activeSteps.length - 1));
   const prevStep = () => setCurrentStep(Math.max(currentStep - 1, 0));
 
   const toggleClass = (id: string) => {
     setSettings(prev => ({
       ...prev,
       classId: id,
+      academicGroup: '',
       subjects: [],
       chapters: [],
       topics: []
     }));
-    nextStep();
+    setCurrentStep(1);
+  };
+
+  const toggleGroup = (groupName: string) => {
+    setSettings(prev => ({
+      ...prev,
+      academicGroup: groupName,
+      subjects: [],
+      chapters: [],
+      topics: []
+    }));
+    const groupStepIndex = activeSteps.findIndex(s => s.id === 'group');
+    if (groupStepIndex !== -1) {
+      setCurrentStep(groupStepIndex + 1);
+    } else {
+      nextStep();
+    }
   };
 
   const toggleSubject = (id: string) => {
@@ -164,8 +244,20 @@ export const PremiumExamBuilder: React.FC<Props> = ({
 
   const currentSubjects = useMemo(() => {
     if (!settings.classId) return [];
-    return dynamicSubjects.filter(s => s.classId === settings.classId);
-  }, [settings.classId, dynamicSubjects]);
+    let list = dynamicSubjects.filter(s => s.classId === settings.classId);
+    
+    const selectedClass = dynamicClasses.find(c => c.id === settings.classId);
+    const classHasGroups = selectedClass ? (selectedClass.has_groups || selectedClass.hasGroups) : false;
+    
+    if (classHasGroups && settings.academicGroup) {
+      list = list.filter(s => {
+        const sGroup = (s.academicGroup || (s as any).academic_group || 'All').trim().toLowerCase();
+        const selectedG = settings.academicGroup.trim().toLowerCase();
+        return sGroup === selectedG || sGroup === 'all' || sGroup === 'general';
+      });
+    }
+    return list;
+  }, [settings.classId, settings.academicGroup, dynamicSubjects, dynamicClasses]);
 
   const filteredChapters = useMemo(() => {
     return dynamicChapters.filter(c => 
@@ -202,7 +294,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
     
     const selectedChaptersData = dynamicChapters.filter(c => settings.chapters.includes(c.id));
     return {
-      totalMcq: selectedChaptersData.length * 100, // Fallback if mcqCount not in AcademicChapter
+      totalMcq: selectedChaptersData.length * 100,
       totalWritten: selectedChaptersData.length * 20,
     };
   }, [settings.topics, settings.chapters, dynamicTopics, dynamicChapters]);
@@ -211,7 +303,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
     <div ref={builderRef} className="w-full max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
       {/* Progress Header */}
       <div className="flex justify-between items-center mb-12 overflow-x-auto pb-4 no-scrollbar">
-        {STEPS.map((step, idx) => {
+        {activeSteps.map((step, idx) => {
           const Icon = step.icon;
           const isActive = currentStep === idx;
           const isCompleted = currentStep > idx;
@@ -229,7 +321,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                 ${isActive ? 'text-primary-palette' : 'text-zinc-500 dark:text-zinc-400'}`}>
                 {step.name}
               </span>
-              {idx < STEPS.length - 1 && (
+              {idx < activeSteps.length - 1 && (
                 <div className={`absolute left-1/2 top-5 sm:top-6 w-[80px] sm:w-[200px] h-[2px] -z-0 transition-colors duration-500
                   ${isCompleted ? 'bg-emerald-500/30' : 'bg-zinc-100 dark:bg-zinc-800'}`} 
                 />
@@ -248,7 +340,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
           transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
           className="min-h-[500px] pb-24"
         >
-          {currentStep === 0 && (
+          {activeSteps[currentStep]?.id === 'class' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {dynamicClasses.map((cls) => {
                 const isSelected = settings.classId === cls.id;
@@ -283,7 +375,61 @@ export const PremiumExamBuilder: React.FC<Props> = ({
             </div>
           )}
 
-          {currentStep === 1 && (
+          {activeSteps[currentStep]?.id === 'group' && (
+            <div className="space-y-6">
+              <div className="text-center max-w-md mx-auto mb-8">
+                <h3 className="text-2xl font-extrabold text-zinc-900 dark:text-white mb-2">গ্রুপ নির্বাচন করুন</h3>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">আপনার বিজ্ঞান, ব্যবসায় শিক্ষা অথবা মানবিক গ্রুপটি বেছে নিন</p>
+              </div>
+
+              {isLoadingGroups ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <div className="w-12 h-12 border-4 border-primary-palette/30 border-t-primary-palette rounded-full animate-spin" />
+                  <span className="text-sm text-zinc-500 font-bold">লোডিং হচ্ছে...</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {academicGroups.map((group) => {
+                    const isSelected = settings.academicGroup === group.name;
+                    return (
+                      <Card 
+                        key={group.id}
+                        onClick={() => toggleGroup(group.name)}
+                        className={`relative p-8 text-center group transition-all duration-500 cursor-pointer overflow-hidden
+                          ${isSelected ? 'border-2 border-primary-palette bg-primary-palette/5 shadow-lg shadow-purple-500/5' : 'border border-zinc-100 dark:border-zinc-800 hover:border-primary-palette/30'}`}
+                      >
+                        <div 
+                          className={`w-20 h-20 rounded-[24px] mx-auto mb-6 flex items-center justify-center transition-all duration-500 group-hover:scale-110
+                            ${isSelected ? 'bg-primary-palette text-white' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-400 group-hover:text-primary-palette'}`}
+                        >
+                          <List size={32} />
+                        </div>
+                        <h3 className="text-xl font-bold mb-2 text-zinc-900 dark:text-white">{group.name}</h3>
+                        <p className="text-sm text-zinc-600 dark:text-zinc-400">গ্রুপের বিষয়সমূহ উন্মোচন করতে ক্লিক করুন</p>
+                        {isSelected && (
+                          <motion.div 
+                            initial={{ scale: 0, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0, opacity: 0 }}
+                            className="absolute top-4 right-4 w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center text-white"
+                          >
+                            <Check size={14} />
+                          </motion.div>
+                        )}
+                      </Card>
+                    );
+                  })}
+                  {academicGroups.length === 0 && (
+                    <div className="col-span-full py-20 text-center text-zinc-500 font-semibold bg-zinc-50 dark:bg-zinc-900/50 rounded-2xl border-2 border-dashed border-zinc-100 dark:border-zinc-800">
+                       কোনো গ্রুপ পাওয়া যায়নি। অনুগ্রহ করে অপেক্ষা করুন...
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeSteps[currentStep]?.id === 'subjects' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {currentSubjects.map((subject) => {
                 const isSelected = settings.subjects.includes(subject.id);
@@ -323,7 +469,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
             </div>
           )}
 
-          {currentStep === 2 && (
+          {activeSteps[currentStep]?.id === 'chapters' && (
             <div className="space-y-6">
               <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
                 <div className="relative w-full max-w-md">
@@ -399,7 +545,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
             </div>
           )}
 
-          {currentStep === 3 && (
+          {activeSteps[currentStep]?.id === 'topics' && (
             <div className="space-y-6">
               <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
                 <div className="relative w-full max-w-md">
@@ -498,7 +644,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
             </div>
           )}
 
-          {currentStep === 4 && (
+          {activeSteps[currentStep]?.id === 'config' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               {/* MCQ Config */}
               <div className="space-y-6">
@@ -667,7 +813,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
             </div>
           )}
 
-          {currentStep === 4 && (
+          {activeSteps[currentStep]?.id === 'rules' && (
             <div className="space-y-8">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-6">
@@ -762,7 +908,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
           </div>
           )}
 
-          {currentStep === 5 && (
+          {activeSteps[currentStep]?.id === 'preview' && (
              <div className="max-w-2xl mx-auto space-y-8">
                <Card className="p-8 border-2 border-primary-palette bg-primary-palette/5 relative overflow-hidden">
                  {/* Decorative background circle */}
@@ -871,12 +1017,16 @@ export const PremiumExamBuilder: React.FC<Props> = ({
           
           <div className="flex items-center gap-4">
             <span className="hidden sm:inline-block text-[11px] font-black uppercase text-zinc-400 dark:text-zinc-500 tracking-wider">
-              ধাপ {currentStep + 1} / {STEPS.length}: {STEPS[currentStep].name}
+              ধাপ {currentStep + 1} / {activeSteps.length}: {activeSteps[currentStep]?.name}
             </span>
-            {currentStep < STEPS.length - 1 && (
+            {currentStep < activeSteps.length - 1 && (
               <Button 
                 onClick={nextStep}
-                className="bg-primary-palette hover:bg-primary-palette/90 text-white px-8 py-3 font-bold rounded-xl shadow-lg shadow-purple-500/20 active:scale-95 transition-all"
+                disabled={!canAdvanceCurrentStep}
+                className={`px-8 py-3 font-bold rounded-xl shadow-lg active:scale-95 transition-all
+                  ${canAdvanceCurrentStep 
+                    ? 'bg-primary-palette hover:bg-primary-palette/90 text-white shadow-purple-500/20' 
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-200 dark:border-zinc-700 shadow-none'}`}
               >
                 পরবর্তী <ChevronRight size={18} className="ml-1" />
               </Button>

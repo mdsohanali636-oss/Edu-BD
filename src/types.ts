@@ -358,6 +358,7 @@ export interface Subject {
 
 export interface CustomExamSettings {
   classId?: string;
+  academicGroup?: string;
   subjects: string[];
   chapters: string[]; // List of chapter IDs
   topics: string[]; // List of topic IDs

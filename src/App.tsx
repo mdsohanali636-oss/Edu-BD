@@ -661,13 +661,13 @@ export default function App() {
   const [newsletterSubTab, setNewsletterSubTab] = useState<'subscribers' | 'logs'>('subscribers');
 
   // Filters
-  const [classFilter, setClassFilter] = useState<AcademicClass | 'All'>('All');
-  const [groupFilter, setGroupFilter] = useState<string>('All');
-  const [subjectFilter, setSubjectFilter] = useState<string>('All');
-  const [examClassFilter, setExamClassFilter] = useState<AcademicClass | 'All'>('All');
-  const [examGroupFilter, setExamGroupFilter] = useState<string>('All');
-  const [questionClassFilter, setQuestionClassFilter] = useState<string>('All');
-  const [questionGroupFilter, setQuestionGroupFilter] = useState<string>('All');
+  const [classFilter, setClassFilter] = useState<string>('');
+  const [groupFilter, setGroupFilter] = useState<string>('');
+  const [subjectFilter, setSubjectFilter] = useState<string>('');
+  const [examClassFilter, setExamClassFilter] = useState<string>('');
+  const [examGroupFilter, setExamGroupFilter] = useState<string>('');
+  const [questionClassFilter, setQuestionClassFilter] = useState<string>('');
+  const [questionGroupFilter, setQuestionGroupFilter] = useState<string>('');
 
   const isGroupNeeded = (className: any) => {
     if (!className || typeof className !== 'string') return false;
@@ -683,26 +683,32 @@ export default function App() {
     return false;
   };
 
-  // Reset group filter when class changes to non-stream level
+  // Reset downstream filters for home/classes
   useEffect(() => {
-    if (!isGroupNeeded(classFilter)) {
-      setGroupFilter('All');
-    }
+    setGroupFilter('');
+    setSubjectFilter('');
+    setChapterFilter('');
+    setTopicFilter('');
   }, [classFilter]);
 
   useEffect(() => {
-    if (!isGroupNeeded(examClassFilter)) {
-      setExamGroupFilter('All');
-    }
-  }, [examClassFilter]);
+    setSubjectFilter('');
+    setChapterFilter('');
+    setTopicFilter('');
+  }, [groupFilter]);
 
+  // Reset question bank admin filters
   useEffect(() => {
-    if (!isGroupNeeded(questionClassFilter)) {
-      setQuestionGroupFilter('All');
-    }
+    setQuestionGroupFilter('');
+    setQuestionSubjectFilter('');
   }, [questionClassFilter]);
 
+  useEffect(() => {
+    setQuestionSubjectFilter('');
+  }, [questionGroupFilter]);
+
   const getSubjectNamesForClass = useCallback((className: string | 'All', groupName: string = 'All') => {
+    if (className === '') return [];
     if (className === 'All') {
       // Return unique names if multiple classes have same subject name
       return Array.from(new Set(dynamicSubjects.map(s => s.name)));
@@ -714,7 +720,7 @@ export default function App() {
       const matchClass = s.classId === matchedClass.id;
       const sGroup = (s.academicGroup || (s as any).academic_group || 'All').trim().toLowerCase();
       const filterGroup = (groupName || 'All').trim().toLowerCase();
-      const matchGroup = filterGroup === 'all' || sGroup === filterGroup || sGroup === 'all';
+      const matchGroup = filterGroup === 'all' || filterGroup === '' || sGroup === filterGroup || sGroup === 'all';
       return matchClass && matchGroup;
     }).map(s => s.name);
     return Array.from(new Set(subjectNames));
@@ -765,7 +771,7 @@ export default function App() {
   const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
   const [isAvatarRemoved, setIsAvatarRemoved] = useState<boolean>(false);
-  const [examSubjectFilter, setExamSubjectFilter] = useState('All');
+  const [examSubjectFilter, setExamSubjectFilter] = useState('');
   const [examChapterFilter, setExamChapterFilter] = useState<string>('');
   const [examTopicFilter, setExamTopicFilter] = useState<string>('All');
   const [examSetup, setExamSetup] = useState<{
@@ -778,6 +784,25 @@ export default function App() {
      chapter: 'All Chapters'
    });
   const [isGeneratingExam, setIsGeneratingExam] = useState(false);
+
+  // Reset exam filters
+  useEffect(() => {
+    setExamGroupFilter('');
+    setExamSubjectFilter('');
+    setExamChapterFilter('');
+    setExamTopicFilter('');
+  }, [examClassFilter]);
+
+  useEffect(() => {
+    setExamSubjectFilter('');
+    setExamChapterFilter('');
+    setExamTopicFilter('');
+  }, [examGroupFilter]);
+
+  useEffect(() => {
+    setExamChapterFilter('');
+    setExamTopicFilter('');
+  }, [examSubjectFilter]);
 
   const handlePremiumExamClick = () => {
     if (!hasPremiumAccess) {
@@ -958,7 +983,7 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [selectedFiles, setSelectedFiles] = useState<{ thumbnail?: File, resource?: File }>({});
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [questionSubjectFilter, setQuestionSubjectFilter] = useState<string>('All');
+  const [questionSubjectFilter, setQuestionSubjectFilter] = useState<string>('');
 
   const [examPrep, setExamPrep] = useState<Exam | null>(null);
 
@@ -4027,8 +4052,8 @@ export default function App() {
     }
   };
 
-  const classes: (string | 'All')[] = useMemo(() => {
-    return ['All', ...Array.from(new Set(dynamicClasses.map(c => c.name)))];
+  const classes: string[] = useMemo(() => {
+    return Array.from(new Set(dynamicClasses.map(c => c.name))).filter(Boolean) as string[];
   }, [dynamicClasses]);
   
   const subjectIcons: Record<string, any> = {
@@ -4042,14 +4067,14 @@ export default function App() {
     'General': GraduationCap
   };
 
-  const subjectsFilterList = useMemo(() => ['All', ...currentSubjects], [currentSubjects]);
-  const examSubjectsFilterList = useMemo(() => ['All', ...examSubjects], [examSubjects]);
-  const questionSubjectsFilterList = useMemo(() => ['All', ...questionSubjects], [questionSubjects]);
+  const subjectsFilterList = useMemo(() => currentSubjects, [currentSubjects]);
+  const examSubjectsFilterList = useMemo(() => examSubjects, [examSubjects]);
+  const questionSubjectsFilterList = useMemo(() => questionSubjects, [questionSubjects]);
 
   const years = ['All Years', '2024', '2023', '2022', '2021'];
   const [yearFilter, setYearFilter] = useState('All Years');
-  const [chapterFilter, setChapterFilter] = useState<string>('All');
-  const [topicFilter, setTopicFilter] = useState<string>('All');
+  const [chapterFilter, setChapterFilter] = useState<string>('');
+  const [topicFilter, setTopicFilter] = useState<string>('');
   
   // Derive chapters from dynamicChapters based on subject and class
   const chapters = useMemo(() => {
@@ -4740,213 +4765,177 @@ export default function App() {
     );
   };
 
-  const renderFilters = () => (
-    <div className="py-6 sm:py-8 flex flex-col items-center w-full relative">
-      {/* Ambient background for filter section */}
-      <div className="absolute inset-0 bg-blue-50/20 dark:bg-zinc-900/10 blur-3xl -z-10 rounded-full scale-90" />
-      
-      <div className="space-y-4 w-full max-w-6xl px-4">
-        <div className="flex flex-col items-center justify-center gap-1.5 w-full">
-          <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
-            Academic Level
-          </Badge>
-          <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
-            {classes.map(c => (
-              <motion.button 
-                key={c}
-                whileHover={{ scale: 1.02, y: -0.5 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => setClassFilter(c as any)}
-                className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center text-center py-1.5 sm:py-2 px-1 text-[9px] xs:text-[10px] sm:text-xs font-semibold rounded-lg sm:rounded-xl transition-all duration-300 shadow-sm border ${
-                  classFilter === c 
-                  ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-md shadow-zinc-900/10 dark:shadow-white/10' 
-                  : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
-                }`}
-              >
-                <span className="leading-tight truncate max-w-full">{c}</span>
-              </motion.button>
-            ))}
-          </div>
-        </div>
+  const renderFilters = () => {
+    const classSelected = !!classFilter;
+    const hasGroup = classSelected && isGroupNeeded(classFilter);
+    const groupSelected = !!groupFilter;
 
-        {isGroupNeeded(classFilter) && (
-          <div className="flex flex-col items-center justify-center gap-1.5 w-full animate-in fade-in slide-in-from-top-2">
+    // Show Group Selector if classSelected and hasGroup
+    const showGroupSelector = classSelected && hasGroup;
+    
+    // We show Subject Selector ONLY after:
+    // (a) Class is selected and has Group AND Group is selected
+    // OR (b) Class is selected and does NOT have Group
+    const showSubjectSelector = classSelected && (!hasGroup || groupSelected);
+
+    // Show Chapter Selector ONLY after Subject is selected
+    const subjectSelected = !!subjectFilter;
+    const showChapterSelector = showSubjectSelector && subjectSelected;
+
+    // Show Topic Selector ONLY after Chapter is selected
+    const chapterSelected = !!chapterFilter;
+    const showTopicSelector = showChapterSelector && chapterSelected;
+
+    return (
+      <div className="py-6 sm:py-8 flex flex-col items-center w-full relative">
+        {/* Ambient background for filter section */}
+        <div className="absolute inset-0 bg-blue-50/20 dark:bg-zinc-900/10 blur-3xl -z-10 rounded-full scale-90" />
+        
+        <div className="space-y-4 w-full max-w-6xl px-4">
+          {/* Step 1: Class Selector */}
+          <div className="flex flex-col items-center justify-center gap-1.5 w-full">
             <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
-              Academic Group / Stream
+              Academic Level
             </Badge>
             <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
-              {['All', ...Array.from(new Set(academicGroups.map(g => g.name)))].map(g => (
+              {classes.map(c => (
                 <motion.button 
-                  key={g}
+                  key={c}
                   whileHover={{ scale: 1.02, y: -0.5 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    setGroupFilter(g);
-                    setSubjectFilter('All');
-                    setChapterFilter('All');
-                  }}
+                  onClick={() => setClassFilter(c)}
                   className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center text-center py-1.5 sm:py-2 px-1 text-[9px] xs:text-[10px] sm:text-xs font-semibold rounded-lg sm:rounded-xl transition-all duration-300 shadow-sm border ${
-                    groupFilter === g 
+                    classFilter === c 
                     ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-md shadow-zinc-900/10 dark:shadow-white/10' 
                     : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
                   }`}
                 >
-                  <span className="leading-tight truncate max-w-full">{g}</span>
+                  <span className="leading-tight truncate max-w-full">{c}</span>
                 </motion.button>
               ))}
             </div>
           </div>
-        )}
 
-        <div className="flex flex-col items-center justify-center gap-1 w-full">
-          <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-2 py-0.5 text-[9px] uppercase tracking-[0.25em] font-bold">
-            Subject Focus
-          </Badge>
-          <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
-            {subjectsFilterList.map(s => {
-              const Icon = subjectIcons[s];
-              return (
-                <motion.button 
-                  key={s}
-                  whileHover={{ scale: 1.02, y: -0.5 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    setSubjectFilter(s);
-                    setChapterFilter('All');
-                  }}
-                  className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center gap-0.5 sm:gap-1 px-1 py-1.5 sm:py-2 sm:px-4 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] sm:text-xs font-semibold transition-all duration-300 shadow-sm border ${
-                    subjectFilter === s 
-                    ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-md shadow-zinc-900/10 dark:shadow-white/10' 
-                    : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
-                  }`}
-                >
-                  {Icon && <Icon size={11} className={subjectFilter === s ? 'text-blue-400 shrink-0' : 'text-zinc-400 shrink-0'} strokeWidth={2.5} />}
-                  <span className="leading-tight truncate max-w-full">{s}</span>
-                </motion.button>
-              );
-            })}
-          </div>
-        </div>
-
-        {subjectFilter !== 'All' && (
-          <div className="flex flex-col items-center justify-center gap-1.5 w-full animate-in fade-in slide-in-from-top-2">
-            <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
-              Chapter selection
-            </Badge>
-            <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
-               {['All', ...Array.from(new Set(dynamicChapters.filter(ch => {
-                 const matchedSubject = dynamicSubjects.find(s => s.name === subjectFilter);
-                 const matchedClass = dynamicClasses.find(c => c.name === classFilter);
-                 let matches = true;
-                 if (matchedSubject) matches = matches && ch.subjectId === matchedSubject.id;
-                 if (matchedClass) matches = matches && ch.classId === matchedClass.id;
-                 return matches;
-               }).map(ch => ch.name)))].map(ch => (
-                <motion.button 
-                  key={ch}
-                  whileHover={{ scale: 1.02, y: -0.5 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    setChapterFilter(ch);
-                    setTopicFilter('All');
-                  }}
-                  className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center text-center px-1 py-1.5 sm:py-2 sm:px-4 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] sm:text-xs font-semibold transition-all duration-300 shadow-sm border ${
-                    chapterFilter === ch 
-                    ? 'bg-blue-600 text-white border-transparent shadow-md shadow-blue-500/20' 
-                    : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
-                  }`}
-                >
-                  <span className="line-clamp-1 leading-tight max-w-full">{ch}</span>
-                </motion.button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {chapterFilter !== 'All' && (
-          <div className="flex flex-col items-center justify-center gap-1.5 w-full animate-in fade-in slide-in-from-top-2">
-            <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
-              Topic selection
-            </Badge>
-            <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
-               {['All', ...dynamicTopics.filter(t => {
-                 const matchedChapter = dynamicChapters.find(ch => ch.name === chapterFilter);
-                 return matchedChapter && t.chapterId === matchedChapter.id;
-               }).map(t => ({ id: t.id, name: t.name }))].map(t => (
-                <motion.button 
-                  key={typeof t === 'string' ? t : t.id}
-                  whileHover={{ scale: 1.02, y: -0.5 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setTopicFilter(typeof t === 'string' ? t : t.id)}
-                  className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center text-center px-1 py-1.5 sm:py-2 sm:px-4 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] sm:text-xs font-semibold transition-all duration-300 shadow-sm border ${
-                    (topicFilter === (typeof t === 'string' ? t : t.id)) 
-                    ? 'bg-indigo-600 text-white border-transparent shadow-md shadow-indigo-500/20' 
-                    : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
-                  }`}
-                >
-                  <span className="line-clamp-1 leading-tight max-w-full">{typeof t === 'string' ? t : t.name}</span>
-                </motion.button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {user && (
-          <div className="flex flex-col items-center justify-center gap-6 w-full pt-4">
-            <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-black">
-              Content Access
-            </Badge>
-            
-            <div className="relative flex p-1 bg-zinc-200/50 dark:bg-zinc-800/50 backdrop-blur-xl rounded-2xl w-full max-w-[280px] border border-zinc-200 dark:border-zinc-700 shadow-inner group/toggle">
-              {/* Animated Slider */}
-              <motion.div 
-                className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-xl shadow-lg z-0 ${
-                  contentTypeFilter === 'free' 
-                  ? 'bg-blue-600 left-1' 
-                  : 'bg-gradient-to-r from-purple-600 to-indigo-600 right-1'
-                }`}
-                layoutId="accessToggle"
-                transition={{ type: "spring", stiffness: 400, damping: 30 }}
-              />
-              
-              <button 
-                onClick={() => setContentTypeFilter('free')}
-                className={`relative z-10 flex-1 py-2.5 text-xs font-black uppercase tracking-widest transition-colors duration-300 cursor-pointer ${
-                  contentTypeFilter === 'free' ? 'text-white' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
-                }`}
-              >
-                Free
-              </button>
-              <button 
-                onClick={() => {
-                  if (!hasPremiumAccess) {
-                    setShowPremiumPromptModal(true);
-                  } else {
-                    setContentTypeFilter('premium');
-                  }
-                }}
-                className={`relative z-10 flex-1 py-2.5 text-xs font-black uppercase tracking-widest transition-colors duration-300 flex items-center justify-center gap-2 cursor-pointer ${
-                  contentTypeFilter === 'premium' ? 'text-white' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
-                }`}
-              >
-                {contentTypeFilter !== 'premium' && <Lock size={12} className="opacity-50" />}
-                Premium
-                {contentTypeFilter === 'premium' && (
-                  <motion.span 
-                    initial={{ scale: 0 }} 
-                    animate={{ scale: 1 }} 
-                    className="bg-white/20 px-1.5 py-0.5 rounded-md text-[8px]"
+          {/* Step 2: Group Selector */}
+          {showGroupSelector && (
+            <div className="flex flex-col items-center justify-center gap-1.5 w-full animate-in fade-in slide-in-from-top-2">
+              <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
+                Academic Group / Stream
+              </Badge>
+              <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
+                {Array.from(new Set(academicGroups.map(g => g.name))).filter(Boolean).map(g => (
+                  <motion.button 
+                    key={g}
+                    whileHover={{ scale: 1.02, y: -0.5 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => {
+                      setGroupFilter(g);
+                      setSubjectFilter('');
+                      setChapterFilter('');
+                    }}
+                    className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center text-center py-1.5 sm:py-2 px-1 text-[9px] xs:text-[10px] sm:text-xs font-semibold rounded-lg sm:rounded-xl transition-all duration-300 shadow-sm border ${
+                      groupFilter === g 
+                      ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-md shadow-zinc-900/10 dark:shadow-white/10' 
+                      : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
+                    }`}
                   >
-                    PRO
-                  </motion.span>
-                )}
-              </button>
+                    <span className="leading-tight truncate max-w-full">{g}</span>
+                  </motion.button>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+
+          {/* Step 3: Subject Selector */}
+          {showSubjectSelector && (
+            <div className="flex flex-col items-center justify-center gap-1 w-full animate-in fade-in slide-in-from-top-2">
+              <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-2 py-0.5 text-[9px] uppercase tracking-[0.25em] font-bold">
+                Subject Focus
+              </Badge>
+              <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
+                {subjectsFilterList.map(s => {
+                  const Icon = subjectIcons[s];
+                  return (
+                    <motion.button 
+                      key={s}
+                      whileHover={{ scale: 1.02, y: -0.5 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => {
+                        setSubjectFilter(s);
+                        setChapterFilter('');
+                      }}
+                      className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center gap-0.5 sm:gap-1 px-1 py-1.5 sm:py-2 sm:px-4 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] sm:text-xs font-semibold transition-all duration-300 shadow-sm border ${
+                        subjectFilter === s 
+                        ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-md shadow-zinc-900/10 dark:shadow-white/10' 
+                        : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
+                      }`}
+                    >
+                      {Icon && <Icon size={11} className={subjectFilter === s ? 'text-blue-400 shrink-0' : 'text-zinc-400 shrink-0'} strokeWidth={2.5} />}
+                      <span className="leading-tight truncate max-w-full">{s}</span>
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {user && (
+            <div className="flex flex-col items-center justify-center gap-6 w-full pt-4">
+              <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-black">
+                Content Access
+              </Badge>
+              
+              <div className="relative flex p-1 bg-zinc-200/50 dark:bg-zinc-800/50 backdrop-blur-xl rounded-2xl w-full max-w-[280px] border border-zinc-200 dark:border-zinc-700 shadow-inner group/toggle">
+                {/* Animated Slider */}
+                <motion.div 
+                  className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-xl shadow-lg z-0 ${
+                    contentTypeFilter === 'free' 
+                    ? 'bg-blue-600 left-1' 
+                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 right-1'
+                  }`}
+                  layoutId="accessToggle"
+                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                />
+                
+                <button 
+                  onClick={() => setContentTypeFilter('free')}
+                  className={`relative z-10 flex-1 py-2.5 text-xs font-black uppercase tracking-widest transition-colors duration-300 cursor-pointer ${
+                    contentTypeFilter === 'free' ? 'text-white' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  Free
+                </button>
+                <button 
+                  onClick={() => {
+                    if (!hasPremiumAccess) {
+                      setShowPremiumPromptModal(true);
+                    } else {
+                      setContentTypeFilter('premium');
+                    }
+                  }}
+                  className={`relative z-10 flex-1 py-2.5 text-xs font-black uppercase tracking-widest transition-colors duration-300 flex items-center justify-center gap-2 cursor-pointer ${
+                    contentTypeFilter === 'premium' ? 'text-white' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  {contentTypeFilter !== 'premium' && <Lock size={12} className="opacity-50" />}
+                  Premium
+                  {contentTypeFilter === 'premium' && (
+                    <motion.span 
+                      initial={{ scale: 0 }} 
+                      animate={{ scale: 1 }} 
+                      className="bg-white/20 px-1.5 py-0.5 rounded-md text-[8px]"
+                    >
+                      PRO
+                    </motion.span>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const [isCleaning, setIsCleaning] = useState(false);
 
@@ -6085,13 +6074,15 @@ export default function App() {
             <div className="space-y-4">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">Filter by Class</label>
-                <Badge className="bg-indigo-500/10 text-indigo-600 border-none">{questionClassFilter}</Badge>
+                {questionClassFilter && <Badge className="bg-indigo-500/10 text-indigo-600 border-none">{questionClassFilter}</Badge>}
               </div>
               <div className="flex flex-wrap gap-2">
                 {classes.map(c => (
                   <button
                     key={c}
-                    onClick={() => setQuestionClassFilter(c)}
+                    onClick={() => {
+                      setQuestionClassFilter(c);
+                    }}
                     className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
                       questionClassFilter === c 
                       ? 'bg-indigo-600 text-white shadow-[0_10px_20px_-5px_rgba(79,70,229,0.4)] scale-105' 
@@ -6104,19 +6095,18 @@ export default function App() {
               </div>
             </div>
 
-            {isGroupNeeded(questionClassFilter) && (
+            {questionClassFilter && isGroupNeeded(questionClassFilter) && (
               <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50 animate-in fade-in slide-in-from-top-2">
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">Filter by Group</label>
-                  <Badge className="bg-amber-500/10 text-amber-600 border-none">{questionGroupFilter}</Badge>
+                  {questionGroupFilter && <Badge className="bg-amber-500/10 text-amber-600 border-none">{questionGroupFilter}</Badge>}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {['All', ...Array.from(new Set(academicGroups.map(g => g.name)))].map(g => (
+                  {Array.from(new Set(academicGroups.map(g => g.name))).filter(Boolean).map(g => (
                     <button
                       key={g}
                       onClick={() => {
                         setQuestionGroupFilter(g);
-                        setQuestionSubjectFilter('All');
                       }}
                       className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
                         questionGroupFilter === g 
@@ -6131,63 +6121,82 @@ export default function App() {
               </div>
             )}
 
-            <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">Filter by Subject</label>
-                <Badge className="bg-blue-500/10 text-blue-600 border-none">{questionSubjectFilter}</Badge>
+            {questionClassFilter && (!isGroupNeeded(questionClassFilter) || questionGroupFilter) && (
+              <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50 animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">Filter by Subject</label>
+                  {questionSubjectFilter && <Badge className="bg-blue-500/10 text-blue-600 border-none">{questionSubjectFilter}</Badge>}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {questionSubjectsFilterList.map(s => (
+                    <button
+                      key={s}
+                      onClick={() => setQuestionSubjectFilter(s)}
+                      className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
+                        questionSubjectFilter === s 
+                        ? 'bg-blue-600 text-white shadow-[0_10px_20px_-5px_rgba(37,99,235,0.4)] scale-105' 
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {questionSubjectsFilterList.map(s => (
-                  <button
-                    key={s}
-                    onClick={() => setQuestionSubjectFilter(s)}
-                    className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
-                      questionSubjectFilter === s 
-                      ? 'bg-blue-600 text-white shadow-[0_10px_20px_-5px_rgba(37,99,235,0.4)] scale-105' 
-                      : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
+            )}
 
             <div className="pt-6 flex items-center justify-between border-t border-zinc-100 dark:border-zinc-800/50">
               <div className="flex items-center gap-2 text-zinc-500 font-bold text-xs">
                 <Database size={16} />
-                <span>Showing {allQuestions.filter(q => (questionClassFilter === 'All' || q.class === questionClassFilter) && (questionGroupFilter === 'All' || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter || q.academicGroup === 'All' || (q as any).academic_group === 'All') && (questionSubjectFilter === 'All' || q.subject === questionSubjectFilter)).length} Questions</span>
+                <span>
+                  {!questionSubjectFilter 
+                    ? "রিসোর্স দেখতে উপরে শ্রেণী ও বিষয় নির্বাচন করুন" 
+                    : `Showing ${allQuestions.filter(q => q.class === questionClassFilter && (!isGroupNeeded(questionClassFilter) || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter) && q.subject === questionSubjectFilter).length} Questions`}
+                </span>
               </div>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => {
-                  setQuestionClassFilter('All');
-                  setQuestionSubjectFilter('All');
-                }}
-                className="text-[10px]"
-                icon={RefreshCw}
-              >
-                Reset All
-              </Button>
+              {(questionClassFilter || questionGroupFilter || questionSubjectFilter) && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => {
+                    setQuestionClassFilter('');
+                    setQuestionGroupFilter('');
+                    setQuestionSubjectFilter('');
+                  }}
+                  className="text-[10px]"
+                  icon={RefreshCw}
+                >
+                  Reset All
+                </Button>
+              )}
             </div>
           </div>
 
-          {allQuestions.filter(q => (questionClassFilter === 'All' || q.class === questionClassFilter) && (questionGroupFilter === 'All' || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter || q.academicGroup === 'All' || (q as any).academic_group === 'All') && (questionSubjectFilter === 'All' || q.subject === questionSubjectFilter)).length === 0 && (
-            <div className="bg-blue-500/5 border border-blue-500/20 rounded-3xl p-8 text-center space-y-4">
-              <div className="w-16 h-16 bg-blue-500/10 text-blue-600 rounded-2xl flex items-center justify-center mx-auto">
-                <Database size={32} />
-              </div>
-              <div className="space-y-2">
-                <h4 className="text-xl font-bold text-zinc-900 dark:text-white">Empty Question Bank</h4>
-                <p className="text-sm text-zinc-500 max-w-sm mx-auto">Your question bank is empty. Use the "Seed Questions" button above to quickly populate it with standardized data.</p>
-              </div>
+          {!questionSubjectFilter ? (
+            <div className="py-20 text-center rounded-[32px] border-2 border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50/20 dark:bg-zinc-900/10 p-8 space-y-4 animate-in fade-in duration-500 flex flex-col items-center justify-center">
+              <Database className="text-zinc-400 dark:text-zinc-600 animate-bounce" size={56} />
+              <h4 className="text-xl font-bold text-zinc-700 dark:text-zinc-300">প্রশ্ন ব্যাংক দেখতে শ্রেণী ও বিষয় নির্বাচন করুন</h4>
+              <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
+                দয়া করে উপরে শ্রেণী এবং বিষয় নির্বাচন সম্পন্ন করুন। নির্বাচন সম্পন্ন করা হলে সংশ্লিষ্ট বিষয়ভিত্তিক প্রশ্নসমুহ লোড হবে।
+              </p>
             </div>
-          )}
+          ) : (
+            <>
+              {allQuestions.filter(q => q.class === questionClassFilter && (!isGroupNeeded(questionClassFilter) || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter) && q.subject === questionSubjectFilter).length === 0 && (
+                <div className="bg-blue-500/5 border border-blue-500/20 rounded-3xl p-8 text-center space-y-4">
+                  <div className="w-16 h-16 bg-blue-500/10 text-blue-600 rounded-2xl flex items-center justify-center mx-auto">
+                    <Database size={32} />
+                  </div>
+                  <div className="space-y-2">
+                    <h4 className="text-xl font-bold text-zinc-900 dark:text-white">Empty Question Bank</h4>
+                    <p className="text-sm text-zinc-500 max-w-sm mx-auto">Your question bank is empty. Use the "Seed Questions" button above to quickly populate it with standardized data.</p>
+                  </div>
+                </div>
+              )}
 
-          <div className="grid grid-cols-1 gap-4">
-            {allQuestions
-              .filter(q => (questionClassFilter === 'All' || q.class === questionClassFilter) && (questionGroupFilter === 'All' || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter || q.academicGroup === 'All' || (q as any).academic_group === 'All') && (questionSubjectFilter === 'All' || q.subject === questionSubjectFilter))
+              <div className="grid grid-cols-1 gap-4">
+                {allQuestions
+                  .filter(q => q.class === questionClassFilter && (!isGroupNeeded(questionClassFilter) || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter) && q.subject === questionSubjectFilter)
               .map((q, qIdx) => (
               <div key={`${q.id || 'q'}-${qIdx}`} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 flex flex-col md:flex-row items-center gap-6 shadow-sm hover:shadow-md transition-all group">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${q.type === 'mcq' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'bg-purple-100 dark:bg-purple-900/30 text-purple-600'}`}>
@@ -6241,7 +6250,9 @@ export default function App() {
               </div>
             )}
           </div>
-        </div>
+        </>
+      )}
+    </div>
       ) : adminTab === 'leaderboards' ? (
         <div className="space-y-6">
           <div className="flex items-center gap-4 p-4 bg-white dark:bg-zinc-900 rounded-[32px] border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-x-auto no-scrollbar">
@@ -7379,17 +7390,41 @@ export default function App() {
 
   const renderExamMode = () => {
     if (!activeExam) {
-      const subjects = examSubjectsFilterList;
-      const classesList = classes;
+      // Pristine database collections with 'All' filtered out
+      const pristineClassesList = Array.from(new Set(dynamicClasses.map(c => c.name))).filter(Boolean);
+      const pristineGroupsList = Array.from(new Set(academicGroups.map(g => g.name))).filter(Boolean);
+      const pristineExamSubjectsList = examSubjects.filter(name => name !== 'All');
+
+      // Get chapters under the selected class and subject for exams
+      const examChaptersList = (() => {
+        if (!examSubjectFilter || !examClassFilter) return [];
+        const matchedSubject = dynamicSubjects.find(s => s.name === examSubjectFilter);
+        const matchedClass = dynamicClasses.find(c => c.name === examClassFilter);
+        if (!matchedSubject || !matchedClass) return [];
+        
+        return dynamicChapters.filter(ch => ch.subjectId === matchedSubject.id && ch.classId === matchedClass.id);
+      })();
+
+      // Get topics under the selected chapter
+      const examTopicsList = (() => {
+        if (!examChapterFilter) return [];
+        const matchedChapter = examChaptersList.find(ch => ch.name === examChapterFilter);
+        if (!matchedChapter) return [];
+        
+        return dynamicTopics.filter(t => t.chapterId === matchedChapter.id);
+      })();
 
       const filteredExams = allExams.filter(exam => {
-        const matchesSubject = examSubjectFilter === 'All' || exam.subject === examSubjectFilter;
-        const matchesClass = examClassFilter === 'All' || exam.class === examClassFilter;
-        const matchesGroup = examGroupFilter === 'All' || exam.academicGroup === examGroupFilter || (exam as any).academic_group === examGroupFilter || exam.academicGroup === 'All' || (exam as any).academic_group === 'All';
-        const matchesChapter = !examChapterFilter || examChapterFilter === 'All' || !exam.chapter || (exam.chapter || '').toLowerCase() === examChapterFilter.toLowerCase();
-        const matchesTopic = !examTopicFilter || examTopicFilter === 'All' || (exam as any).topic_id === examTopicFilter || (exam.topicIds && exam.topicIds.includes(examTopicFilter));
+        const matchesClass = !examClassFilter || exam.class === examClassFilter;
+        // Group matches if non-streams class, or if exact match
+        const matchesGroup = !examGroupFilter || exam.academicGroup === examGroupFilter || (exam as any).academic_group === examGroupFilter;
+        const matchesSubject = !examSubjectFilter || exam.subject === examSubjectFilter;
+        const matchesChapter = !examChapterFilter || exam.chapter === examChapterFilter;
+        const matchesTopic = !examTopicFilter || examTopicFilter === 'All' || examTopicFilter === '' ? true : (
+          exam.topicIds?.includes(examTopicFilter) || (exam as any).topic_ids?.includes(examTopicFilter) || (exam as any).topic_id === examTopicFilter
+        );
         const matchesType = contentTypeFilter === 'free' ? !exam.isPremium : exam.isPremium;
-        return matchesSubject && matchesClass && matchesGroup && matchesChapter && matchesTopic && matchesType;
+        return matchesClass && matchesGroup && matchesSubject && matchesChapter && matchesTopic && matchesType;
       });
 
       return (
@@ -7401,47 +7436,23 @@ export default function App() {
 
           {/* Exam Filters */}
           <Card className="p-8 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-3xl border border-zinc-200/50 dark:border-zinc-800/50 rounded-[40px] shadow-sm space-y-8">
+            {/* Step 1: Class */}
             <div className="space-y-4">
               <div className="flex items-center justify-between mb-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">বিষয় নির্বাচন করুন</label>
-                <Badge className="bg-blue-500/10 text-blue-600 border-none">{examSubjectFilter}</Badge>
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 rounded-full flex items-center justify-center text-[10px] font-black">১</div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">শ্রেণী নির্বাচন করুন</label>
+                </div>
+                {examClassFilter && <Badge className="bg-indigo-500/10 text-indigo-600 border-none">{examClassFilter}</Badge>}
               </div>
               <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
-                {subjects.map(s => (
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    key={s}
-                    onClick={() => {
-                      setExamSubjectFilter(s);
-                      setExamChapterFilter('All');
-                    }}
-                    className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
-                      examSubjectFilter === s 
-                      ? 'bg-blue-600 text-white shadow-[0_10px_20px_-5px_rgba(37,99,235,0.4)] scale-105' 
-                      : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-                    }`}
-                  >
-                    {s}
-                  </motion.button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">শ্রেণী নির্বাচন করুন</label>
-                <Badge className="bg-indigo-500/10 text-indigo-600 border-none">{examClassFilter}</Badge>
-              </div>
-              <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
-                {classes.map(c => (
+                {pristineClassesList.map(c => (
                   <motion.button
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     key={c}
                     onClick={() => {
-                      setExamClassFilter(c as AcademicClass | 'All');
-                      setExamChapterFilter('All');
+                      setExamClassFilter(c);
                     }}
                     className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
                       examClassFilter === c 
@@ -7455,22 +7466,24 @@ export default function App() {
               </div>
             </div>
 
-            {isGroupNeeded(examClassFilter) && (
-              <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50 animate-in fade-in slide-in-from-top-2">
+            {/* Step 2: Group (if applicable) */}
+            {examClassFilter && isGroupNeeded(examClassFilter) && (
+              <div className="space-y-4 pt-6 border-t border-zinc-100 dark:border-zinc-800/50 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">গ্রুপ/স্ট্রিম নির্বাচন করুন</label>
-                  <Badge className="bg-amber-500/10 text-amber-600 border-none">{examGroupFilter}</Badge>
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 bg-amber-100 dark:bg-amber-900/30 text-amber-600 rounded-full flex items-center justify-center text-[10px] font-black">২</div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">গ্রুপ/স্ট্রিম নির্বাচন করুন</label>
+                  </div>
+                  {examGroupFilter && <Badge className="bg-amber-500/10 text-amber-600 border-none">{examGroupFilter}</Badge>}
                 </div>
                 <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
-                  {['All', ...Array.from(new Set(academicGroups.map(g => g.name)))].map(g => (
+                  {pristineGroupsList.map(g => (
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
                       key={g}
                       onClick={() => {
                         setExamGroupFilter(g);
-                        setExamSubjectFilter('All');
-                        setExamChapterFilter('All');
                       }}
                       className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
                         examGroupFilter === g 
@@ -7485,166 +7498,255 @@ export default function App() {
               </div>
             )}
 
-            <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">উপলব্ধ অধ্যায়সমূহ</label>
-                <Badge className="bg-emerald-500/10 text-emerald-600 border-none">{examChapterFilter || 'সব অধ্যায়'}</Badge>
-              </div>
-              {chapters.length > 1 ? (
-                <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
-                  {chapters.map(ch => (
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      key={ch}
-                      onClick={() => {
-                        setExamChapterFilter(ch);
-                        setExamTopicFilter('All');
-                      }}
-                      className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
-                        (examChapterFilter === ch || (ch === 'All' && !examChapterFilter))
-                        ? 'bg-emerald-600 text-white shadow-[0_10px_20px_-5px_rgba(5,150,105,0.4)] scale-105' 
-                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-                      }`}
-                    >
-                      {ch}
-                    </motion.button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-zinc-400 italic ml-2">এই নির্বাচনের জন্য কোনো নির্দিষ্ট অধ্যায় পাওয়া যায়নি।</p>
-              )}
-            </div>
-
-            {examChapterFilter && examChapterFilter !== 'All' && (
-              <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/50">
+            {/* Step 3 or 2: Subject */}
+            {examClassFilter && (!isGroupNeeded(examClassFilter) || examGroupFilter) && (
+              <div className="space-y-4 pt-6 border-t border-zinc-100 dark:border-zinc-800/50 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">টপিক নির্বাচন করুন</label>
-                  <Badge className="bg-purple-500/10 text-purple-600 border-none">{examTopicFilter || 'সব টপিক'}</Badge>
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-full flex items-center justify-center text-[10px] font-black">
+                      {isGroupNeeded(examClassFilter) ? "৩" : "২"}
+                    </div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">বিষয় নির্বাচন করুন</label>
+                  </div>
+                  {examSubjectFilter && <Badge className="bg-blue-500/10 text-blue-600 border-none">{examSubjectFilter}</Badge>}
                 </div>
-                <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
-                  {['All', ...dynamicTopics.filter(t => {
-                    const matchedChapter = dynamicChapters.find(ch => ch.name === examChapterFilter);
-                    return matchedChapter && t.chapterId === matchedChapter.id;
-                  }).map(t => ({ id: t.id, name: t.name }))].map(t => (
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      key={typeof t === 'string' ? t : t.id}
-                      onClick={() => setExamTopicFilter(typeof t === 'string' ? t : t.id)}
-                      className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
-                        examTopicFilter === (typeof t === 'string' ? t : t.id)
-                        ? 'bg-purple-600 text-white shadow-[0_10px_20px_-5px_rgba(147,51,234,0.4)] scale-105' 
-                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-                      }`}
-                    >
-                      {typeof t === 'string' ? t : t.name}
-                    </motion.button>
-                  ))}
-                </div>
+                {pristineExamSubjectsList.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+                    {pristineExamSubjectsList.map(s => (
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        key={s}
+                        onClick={() => {
+                          setExamSubjectFilter(s);
+                        }}
+                        className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
+                          examSubjectFilter === s 
+                          ? 'bg-blue-600 text-white shadow-[0_10px_20px_-5px_rgba(37,99,235,0.4)] scale-105' 
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                        }`}
+                      >
+                        {s}
+                      </motion.button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-400 italic ml-2">এই শ্রেণীর জন্য কোনো বিষয় পাওয়া যায়নি।</p>
+                )}
               </div>
             )}
 
+            {/* Step 4: Chapter Selection */}
+            {examSubjectFilter && (
+              <div className="space-y-4 pt-6 border-t border-zinc-100 dark:border-zinc-800/50 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 bg-purple-100 dark:bg-purple-900/30 text-purple-600 rounded-full flex items-center justify-center text-[10px] font-black">
+                      {isGroupNeeded(examClassFilter) ? "৪" : "৩"}
+                    </div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">অধ্যায় নির্বাচন করুন</label>
+                  </div>
+                  {examChapterFilter && <Badge className="bg-purple-500/10 text-purple-600 border-none">{examChapterFilter}</Badge>}
+                </div>
+                {examChaptersList.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+                    {Array.from(new Set(examChaptersList.map(ch => ch.name))).filter(Boolean).map(ch => (
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        key={ch}
+                        onClick={() => {
+                          setExamChapterFilter(ch);
+                          setExamTopicFilter('');
+                        }}
+                        className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
+                          examChapterFilter === ch 
+                          ? 'bg-purple-600 text-white shadow-[0_10px_20px_-5px_rgba(147,51,234,0.4)] scale-105' 
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                        }`}
+                      >
+                        {ch}
+                      </motion.button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-400 italic ml-2">এই বিষয়ের জন্য কোনো অধ্যায় পাওয়া যায়নি।</p>
+                )}
+              </div>
+            )}
+
+            {/* Step 5: Topic Selection */}
+            {examChapterFilter && (
+              <div className="space-y-4 pt-6 border-t border-zinc-100 dark:border-zinc-800/50 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-5 h-5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 rounded-full flex items-center justify-center text-[10px] font-black">
+                      {isGroupNeeded(examClassFilter) ? "৫" : "৪"}
+                    </div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 font-bold">টপিক নির্বাচন করুন</label>
+                  </div>
+                  {examTopicFilter && examTopicFilter !== 'All' && examTopicFilter !== '' && (
+                    <Badge className="bg-emerald-500/10 text-emerald-600 border-none">
+                      {examTopicsList.find(t => t.id === examTopicFilter)?.name || examTopicFilter}
+                    </Badge>
+                  )}
+                </div>
+                {examTopicsList.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setExamTopicFilter('All')}
+                      className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
+                        examTopicFilter === 'All' || examTopicFilter === ''
+                        ? 'bg-emerald-600 text-white shadow-[0_10px_20px_-5px_rgba(16,185,129,0.4)] scale-105'
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                      }`}
+                    >
+                      All Topics
+                    </motion.button>
+                    {examTopicsList.map(t => (
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        key={t.id}
+                        onClick={() => {
+                          setExamTopicFilter(t.id);
+                        }}
+                        className={`px-4 py-2 rounded-full text-[11px] font-bold transition-all duration-300 ${
+                          examTopicFilter === t.id 
+                          ? 'bg-emerald-600 text-white shadow-[0_10px_20px_-5px_rgba(16,185,129,0.4)] scale-105' 
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                        }`}
+                      >
+                        {t.name}
+                      </motion.button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-400 italic ml-2">এই অধ্যায়ের জন্য কোনো টপিক পাওয়া যায়নি।</p>
+                )}
+              </div>
+            )}
+
+            {/* Status Footer */}
             <div className="pt-6 flex items-center justify-between border-t border-zinc-100 dark:border-zinc-800/50">
-               <div className="flex items-center gap-2 text-blue-600 font-bold text-sm">
-                 <ClipboardList size={18} />
-                 <span>{filteredExams.length}টি পরীক্ষা পাওয়া গেছে</span>
+               <div className="flex items-center gap-2 text-zinc-500 font-bold text-xs">
+                 <ClipboardList size={18} className="text-blue-500" />
+                 {examSubjectFilter ? (
+                   <span className="text-blue-600">{filteredExams.length}টি পরীক্ষা পাওয়া গেছে</span>
+                 ) : (
+                   <span>পরীক্ষাগুলো লোড করতে উপরে আপনার কাঙ্ক্ষিত অপশনগুলো নির্বাচন করুন।</span>
+                 )}
                </div>
-               <Button 
-                 variant="ghost" 
-                 size="sm" 
-                 disabled={examClassFilter === 'All' && examSubjectFilter === 'All' && !examChapterFilter}
-                 onClick={() => {
-                   setExamClassFilter('All');
-                   setExamSubjectFilter('All');
-                   setExamChapterFilter('All');
-                 }}
-                 className="text-[10px]"
-                 icon={RefreshCw}
-               >
-                 ফিল্টার মুছে ফেলুন
-               </Button>
+               {(examClassFilter || examGroupFilter || examSubjectFilter) && (
+                 <Button 
+                   variant="ghost" 
+                   size="sm" 
+                   onClick={() => {
+                     setExamClassFilter('');
+                     setExamGroupFilter('');
+                     setExamSubjectFilter('');
+                     setExamChapterFilter('');
+                     setExamTopicFilter('');
+                   }}
+                   className="text-[10px] text-zinc-500 hover:text-red-500"
+                   icon={RefreshCw}
+                 >
+                   ফিল্টার মুছে ফেলুন
+                 </Button>
+               )}
             </div>
           </Card>
           
-          {filteredExams.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-              {filteredExams.map((exam, feIdx) => (
-                <div key={exam.id || `exam-${feIdx}`}>
-                  <TiltContainer className="h-full">
-                    <Card className="p-8 space-y-6 hover:shadow-2xl hover:shadow-blue-500/10 transition-all border border-zinc-200/50 dark:border-zinc-800/50 hover:border-blue-500/30 group">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="p-3 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-2xl group-hover:scale-110 transition-transform">
-                          <ClipboardList size={24} />
+          {examSubjectFilter ? (
+            filteredExams.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8 animate-in fade-in zoom-in-95 duration-300">
+                {filteredExams.map((exam, feIdx) => (
+                  <div key={exam.id || `exam-${feIdx}`}>
+                    <TiltContainer className="h-full">
+                      <Card className="p-8 space-y-6 hover:shadow-2xl hover:shadow-blue-500/10 transition-all border border-zinc-200/50 dark:border-zinc-800/50 hover:border-blue-500/30 group">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="p-3 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-2xl group-hover:scale-110 transition-transform">
+                            <ClipboardList size={24} />
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <Badge>{exam.time_limit} মি.</Badge>
+                          </div>
                         </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <Badge>{exam.time_limit} মি.</Badge>
+                        <div className="space-y-2">
+                          <h4 className="text-xl font-bold text-zinc-900 dark:text-white line-clamp-1">{exam.title}</h4>
+                          <p className="text-sm text-zinc-500 line-clamp-2">{exam.description}</p>
                         </div>
-                      </div>
-                      <div className="space-y-2">
-                        <h4 className="text-xl font-bold text-zinc-900 dark:text-white line-clamp-1">{exam.title}</h4>
-                        <p className="text-sm text-zinc-500 line-clamp-2">{exam.description}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500">{exam.class}</Badge>
-                        <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500">{exam.subject}</Badge>
-                        {exam.isPremium && (
-                          <Badge className="bg-amber-500 text-white border-none flex items-center gap-1 font-black animate-pulse">
-                            <Lock size={10} fill="currentColor" /> প্রিমিয়াম
-                          </Badge>
-                        )}
-                      </div>
-                    <div className="flex items-center gap-2">
-                      {exam.isPremium && !hasPremiumAccess ? (
-                        <Button 
-                          className="rounded-2xl flex-1 h-12 bg-amber-600 hover:bg-amber-700 shadow-lg shadow-amber-500/20" 
-                          onClick={() => setGlobalError("🔒 This Exam requires a Premium subscription. Unlock Parodorshhi PRO to continue!")} 
-                          icon={Lock}
-                        >
-                          Unlock Exam
-                        </Button>
-                      ) : (
-                        <Button 
-                          className="rounded-2xl flex-1 h-12 bg-blue-600 hover:bg-blue-700" 
-                          onClick={() => handleStartExam(exam)} 
-                          icon={Play}
-                        >
-                          Start Exam
-                        </Button>
-                      )}
-                        <Button 
-                          variant="outline" 
-                          className="rounded-2xl flex-1 h-12 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800" 
-                          onClick={() => {
-                            setLeaderboardExamId(exam.id);
-                            setLeaderboardTab('exam');
-                            setView('leaderboard');
-                          }}
-                          icon={Trophy}
-                        >
-                          Rankings
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          className="rounded-2xl w-12 h-12 p-0 border-zinc-200" 
-                          onClick={() => setExamPrep(exam)}
-                        >
-                          <Settings size={18} />
-                        </Button>
-                      </div>
-                    </Card>
-                  </TiltContainer>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="py-20 text-center space-y-4">
-              <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
-                <Search size={32} />
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500">{exam.class}</Badge>
+                          <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500">{exam.subject}</Badge>
+                          {exam.isPremium && (
+                            <Badge className="bg-amber-500 text-white border-none flex items-center gap-1 font-black animate-pulse">
+                              <Lock size={10} fill="currentColor" /> প্রিমিয়াম
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {exam.isPremium && !hasPremiumAccess ? (
+                            <Button 
+                              className="rounded-2xl flex-1 h-12 bg-amber-600 hover:bg-amber-700 shadow-lg shadow-amber-500/20" 
+                              onClick={() => setGlobalError("🔒 This Exam requires a Premium subscription. Unlock Parodorshhi PRO to continue!")} 
+                              icon={Lock}
+                            >
+                              Unlock Exam
+                            </Button>
+                          ) : (
+                            <Button 
+                              className="rounded-2xl flex-1 h-12 bg-blue-600 hover:bg-blue-700" 
+                              onClick={() => handleStartExam(exam)} 
+                              icon={Play}
+                            >
+                              Start Exam
+                            </Button>
+                          )}
+                          <Button 
+                            variant="outline" 
+                            className="rounded-2xl flex-1 h-12 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800" 
+                            onClick={() => {
+                              setLeaderboardExamId(exam.id);
+                              setLeaderboardTab('exam');
+                              setView('leaderboard');
+                            }}
+                            icon={Trophy}
+                          >
+                            Rankings
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            className="rounded-2xl w-12 h-12 p-0 border-zinc-200" 
+                            onClick={() => setExamPrep(exam)}
+                          >
+                            <Settings size={18} />
+                          </Button>
+                        </div>
+                      </Card>
+                    </TiltContainer>
+                  </div>
+                ))}
               </div>
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">No exams found</h3>
-              <p className="text-zinc-500">Try adjusting your filters to find more exams.</p>
-              <Button variant="outline" onClick={() => { setExamSubjectFilter('All'); setExamClassFilter('All'); }}>Clear All Filters</Button>
+            ) : (
+              <div className="py-20 text-center space-y-4 animate-in fade-in duration-300">
+                <div className="w-20 h-20 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
+                  <Search size={32} />
+                </div>
+                <h3 className="text-xl font-bold text-zinc-900 dark:text-white">কোনো পরীক্ষা পাওয়া যায়নি</h3>
+                <p className="text-zinc-500">আপনার নির্বাচক ফিল্টার পরিবর্তন করে পুনরায় চেষ্টা করুন।</p>
+                <Button variant="outline" onClick={() => { setExamSubjectFilter(''); setExamGroupFilter(''); setExamClassFilter(''); }}>ফিল্টার রিসেট করুন</Button>
+              </div>
+            )
+          ) : (
+            <div className="py-16 text-center rounded-[32px] border-2 border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50/20 dark:bg-zinc-900/10 p-8 space-y-3 animate-in fade-in duration-300">
+              <ClipboardList className="mx-auto text-zinc-400/80" size={48} />
+              <h4 className="text-lg font-black text-zinc-700 dark:text-zinc-300">পরীক্ষাগুলো দেখতে নির্বাচন সম্পূর্ণ করুন</h4>
+              <p className="text-sm text-zinc-400 max-w-sm mx-auto">
+                উপরে আপনার কাঙ্ক্ষিত শ্রেণী{examClassFilter && isGroupNeeded(examClassFilter) ? ", গ্রুপ" : ""} এবং বিষয় নির্বাচন সম্পন্ন করলে মক পরীক্ষাগুলোর তালিকা এখানে প্রদর্শিত হবে।
+              </p>
             </div>
           )}
         </ScrollSection>
@@ -7908,200 +8010,212 @@ export default function App() {
       <div className="w-full max-w-full px-3 sm:px-6 space-y-6 sm:space-y-10 pb-20 overflow-x-hidden">
         {renderFilters()}
 
-        {contentTypeFilter === 'premium' && user && hasPremiumAccess && (
-          <ScrollSection className="w-full max-w-6xl mx-auto px-4 py-8">
-            <div className="relative group cursor-pointer" onClick={handlePremiumExamClick}>
-              {/* Premium Glow Effect */}
-              <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 rounded-[40px] blur-xl opacity-25 group-hover:opacity-40 transition-all duration-700" />
-              
-              <Card className="relative overflow-hidden bg-zinc-900 border-none rounded-[40px] p-8 sm:p-14 text-white shadow-2xl">
-                <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-primary-palette/20 rounded-full blur-[100px] -mr-40 -mt-40 animate-pulse" />
-                <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-blue-500/10 rounded-full blur-[80px] -ml-20 -mb-20" />
-                
-                <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-12">
-                  <div className="max-w-xl space-y-8 text-center md:text-left">
-                    <div className="inline-flex items-center gap-3 px-5 py-2 bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl">
-                      <Sparkles size={18} className="text-amber-400" />
-                      <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white/90">Elite Intelligence Service</span>
-                    </div>
-                    
-                    <h2 className="text-4xl sm:text-6xl font-black tracking-tighter leading-[1.05]">
-                      Elite Customize <br /> 
-                      <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">Exam System</span>
-                    </h2>
-                    
-                    <p className="text-zinc-400 text-lg font-medium leading-relaxed">
-                      Architect your own practice sessions with our advanced AI-driven question matrix. Complete control over subjects, chapters, and difficulty.
-                    </p>
-                    
-                    <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 sm:gap-6 pt-4">
-                      <Button 
-                        size="lg" 
-                        onClick={handlePremiumExamClick}
-                        className="rounded-2xl px-10 py-7 bg-white text-zinc-950 hover:bg-zinc-100 font-black text-lg shadow-xl shadow-white/10 group/btn"
-                      >
-                        Launch System
-                        <Zap size={20} className="ml-2 group-hover:scale-125 transition-transform text-indigo-600" />
-                      </Button>
-                      <div className="flex flex-col items-center md:items-start">
-                        <div className="flex -space-x-3 mb-2 items-center">
-                          {premiumStudents && premiumStudents.length > 0 ? (
-                            premiumStudents.slice(0, 4).map((student: any, idx: number) => {
-                              const name = student.full_name || student.display_name || 'Pro Student';
-                              const avatar = student.avatar_url || `https://api.dicebear.com/7.x/open-peeps/svg?seed=${encodeURIComponent(name)}`;
-                              return (
-                                <div key={student.id || idx} className="w-9 h-9 rounded-full border-2 border-zinc-900 bg-zinc-800 flex items-center justify-center text-[10px] font-bold overflow-hidden" title={name}>
-                                  <img src={avatar} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                </div>
-                              );
-                            })
-                          ) : (
-                            [1, 2, 3].map(i => (
-                              <div key={i} className="w-9 h-9 rounded-full border-2 border-zinc-900 bg-zinc-800 flex items-center justify-center text-[10px] font-bold overflow-hidden">
-                                <img src={`https://i.pravatar.cc/100?img=${i+10}`} alt="user fallback" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                              </div>
-                            ))
-                          )}
-                          <div className="w-12 h-9 rounded-full px-2 border-2 border-zinc-900 bg-indigo-600 flex items-center justify-center text-[11px] font-black tracking-tight shadow-md select-none">
-                            {premiumStudents ? `${premiumStudents.length}` : '0'}
-                          </div>
-                        </div>
-                        <span className="text-[10px] uppercase tracking-widest font-black text-zinc-500">
-                          {premiumStudents && premiumStudents.length > 0 ? `${premiumStudents.length} Active Pro Student${premiumStudents.length > 1 ? 's' : ''}` : 'Active Pro Students'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+        {!subjectFilter ? (
+          <div className="py-20 text-center rounded-[32px] border-2 border-dashed border-zinc-200/60 dark:border-zinc-800/60 bg-zinc-50/20 dark:bg-zinc-900/10 p-8 space-y-4 animate-in fade-in duration-500 max-w-4xl mx-auto flex flex-col items-center justify-center">
+            <BookOpen className="text-zinc-400 dark:text-zinc-600 animate-bounce" size={56} />
+            <h4 className="text-xl font-bold text-zinc-700 dark:text-zinc-300">রিসোর্সগুলো দেখতে শ্রেণী ও বিষয় নির্বাচন করুন</h4>
+            <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
+              দয়া করে উপরে আপনার শ্রেণী এবং বিষয় নির্বাচন সম্পন্ন করুন। নির্বাচন সম্পন্ন করা হলে সংশ্লিষ্ট নোট, বই, শীট ও ভিডিও কন্টেন্টসমূহ এখানে লোড হবে।
+            </p>
+          </div>
+        ) : (
+          <>
+            {contentTypeFilter === 'premium' && user && hasPremiumAccess && (
+              <ScrollSection className="w-full max-w-6xl mx-auto px-4 py-8">
+                <div className="relative group cursor-pointer" onClick={handlePremiumExamClick}>
+                  {/* Premium Glow Effect */}
+                  <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 rounded-[40px] blur-xl opacity-25 group-hover:opacity-40 transition-all duration-700" />
                   
-                  <div className="relative hidden lg:block">
-                    <motion.div 
-                      animate={{ y: [0, -6, 0] }}
-                      transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-                      className="relative z-10 w-[340px] h-[340px] bg-gradient-to-br from-zinc-800 to-zinc-900 rounded-[60px] border-4 border-white/5 shadow-2xl p-8 flex flex-col justify-between"
-                    >
-                      <div className="space-y-4">
-                        <div className="w-12 h-12 bg-indigo-500/20 rounded-2xl flex items-center justify-center text-indigo-400 shadow-inner">
-                          <BrainIcon size={24} />
-                        </div>
-                        <div className="h-4 w-3/4 bg-white/10 rounded-full" />
-                        <div className="h-4 w-1/2 bg-white/5 rounded-full" />
-                      </div>
-                      
-                      <div className="space-y-3">
-                        {[1, 2, 3].map(i => (
-                          <div key={i} className="flex items-center gap-3">
-                            <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                            <div className="h-2 flex-1 bg-white/10 rounded-full" />
-                          </div>
-                        ))}
-                      </div>
-                      
-                      <div className="flex items-center justify-between">
-                         <div className="flex gap-2">
-                           <div className="w-8 h-8 rounded-lg bg-zinc-700" />
-                           <div className="w-8 h-8 rounded-lg bg-zinc-700" />
-                         </div>
-                         <div className="w-12 h-6 bg-indigo-500/20 rounded-full" />
-                      </div>
-                    </motion.div>
+                  <Card className="relative overflow-hidden bg-zinc-900 border-none rounded-[40px] p-8 sm:p-14 text-white shadow-2xl">
+                    <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-primary-palette/20 rounded-full blur-[100px] -mr-40 -mt-40 animate-pulse" />
+                    <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-blue-500/10 rounded-full blur-[80px] -ml-20 -mb-20" />
                     
-                    {/* Fixed Decorative Orbs */}
-                    <div className="absolute -top-10 -right-10 w-24 h-24 bg-gradient-to-br from-purple-500 to-indigo-500 rounded-full blur-xl opacity-35 z-0" />
-                    <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl z-0" />
-                  </div>
-                </div>
-              </Card>
-            </div>
-          </ScrollSection>
-        )}
-
-        {/* Featured Exams Section */}
-        <ScrollSection id="exams-section" className="space-y-6 sm:space-y-8 group/section relative w-full max-w-full">
-          <div className="absolute top-4 right-20 sm:top-16 sm:right-12 pointer-events-none scale-100 origin-top-right z-30 opacity-100">
-            <div className="pointer-events-auto">
-              <MiniRobot />
-            </div>
-          </div>
-          <div className="flex items-center justify-between relative z-10">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/10">
-                <ClipboardList size={24} />
-              </div>
-              <h3 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">Featured Mock Exams</h3>
-            </div>
-            <div className="flex items-center gap-4">
-              {allExams.filter(e => contentTypeFilter === 'free' ? !e.isPremium : e.isPremium).length > 0 && (
-                <div className="hidden sm:flex items-center gap-1 mr-2">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
-                    onClick={() => scrollContainer("scroll-exams", 'left')}
-                  >
-                    <ChevronLeft size={16} />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
-                    onClick={() => scrollContainer("scroll-exams", 'right')}
-                  >
-                    <ChevronRight size={16} />
-                  </Button>
-                </div>
-              )}
-              <Button variant="ghost" className="text-blue-600 hover:bg-blue-50" onClick={() => setView('exam')}>View All <ChevronRight size={16} className="ml-1" /></Button>
-            </div>
-          </div>
-          <div id="scroll-exams" className="flex overflow-x-auto pb-6 sm:pb-2 gap-4 sm:gap-6 no-scrollbar snap-x snap-mandatory scroll-smooth min-w-full">
-            {allExams.filter(e => contentTypeFilter === 'free' ? !e.isPremium : e.isPremium).length > 0 ? (
-              allExams
-                .filter(e => contentTypeFilter === 'free' ? !e.isPremium : e.isPremium)
-                .slice(0, 10)
-                .map((exam, aeIdx) => (
-                <div key={`home-exam-${exam.id || aeIdx}`} className="min-w-[200px] sm:min-w-[300px] w-[200px] sm:w-[300px] snap-start">
-                  <TiltContainer className="h-full">
-                    <Card className={`p-5 sm:p-8 h-full flex flex-col space-y-3 sm:space-y-4 hover:shadow-xl transition-all group ${exam.isPremium && !hasPremiumAccess ? 'border-amber-500/30' : ''}`}>
-                      <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-                        <Badge className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[9px] sm:text-xs">{exam.subject}</Badge>
-                        <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-400 text-[9px] sm:text-xs">{exam.class}</Badge>
-                        <span className="text-[9px] sm:text-xs font-bold text-zinc-400 group-hover:text-indigo-400 transition-colors uppercase tracking-widest">{exam.time_limit} Min</span>
+                    <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-12">
+                      <div className="max-w-xl space-y-8 text-center md:text-left">
+                        <div className="inline-flex items-center gap-3 px-5 py-2 bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl">
+                          <Sparkles size={18} className="text-amber-400" />
+                          <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white/90">Elite Intelligence Service</span>
+                        </div>
+                        
+                        <h2 className="text-4xl sm:text-6xl font-black tracking-tighter leading-[1.05]">
+                          Elite Customize <br /> 
+                          <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-400">Exam System</span>
+                        </h2>
+                        
+                        <p className="text-zinc-400 text-lg font-medium leading-relaxed">
+                          Architect your own practice sessions with our advanced AI-driven question matrix. Complete control over subjects, chapters, and difficulty.
+                        </p>
+                        
+                        <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 sm:gap-6 pt-4">
+                          <Button 
+                            size="lg" 
+                            onClick={handlePremiumExamClick}
+                            className="rounded-2xl px-10 py-7 bg-white text-zinc-950 hover:bg-zinc-100 font-black text-lg shadow-xl shadow-white/10 group/btn"
+                          >
+                            Launch System
+                            <Zap size={20} className="ml-2 group-hover:scale-125 transition-transform text-indigo-600" />
+                          </Button>
+                          <div className="flex flex-col items-center md:items-start">
+                            <div className="flex -space-x-3 mb-2 items-center">
+                              {premiumStudents && premiumStudents.length > 0 ? (
+                                premiumStudents.slice(0, 4).map((student: any, idx: number) => {
+                                  const name = student.full_name || student.display_name || 'Pro Student';
+                                  const avatar = student.avatar_url || `https://api.dicebear.com/7.x/open-peeps/svg?seed=${encodeURIComponent(name)}`;
+                                  return (
+                                    <div key={student.id || idx} className="w-9 h-9 rounded-full border-2 border-zinc-900 bg-zinc-800 flex items-center justify-center text-[10px] font-bold overflow-hidden" title={name}>
+                                      <img src={avatar} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                [1, 2, 3].map(i => (
+                                  <div key={i} className="w-9 h-9 rounded-full border-2 border-zinc-900 bg-zinc-800 flex items-center justify-center text-[10px] font-bold overflow-hidden">
+                                    <img src={`https://i.pravatar.cc/100?img=${i+10}`} alt="user fallback" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                  </div>
+                                ))
+                              )}
+                              <div className="w-12 h-9 rounded-full px-2 border-2 border-zinc-900 bg-indigo-600 flex items-center justify-center text-[11px] font-black tracking-tight shadow-md select-none">
+                                {premiumStudents ? `${premiumStudents.length}` : '0'}
+                              </div>
+                            </div>
+                            <span className="text-[10px] uppercase tracking-widest font-black text-zinc-500">
+                              {premiumStudents && premiumStudents.length > 0 ? `${premiumStudents.length} Active Pro Student${premiumStudents.length > 1 ? 's' : ''}` : 'Active Pro Students'}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <h4 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white line-clamp-1 group-hover:text-indigo-600 transition-colors">{exam.title}</h4>
-                      <p className="text-xs sm:text-sm text-zinc-500 line-clamp-2">{exam.description}</p>
-                      <div className="flex justify-end pt-2 mt-auto">
-                        {exam.isPremium && !hasPremiumAccess ? (
-                          <Button size="sm" onClick={() => setShowPremiumPromptModal(true)} className="rounded-xl px-4 sm:px-6 bg-amber-600 shadow-lg shadow-amber-500/20 text-xs" icon={Lock}>Upgrade</Button>
-                        ) : (
-                          <Button size="sm" onClick={() => setExamPrep(exam)} className="rounded-xl px-4 sm:px-6 bg-indigo-600 shadow-lg shadow-indigo-500/20 text-xs">Take Test</Button>
-                        )}
+                      
+                      <div className="relative hidden lg:block">
+                        <motion.div 
+                          animate={{ y: [0, -6, 0] }}
+                          transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+                          className="relative z-10 w-[340px] h-[340px] bg-gradient-to-br from-zinc-800 to-zinc-900 rounded-[60px] border-4 border-white/5 shadow-2xl p-8 flex flex-col justify-between"
+                        >
+                          <div className="space-y-4">
+                            <div className="w-12 h-12 bg-indigo-500/20 rounded-2xl flex items-center justify-center text-indigo-400 shadow-inner">
+                              <BrainIcon size={24} />
+                            </div>
+                            <div className="h-4 w-3/4 bg-white/10 rounded-full" />
+                            <div className="h-4 w-1/2 bg-white/5 rounded-full" />
+                          </div>
+                          
+                          <div className="space-y-3">
+                            {[1, 2, 3].map(i => (
+                              <div key={i} className="flex items-center gap-3">
+                                <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                                <div className="h-2 flex-1 bg-white/10 rounded-full" />
+                              </div>
+                            ))}
+                          </div>
+                          
+                          <div className="flex items-center justify-between">
+                             <div className="flex gap-2">
+                               <div className="w-8 h-8 rounded-lg bg-zinc-700" />
+                               <div className="w-8 h-8 rounded-lg bg-zinc-700" />
+                             </div>
+                             <div className="w-12 h-6 bg-indigo-500/20 rounded-full" />
+                          </div>
+                        </motion.div>
+                        
+                        {/* Fixed Decorative Orbs */}
+                        <div className="absolute -top-10 -right-10 w-24 h-24 bg-gradient-to-br from-purple-500 to-indigo-500 rounded-full blur-xl opacity-35 z-0" />
+                        <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl z-0" />
                       </div>
-                    </Card>
-                  </TiltContainer>
+                    </div>
+                  </Card>
                 </div>
-              ))
-            ) : (
-              <div className="w-full flex items-center justify-center py-6">
-                <div className="bg-zinc-100/40 dark:bg-zinc-800/10 border border-zinc-200/50 dark:border-zinc-800/30 rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center space-y-3 w-full max-w-md shadow-sm">
-                  <div className="p-3 bg-indigo-50 text-indigo-500/10 dark:text-indigo-400/10 rounded-full text-indigo-500 shrink-0">
-                    <ClipboardList size={20} />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-zinc-800 dark:text-zinc-200 text-sm">No Mock Exams available yet</h4>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-xs leading-relaxed">Our subject-matter experts are preparing mock tests. They will be added soon.</p>
-                  </div>
-                </div>
-              </div>
+              </ScrollSection>
             )}
-          </div>
-        </ScrollSection>
-        {renderSection('Notes', 'Notes', <FileText className="text-blue-600" size={24} />, 'Add Note', 'notes-section')}
-        {renderSection('Practice Sheets', 'Practice Sheet', <FileText className="text-orange-600" size={24} />, 'Add Practice Sheet', 'practice-section')}
-        {renderSection('Books PDF', 'Books', <BookOpen className="text-green-600" size={24} />, 'Add Book', 'books-section')}
-        {renderSection('Recent Question Papers', 'Question Papers', <History className="text-purple-600" size={24} />, 'Add Paper', 'papers-section')}
-        {renderPlaylistsSection()}
-        {renderSection('YouTube Classes', 'YouTube Classes', <Youtube className="text-red-600" size={24} />, 'Add Video', 'video-section')}
-        {renderExternalResources()}
+
+            {/* Featured Exams Section */}
+            <ScrollSection id="exams-section" className="space-y-6 sm:space-y-8 group/section relative w-full max-w-full">
+              <div className="absolute top-4 right-20 sm:top-16 sm:right-12 pointer-events-none scale-100 origin-top-right z-30 opacity-100">
+                <div className="pointer-events-auto">
+                  <MiniRobot />
+                </div>
+              </div>
+              <div className="flex items-center justify-between relative z-10">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/10">
+                    <ClipboardList size={24} />
+                  </div>
+                  <h3 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">Featured Mock Exams</h3>
+                </div>
+                <div className="flex items-center gap-4">
+                  {allExams.filter(e => contentTypeFilter === 'free' ? !e.isPremium : e.isPremium).length > 0 && (
+                    <div className="hidden sm:flex items-center gap-1 mr-2">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
+                        onClick={() => scrollContainer("scroll-exams", 'left')}
+                      >
+                        <ChevronLeft size={16} />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="w-8 h-8 rounded-full border border-zinc-200 dark:border-zinc-800 opacity-0 group-hover/section:opacity-100 transition-opacity"
+                        onClick={() => scrollContainer("scroll-exams", 'right')}
+                      >
+                        <ChevronRight size={16} />
+                      </Button>
+                    </div>
+                  )}
+                  <Button variant="ghost" className="text-blue-600 hover:bg-blue-50" onClick={() => setView('exam')}>View All <ChevronRight size={16} className="ml-1" /></Button>
+                </div>
+              </div>
+              <div id="scroll-exams" className="flex overflow-x-auto pb-6 sm:pb-2 gap-4 sm:gap-6 no-scrollbar snap-x snap-mandatory scroll-smooth min-w-full">
+                {allExams.filter(e => contentTypeFilter === 'free' ? !e.isPremium : e.isPremium).length > 0 ? (
+                  allExams
+                    .filter(e => contentTypeFilter === 'free' ? !e.isPremium : e.isPremium)
+                    .slice(0, 10)
+                    .map((exam, aeIdx) => (
+                    <div key={`home-exam-${exam.id || aeIdx}`} className="min-w-[200px] sm:min-w-[300px] w-[200px] sm:w-[300px] snap-start">
+                      <TiltContainer className="h-full">
+                        <Card className={`p-5 sm:p-8 h-full flex flex-col space-y-3 sm:space-y-4 hover:shadow-xl transition-all group ${exam.isPremium && !hasPremiumAccess ? 'border-amber-500/30' : ''}`}>
+                          <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+                            <Badge className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[9px] sm:text-xs">{exam.subject}</Badge>
+                            <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-400 text-[9px] sm:text-xs">{exam.class}</Badge>
+                            <span className="text-[9px] sm:text-xs font-bold text-zinc-400 group-hover:text-indigo-400 transition-colors uppercase tracking-widest">{exam.time_limit} Min</span>
+                          </div>
+                          <h4 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white line-clamp-1 group-hover:text-indigo-600 transition-colors">{exam.title}</h4>
+                          <p className="text-xs sm:text-sm text-zinc-500 line-clamp-2">{exam.description}</p>
+                          <div className="flex justify-end pt-2 mt-auto">
+                            {exam.isPremium && !hasPremiumAccess ? (
+                              <Button size="sm" onClick={() => setShowPremiumPromptModal(true)} className="rounded-xl px-4 sm:px-6 bg-amber-600 shadow-lg shadow-amber-500/20 text-xs" icon={Lock}>Upgrade</Button>
+                            ) : (
+                              <Button size="sm" onClick={() => setExamPrep(exam)} className="rounded-xl px-4 sm:px-6 bg-indigo-600 shadow-lg shadow-indigo-500/20 text-xs">Take Test</Button>
+                            )}
+                          </div>
+                        </Card>
+                      </TiltContainer>
+                    </div>
+                  ))
+                ) : (
+                  <div className="w-full flex items-center justify-center py-6">
+                    <div className="bg-zinc-100/40 dark:bg-zinc-800/10 border border-zinc-200/50 dark:border-zinc-800/30 rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-center text-center space-y-3 w-full max-w-md shadow-sm">
+                      <div className="p-3 bg-indigo-50 text-indigo-500/10 dark:text-indigo-400/10 rounded-full text-indigo-500 shrink-0">
+                        <ClipboardList size={20} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-zinc-800 dark:text-zinc-200 text-sm">No Mock Exams available yet</h4>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-xs leading-relaxed">Our subject-matter experts are preparing mock tests. They will be added soon.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </ScrollSection>
+            {renderSection('Notes', 'Notes', <FileText className="text-blue-600" size={24} />, 'Add Note', 'notes-section')}
+            {renderSection('Practice Sheets', 'Practice Sheet', <FileText className="text-orange-600" size={24} />, 'Add Practice Sheet', 'practice-section')}
+            {renderSection('Books PDF', 'Books', <BookOpen className="text-green-600" size={24} />, 'Add Book', 'books-section')}
+            {renderSection('Recent Question Papers', 'Question Papers', <History className="text-purple-600" size={24} />, 'Add Paper', 'papers-section')}
+            {renderPlaylistsSection()}
+            {renderSection('YouTube Classes', 'YouTube Classes', <Youtube className="text-red-600" size={24} />, 'Add Video', 'video-section')}
+            {renderExternalResources()}
+          </>
+        )}
       </div>
     </div>
   );
@@ -8118,35 +8232,45 @@ export default function App() {
               {view === 'saved' ? 'Saved Resources' : searchQuery ? `Search Results for "${searchQuery}"` : selectedCategory}
             </h2>
             <p className="text-zinc-500 dark:text-zinc-400 text-sm">
-              {filteredContents.length} items found
+              {!subjectFilter ? "০টি রিসোর্স পাওয়া গেছে" : `${filteredContents.length} items found`}
             </p>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        <AnimatePresence mode="popLayout">
-          {filteredContents.length > 0 ? (
-            filteredContents.map((content, fcIdx) => {
-              const card = renderContentCard(content);
-              // Properly clone with index-based key to prevent collisions during filtering
-              return React.cloneElement(card as React.ReactElement, {
-                key: content.id + '-' + fcIdx
-              });
-            })
-          ) : (
-            <div className="col-span-full py-20 flex flex-col items-center justify-center text-center space-y-4">
-              <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
-                <Search size={32} />
+      {!subjectFilter ? (
+        <div className="py-20 text-center rounded-[32px] border-2 border-dashed border-zinc-200/60 dark:border-zinc-800/60 bg-zinc-50/20 dark:bg-zinc-900/10 p-8 space-y-4 animate-in fade-in duration-500 w-full flex flex-col items-center justify-center">
+          <BookOpen className="text-zinc-400 dark:text-zinc-600 animate-bounce" size={56} />
+          <h4 className="text-xl font-bold text-zinc-700 dark:text-zinc-300">রিসোর্সগুলো দেখতে শ্রেণী ও বিষয় নির্বাচন করুন</h4>
+          <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
+            দয়া করে উপরে আপনার শ্রেণী এবং বিষয় নির্বাচন সম্পন্ন করুন। নির্বাচন সম্পন্ন করা হলে সংশ্লিষ্ট নোট, বই, শীট ও ভিডিও কন্টেন্টসমূহ এখানে লোড হবে।
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <AnimatePresence mode="popLayout">
+            {filteredContents.length > 0 ? (
+              filteredContents.map((content, fcIdx) => {
+                const card = renderContentCard(content);
+                // Properly clone with index-based key to prevent collisions during filtering
+                return React.cloneElement(card as React.ReactElement, {
+                  key: content.id + '-' + fcIdx
+                });
+              })
+            ) : (
+              <div className="col-span-full py-20 flex flex-col items-center justify-center text-center space-y-4">
+                <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
+                  <Search size={32} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-zinc-900 dark:text-white">No {contentTypeFilter} content found</h3>
+                  <p className="text-zinc-500 max-w-xs mx-auto">Try adjusting your filters or switching back to the regular material section.</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-xl font-bold text-zinc-900 dark:text-white">No {contentTypeFilter} content found</h3>
-                <p className="text-zinc-500 max-w-xs mx-auto">Try adjusting your filters or switching back to the regular material section.</p>
-              </div>
-            </div>
-          )}
-        </AnimatePresence>
-      </div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
     </div>
   );
 
@@ -8548,8 +8672,8 @@ export default function App() {
       const matchesClass = classFilter === 'All' ? true : item.academicClass === classFilter;
       const matchesSubject = subjectFilter === 'All' ? true : item.subject === subjectFilter;
       const matchesGroup = groupFilter === 'All' ? true : (item.academicGroup === groupFilter || (item as any).academic_group === groupFilter || item.academicGroup === 'All' || (item as any).academic_group === 'All');
-      const matchesChapter = chapterFilter === 'All' ? true : (!item.chapter || item.chapter === 'All Chapters' || item.chapter === chapterFilter);
-      const matchesTopic = topicFilter === 'All' ? true : (item.topicId === topicFilter || (item as any).topic_id === topicFilter);
+      const matchesChapter = !chapterFilter || chapterFilter === 'All' ? true : (!item.chapter || item.chapter === 'All Chapters' || item.chapter === chapterFilter);
+      const matchesTopic = !topicFilter || topicFilter === 'All' ? true : (item.topicId === topicFilter || (item as any).topic_id === topicFilter);
       const matchesYear = yearFilter === 'All Years' ? true : item.year === yearFilter;
       const matchesType = contentTypeFilter === 'free' ? !item.isPremium : item.isPremium;
       
