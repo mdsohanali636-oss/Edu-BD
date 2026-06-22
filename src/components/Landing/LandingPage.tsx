@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { Button, Card } from '../ui/Base';
 import parodorshiLogo from '../../assets/logo/parodorshi-logo.svg';
-import parodorshiLogoPng from '../../assets/logo/parodorshi-logo.png';
+import parodorshiLogoPng from '../../assets/logo/parodorshiLogoBase64';
 
 const LandingLogo = ({ className = "h-14 w-auto" }: { className?: string }) => {
   return (

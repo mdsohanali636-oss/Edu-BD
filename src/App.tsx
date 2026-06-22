@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import React, { useState, useMemo, useEffect, useRef, ChangeEvent, FormEvent, cloneElement, useCallback } from 'react';
-import parodorshiLogoPng from './assets/logo/parodorshi-logo.png';
+import parodorshiLogoPng from './assets/logo/parodorshiLogoBase64';
 import { MathRenderer, MathEditor } from './components/Math/MathEditorAndRenderer';
 import { mathInputRegistry, FloatingMathKeyboard } from './components/Math/MathKeyboard';
 import { 
