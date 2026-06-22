@@ -313,8 +313,9 @@ export const WaveDivider = () => (
   </div>
 );
 
-export const ScrollSection = ({ children, id, className = "", style }: { children: React.ReactNode, id?: string, className?: string, style?: React.CSSProperties }) => (
-  <motion.section id={id} className={`relative w-full ${className}`} style={style} initial={{ opacity: 0 }} whileInView={{ opacity: 1 }}>
+export const ScrollSection = React.memo(({ children, id, className = "", style }: { children: React.ReactNode, id?: string, className?: string, style?: React.CSSProperties }) => (
+  <section id={id} className={`relative w-full ${className} animate-in fade-in duration-700`} style={style}>
     {children}
-  </motion.section>
-);
+  </section>
+));
+ScrollSection.displayName = 'ScrollSection';

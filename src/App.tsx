@@ -925,6 +925,112 @@ const PlaylistCard = React.memo(({
 });
 PlaylistCard.displayName = 'PlaylistCard';
 
+export const ensureFullUrl = (url: string) => {
+  if (!url) return '';
+  
+  // If it's a Supabase storage URL (either a full URL or just a path)
+  const isSupabase = url.includes('.supabase.co/storage/v1/object/public/') || !url.startsWith('http');
+  
+  if (isSupabase) {
+    let filePath = url;
+    
+    // If it's a full URL, extract the part after 'public/'
+    if (url.startsWith('http')) {
+      const parts = url.split('/storage/v1/object/public/');
+      if (parts.length > 1) {
+        const bucketAndPath = parts[1];
+        const firstSlash = bucketAndPath.indexOf('/');
+        if (firstSlash !== -1) {
+          // This is the actual path inside the bucket
+          filePath = bucketAndPath.substring(firstSlash + 1);
+        }
+      }
+    }
+    
+    // Clean path: remove any leading 'resources/' or '/resources/' strings that might cause doubling
+    let cleanPath = filePath.replace(/^\/?resources\//, '');
+    
+    try {
+      const { data: { publicUrl } } = supabase.storage
+        .from('resources')
+        .getPublicUrl(cleanPath);
+      return publicUrl;
+    } catch (err) {
+      return url;
+    }
+  }
+  
+  return url;
+};
+
+export const getDirectImageUrl = (url: string) => {
+  if (!url) return '';
+  if (url.startsWith('data:')) return url;
+  
+  // Check if it's a Supabase storage URL
+  const isSupabase = url.includes('.supabase.co/storage/v1/object/public/') || !url.startsWith('http');
+
+  if (isSupabase) {
+    let filePath = url;
+    if (url.startsWith('http')) {
+      const parts = url.split('/storage/v1/object/public/');
+      if (parts.length > 1) {
+        const bucketAndPath = parts[1];
+        const firstSlash = bucketAndPath.indexOf('/');
+        if (firstSlash !== -1) {
+          filePath = bucketAndPath.substring(firstSlash + 1);
+        }
+      }
+    }
+    
+    const cleanPath = filePath.replace(/^\/?resources\//, '');
+    const bucket = 'resources';
+
+    try {
+      const { data: { publicUrl } } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(cleanPath);
+      return publicUrl;
+    } catch (e) {
+      return url;
+    }
+  }
+
+  try {
+    const urlObj = new URL(url);
+    
+    // Handle Google Drive links
+    if (urlObj.hostname.includes('drive.google.com')) {
+      const fileId = urlObj.searchParams.get('id') || urlObj.pathname.split('/d/')?.[1]?.split('/')?.[0];
+      if (fileId) {
+        return `https://drive.google.com/uc?export=view&id=${fileId}`;
+      }
+    }
+
+    // Handle Google Image search result URLs (imgres)
+    if (urlObj.hostname.includes('google.') && urlObj.pathname.includes('imgres')) {
+      const imgUrl = urlObj.searchParams.get('imgurl');
+      if (imgUrl) return decodeURIComponent(imgUrl);
+    }
+
+    // Handle Google Redirector URLs
+    if (urlObj.hostname.includes('google.') && urlObj.pathname.includes('url')) {
+      const urlParam = urlObj.searchParams.get('url') || urlObj.searchParams.get('q');
+      if (urlParam) return decodeURIComponent(urlParam);
+    }
+
+    // Handle Google User Content - ensure high res
+    if (urlObj.hostname.includes('googleusercontent.com')) {
+      const baseUrl = url.split('=')[0];
+      return `${baseUrl}=s1600-rw`;
+    }
+
+  } catch (e) {
+    // Not a valid URL
+  }
+  return url;
+};
+
 export default function App() {
   const queryClient = useQueryClient();
   const [contents, setContents] = useState<ContentItem[]>([]);
@@ -4147,7 +4253,7 @@ export default function App() {
     }
   }, [user, userRole, firestoreUser?.premiumExpiry, isPremium, firestoreUser?.hasPremiumAccess]);
 
-  const handleLogin = async () => {
+  const handleLogin = useCallback(async () => {
     if (isAuthLoading) return;
     setAuthError(null);
     setIsAuthLoading(true);
@@ -4164,7 +4270,7 @@ export default function App() {
     } finally {
       setIsAuthLoading(false);
     }
-  };
+  }, [isAuthLoading]);
 
   const handleEmailLogin = async (email: string, pass: string) => {
     setAuthError(null);
@@ -8856,7 +8962,7 @@ export default function App() {
       .slice(0, 8);
   }, [contents, searchQuery]);
 
-  const toggleBookmark = async (id: string) => {
+  const toggleBookmark = useCallback(async (id: string) => {
     if (!user) {
       setGlobalError("Please login to save resources!");
       handleLogin();
@@ -8911,49 +9017,9 @@ export default function App() {
       console.error("Bookmark toggle error:", error);
       setGlobalError("An unexpected error occurred while saving.");
     }
-  };
+  }, [user, bookmarks, handleLogin]);
 
-  const ensureFullUrl = (url: string) => {
-    if (!url) return '';
-    
-    // If it's a Supabase storage URL (either a full URL or just a path)
-    const isSupabase = url.includes('.supabase.co/storage/v1/object/public/') || !url.startsWith('http');
-    
-    if (isSupabase) {
-      let filePath = url;
-      
-      // If it's a full URL, extract the part after 'public/'
-      if (url.startsWith('http')) {
-        const parts = url.split('/storage/v1/object/public/');
-        if (parts.length > 1) {
-          const bucketAndPath = parts[1];
-          const firstSlash = bucketAndPath.indexOf('/');
-          if (firstSlash !== -1) {
-            // This is the actual path inside the bucket
-            filePath = bucketAndPath.substring(firstSlash + 1);
-          }
-        }
-      }
-      
-      // Clean path: remove any leading 'resources/' or '/resources/' strings that might cause doubling
-      let cleanPath = filePath.replace(/^\/?resources\//, '');
-      
-      // Generate the fresh public URL using the Supabase client
-      // This ensures we use the correct project reference and bucket name
-      try {
-        const { data: { publicUrl } } = supabase.storage
-          .from('resources')
-          .getPublicUrl(cleanPath);
-        return publicUrl;
-      } catch (err) {
-        return url;
-      }
-    }
-    
-    return url;
-  };
-
-  const handleEditContent = (item: ContentItem) => {
+  const handleEditContent = useCallback((item: ContentItem) => {
     setNewItem({
       category: item.category,
       academicClass: item.academicClass,
@@ -8970,7 +9036,7 @@ export default function App() {
     setEditingId(item.id);
     setIsEditing(true);
     setIsAdding(true);
-  };
+  }, []);
 
   const uploadFile = async (file: File, folder: string): Promise<string> => {
     console.log(`[STORAGE] Using Supabase for ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`);
@@ -9489,7 +9555,7 @@ export default function App() {
     }
   };
 
-  const handleDeleteContent = async (id: string) => {
+  const handleDeleteContent = useCallback(async (id: string) => {
     const content = allContents.find(c => c.id === id) || userContents.find(c => c.id === id) || contents.find(c => c.id === id);
     if (!content) return;
     
@@ -9499,7 +9565,7 @@ export default function App() {
     setDeletingId(id);
     setDeletingCategory(content.category);
     setUploadError(null);
-  };
+  }, [allContents, userContents, contents, canUpload, userRole, user]);
 
   const confirmDeleteContent = async (id: string) => {
     console.log("Attempting to delete post with ID:", id, "Category:", deletingCategory);
@@ -9587,78 +9653,6 @@ export default function App() {
       }, 300);
     }
   }, [activeVideo]);
-
-  const getDirectImageUrl = (url: string) => {
-    if (!url) return '';
-    if (url.startsWith('data:')) return url;
-    
-    // Check if it's a Supabase storage URL
-    const isSupabase = url.includes('.supabase.co/storage/v1/object/public/') || !url.startsWith('http');
-
-    if (isSupabase) {
-      let filePath = url;
-      if (url.startsWith('http')) {
-        const parts = url.split('/storage/v1/object/public/');
-        if (parts.length > 1) {
-          const bucketAndPath = parts[1];
-          const firstSlash = bucketAndPath.indexOf('/');
-          if (firstSlash !== -1) {
-            filePath = bucketAndPath.substring(firstSlash + 1);
-          }
-        }
-      }
-      
-      const cleanPath = filePath.replace(/^\/?resources\//, '');
-      const bucket = 'resources';
-
-      try {
-        const { data: { publicUrl } } = supabase.storage
-          .from(bucket)
-          .getPublicUrl(cleanPath);
-        return publicUrl;
-      } catch (e) {
-        return url;
-      }
-    }
-
-    try {
-      const urlObj = new URL(url);
-      
-      // Handle Google Drive links
-      if (urlObj.hostname.includes('drive.google.com')) {
-        const fileId = urlObj.searchParams.get('id') || urlObj.pathname.split('/d/')?.[1]?.split('/')?.[0];
-        if (fileId) {
-          return `https://drive.google.com/uc?export=view&id=${fileId}`;
-        }
-      }
-
-      // Handle Google Image search result URLs (imgres)
-      if (urlObj.hostname.includes('google.') && urlObj.pathname.includes('imgres')) {
-        const imgUrl = urlObj.searchParams.get('imgurl');
-        if (imgUrl) return decodeURIComponent(imgUrl);
-      }
-
-      // Handle Google Redirector URLs
-      if (urlObj.hostname.includes('google.') && urlObj.pathname.includes('url')) {
-        const urlParam = urlObj.searchParams.get('url') || urlObj.searchParams.get('q');
-        if (urlParam) return decodeURIComponent(urlParam);
-      }
-
-      // Handle Google User Content - ensure high res
-      if (urlObj.hostname.includes('googleusercontent.com')) {
-        // Remove existing size parameters and force s1600
-        const baseUrl = url.split('=')[0];
-        return `${baseUrl}=s1600-rw`; // -rw for webp if supported, s1600 for original size
-      }
-
-      // Handle common image hosting wrappers (like postimg/imgur if they copy the page instead of image)
-      // This is harder but common patterns can be added here if needed.
-
-    } catch (e) {
-      // Not a valid URL
-    }
-    return url;
-  };
 
   const handleAddExam = async () => {
     if (userRole !== 'admin' && !canUpload) return;
