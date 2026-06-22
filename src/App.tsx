@@ -463,6 +463,71 @@ const Logo = ({ className = "h-10 w-auto", alt = "Parodorshhi Logo" }: { classNa
   );
 };
 
+interface HeroSectionProps {
+  contentsLength: number;
+  externalResourcesLength: number;
+  playlistsLength: number;
+  dynamicClassesLength: number;
+  dynamicSubjectsLength: number;
+}
+
+const HeroSection = React.memo(({
+  contentsLength,
+  externalResourcesLength,
+  playlistsLength,
+  dynamicClassesLength,
+  dynamicSubjectsLength
+}: HeroSectionProps) => {
+  return (
+    <ScrollSection 
+      className="relative py-12 sm:py-24 overflow-hidden rounded-2xl sm:rounded-[40px] shadow-2xl w-full text-center"
+      style={{ background: 'linear-gradient(95deg, #5de0e6, #004aad)' }}
+    >
+      {/* Subtle Background Elements */}
+      <div className="absolute top-[-20%] left-[-10%] w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] bg-white/20 rounded-full blur-2xl sm:blur-3xl z-0 pointer-events-none"></div>
+      <div className="absolute bottom-[-20%] right-[-10%] w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] bg-white/10 rounded-full blur-2xl sm:blur-3xl z-0 pointer-events-none"></div>
+      
+      <div className="max-w-3xl mx-auto px-4 sm:px-8 relative z-20 text-center">
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+        >
+          <Badge className="bg-white/20 text-white border border-white/20 mb-6 sm:mb-8 py-1.5 sm:py-2 px-4 sm:px-5 text-[10px] sm:text-[11px] backdrop-blur-md italic font-medium">
+            ✨ Made for Bangladeshi Students
+          </Badge>
+          <h2 className="text-lg sm:text-4xl md:text-6xl font-extrabold text-white mb-4 sm:mb-8 leading-[1.1] tracking-tight break-words px-2">
+            Study Materials<br />
+            <span className="text-white opacity-95">For Every Students</span> 📚
+          </h2>
+          <p className="text-white/90 text-sm sm:text-lg mb-6 sm:mb-12 max-w-xl mx-auto leading-relaxed font-semibold">
+            Access notes, textbook PDFs, board question papers, and live video classes — all in one place, completely free.
+          </p>
+
+          <motion.div 
+            whileHover={{ scale: 1.01 }}
+            className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-[32px] sm:rounded-[40px] p-6 sm:p-10 max-w-2xl mx-auto shadow-2xl"
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-10">
+              {[
+                { label: 'Resources', value: (contentsLength + externalResourcesLength + playlistsLength).toString() },
+                { label: 'Classes', value: dynamicClassesLength.toString() },
+                { label: 'Subjects', value: dynamicSubjectsLength.toString() },
+              ].map((stat) => (
+                <div key={stat.label} className="text-center py-2 sm:py-0 border-b last:border-b-0 sm:border-b-0 border-white/10">
+                  <div className="text-3xl sm:text-4xl font-bold text-white mb-2 tracking-tight">{stat.value}</div>
+                  <div className="text-white/60 text-[10px] font-bold uppercase tracking-[0.2em]">{stat.label}</div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        </motion.div>
+      </div>
+    </ScrollSection>
+  );
+});
+HeroSection.displayName = 'HeroSection';
+
 export default function App() {
   const queryClient = useQueryClient();
   const [contents, setContents] = useState<ContentItem[]>([]);
@@ -7967,51 +8032,13 @@ export default function App() {
     <div className={`space-y-10 overflow-x-hidden w-full max-w-full relative transition-colors duration-1000 ${contentTypeFilter === 'premium' ? 'bg-indigo-950/5 dark:bg-indigo-950/20' : ''}`}>
       {/* Hero Section */}
       {!selectedCategory && (
-        <ScrollSection 
-          className="relative py-12 sm:py-24 overflow-hidden rounded-2xl sm:rounded-[40px] shadow-2xl w-full"
-          style={{ background: 'linear-gradient(95deg, #5de0e6, #004aad)' }}
-        >
-          {/* Subtle Background Elements */}
-          <div className="absolute top-[-20%] left-[-10%] w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] bg-white/20 rounded-full blur-2xl sm:blur-3xl z-0 pointer-events-none"></div>
-          <div className="absolute bottom-[-20%] right-[-10%] w-[300px] sm:w-[500px] h-[300px] sm:h-[500px] bg-white/10 rounded-full blur-2xl sm:blur-3xl z-0 pointer-events-none"></div>
-          
-          <div className="max-w-3xl mx-auto px-4 sm:px-8 relative z-20 text-center">
-            <motion.div
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
-            >
-              <Badge className="bg-white/20 text-white border border-white/20 mb-6 sm:mb-8 py-1.5 sm:py-2 px-4 sm:px-5 text-[10px] sm:text-[11px] backdrop-blur-md italic font-medium">
-                ✨ Made for Bangladeshi Students
-              </Badge>
-              <h2 className="text-lg sm:text-4xl md:text-6xl font-extrabold text-white mb-4 sm:mb-8 leading-[1.1] tracking-tight break-words px-2">
-                Study Materials<br />
-                <span className="text-white opacity-95">For Every Students</span> 📚
-              </h2>
-              <p className="text-white/90 text-sm sm:text-lg mb-6 sm:mb-12 max-w-xl mx-auto leading-relaxed font-semibold">
-                Access notes, textbook PDFs, board question papers, and live video classes — all in one place, completely free.
-              </p>
-
-              <motion.div 
-                whileHover={{ scale: 1.01 }}
-                className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-[32px] sm:rounded-[40px] p-6 sm:p-10 max-w-2xl mx-auto shadow-2xl"
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-10">
-                  {[
-                    { label: 'Resources', value: (contents.length + externalResources.length + playlists.length).toString() },
-                    { label: 'Classes', value: dynamicClasses.length.toString() },
-                    { label: 'Subjects', value: dynamicSubjects.length.toString() },
-                  ].map((stat) => (
-                    <div key={stat.label} className="text-center py-2 sm:py-0 border-b last:border-b-0 sm:border-b-0 border-white/10">
-                      <div className="text-3xl sm:text-4xl font-bold text-white mb-2 tracking-tight">{stat.value}</div>
-                      <div className="text-white/60 text-[10px] font-bold uppercase tracking-[0.2em]">{stat.label}</div>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            </motion.div>
-          </div>
-        </ScrollSection>
+        <HeroSection 
+          contentsLength={contents.length}
+          externalResourcesLength={externalResources.length}
+          playlistsLength={playlists.length}
+          dynamicClassesLength={dynamicClasses.length}
+          dynamicSubjectsLength={dynamicSubjects.length}
+        />
       )}
 
       <div className="w-full max-w-full px-3 sm:px-6 space-y-6 sm:space-y-10 pb-20 overflow-x-hidden">
