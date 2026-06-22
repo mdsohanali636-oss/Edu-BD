@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import React, { useState, useMemo, useEffect, useRef, ChangeEvent, FormEvent, cloneElement, useCallback } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import parodorshiLogoPng from './assets/logo/parodorshiLogoBase64';
 import { MathRenderer, MathEditor } from './components/Math/MathEditorAndRenderer';
 import { mathInputRegistry, FloatingMathKeyboard } from './components/Math/MathKeyboard';
@@ -13000,6 +13001,7 @@ export default function App() {
 
       {renderFooter()}
       <FloatingMathKeyboard />
+      <Analytics />
     </div>
     </div>
   );
