@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import React, { useState, useMemo, useEffect, useRef, ChangeEvent, FormEvent, cloneElement, useCallback } from 'react';
-import parodorshhiLogo from './assets/images/parodorshhi_logo_1780464304136.png';
+import { MathRenderer, MathEditor } from './components/Math/MathEditorAndRenderer';
+import { mathInputRegistry, FloatingMathKeyboard } from './components/Math/MathKeyboard';
 import { 
   MathQuestionContent, 
   MathOptionContent, 
@@ -89,6 +90,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, Button, Badge } from './components/ui/Base';
 import { INITIAL_DATA, MOCK_EXAMS } from './data/mockData';
 import { ContentItem, Category, AcademicClass, ExternalResource, Feedback, Playlist, Exam, Question, ExamAttempt, ExamAttemptDB, LeaderboardEntry, CustomExamSettings, AcademicClassInfo, AcademicSubject, AcademicChapter, AcademicTopic, AcademicGroup, OperationType, FirestoreErrorInfo, deserializeExplanation, serializeExplanation, UserStats } from './types';
+import parodorshiLogo from './assets/logo/parodorshi-logo.svg';
 
 export const padQuestionsWithPlaceholders = (
   realQuestions: Question[], 
@@ -450,33 +452,12 @@ const FeedbackCard: React.FC<FeedbackCardProps> = ({ feedback, onUpdate }) => {
 };
 
 const Logo = ({ className = "h-10 w-auto", alt = "Parodorshhi Logo" }: { className?: string, alt?: string }) => {
-  const [error, setError] = useState(false);
-  const paths = [
-    parodorshhiLogo,
-    "/api/v1/files/input_file_2.png",
-    "/api/v1/files/input_file_1.png",
-    "/api/v1/files/input_file_0.png",
-    "/api/v1/files/Gemini_Generated_Image_ro03d6ro03d6ro03.png"
-  ];
-  const [pathIndex, setPathIndex] = useState(0);
-
-  if (error && pathIndex >= paths.length - 1) {
-    return <span className="font-black text-rose-500 tracking-tighter">Paro</span>;
-  }
-
   return (
     <img 
-      src={paths[pathIndex]} 
+      src="/api/logo.png?v=clear_art_v5" 
       alt={alt} 
-      className={`${className} object-contain transition-all duration-300 drop-shadow-[0_2px_10px_rgba(255,255,255,0.2)]`}
+      className={className}
       referrerPolicy="no-referrer"
-      onError={() => {
-        if (pathIndex < paths.length - 1) {
-          setPathIndex(pathIndex + 1);
-        } else {
-          setError(true);
-        }
-      }}
     />
   );
 };
@@ -686,13 +667,13 @@ export default function App() {
   // Reset downstream filters for home/classes
   useEffect(() => {
     setGroupFilter('');
-    setSubjectFilter('');
+    setSubjectFilter('All');
     setChapterFilter('');
     setTopicFilter('');
   }, [classFilter]);
 
   useEffect(() => {
-    setSubjectFilter('');
+    setSubjectFilter('All');
     setChapterFilter('');
     setTopicFilter('');
   }, [groupFilter]);
@@ -1579,6 +1560,11 @@ export default function App() {
   const [explanationImageFile, setExplanationImageFile] = useState<File | null>(null);
   const [explanationImagePreview, setExplanationImagePreview] = useState<string | null>(null);
 
+  const [adminQuestionFormat, setAdminQuestionFormat] = useState<'text' | 'math' | 'image' | 'mixed'>('math');
+  const [adminOptionsFormat, setAdminOptionsFormat] = useState<('text' | 'math')[]>(['math', 'math', 'math', 'math']);
+  const [adminExplanationFormat, setAdminExplanationFormat] = useState<'text' | 'math'>('math');
+  const [mathLiveBuffer, setMathLiveBuffer] = useState<string>('');
+
   const compressImage = (file: File): Promise<File> => {
     return new Promise((resolve) => {
       if (file.size < 150 * 1024) {
@@ -1659,12 +1645,41 @@ export default function App() {
       options: parsedOptions,
       correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : q.correct_answer,
       explanation: parsedExplanation.text,
+      answerExplanation: parsedExplanation.answer_explanation || '',
+      premiumExplanation: parsedExplanation.premium_explanation || '',
       difficulty: q.difficulty || parsedExplanation.difficulty,
       isPremium: q.is_premium !== undefined ? q.is_premium : (q.isPremium !== undefined ? q.isPremium : parsedExplanation.is_premium),
       tags: q.tags || parsedExplanation.tags,
       status: q.status || parsedExplanation.status,
       negativeMarks: q.negative_marks !== undefined ? q.negative_marks : (q.negativeMarks !== undefined ? q.negativeMarks : parsedExplanation.negative_marks)
     });
+
+    const textVal = parsedText.text || '';
+    let detectedQF: 'text' | 'math' | 'image' | 'mixed' = 'text';
+    if (textVal.includes('$')) {
+      detectedQF = 'mixed';
+    } else if (textVal.includes('\\frac') || textVal.includes('\\sqrt') || textVal.includes('\\int') || textVal.includes('\\lim')) {
+      detectedQF = 'math';
+    } else if (directQuestionImage && !textVal) {
+      detectedQF = 'image';
+    }
+    setAdminQuestionFormat(detectedQF);
+
+    const nextOptFormats = parsedOptions.map((optStr: string) => {
+      if (optStr.includes('$') || optStr.includes('\\') || optStr.includes('^') || optStr.includes('_')) {
+        return 'math';
+      }
+      return 'text';
+    });
+    setAdminOptionsFormat(nextOptFormats);
+
+    const expText = parsedExplanation.text || '';
+    if (expText.includes('$') || expText.includes('\\') || expText.includes('^') || expText.includes('_')) {
+      setAdminExplanationFormat('math');
+    } else {
+      setAdminExplanationFormat('text');
+    }
+    setMathLiveBuffer('');
 
     setQuestionImageFile(null);
     setQuestionImagePreview(directQuestionImage);
@@ -4067,7 +4082,9 @@ export default function App() {
     'General': GraduationCap
   };
 
-  const subjectsFilterList = useMemo(() => currentSubjects, [currentSubjects]);
+  const subjectsFilterList = useMemo(() => {
+    return ['All', ...currentSubjects];
+  }, [currentSubjects]);
   const examSubjectsFilterList = useMemo(() => examSubjects, [examSubjects]);
   const questionSubjectsFilterList = useMemo(() => questionSubjects, [questionSubjects]);
 
@@ -4854,7 +4871,9 @@ export default function App() {
               </Badge>
               <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
                 {subjectsFilterList.map(s => {
-                  const Icon = subjectIcons[s];
+                  const isAll = s === 'All';
+                  const label = isAll ? 'All Subjects' : s;
+                  const Icon = isAll ? BookOpen : subjectIcons[s];
                   return (
                     <motion.button 
                       key={s}
@@ -4871,7 +4890,7 @@ export default function App() {
                       }`}
                     >
                       {Icon && <Icon size={11} className={subjectFilter === s ? 'text-blue-400 shrink-0' : 'text-zinc-400 shrink-0'} strokeWidth={2.5} />}
-                      <span className="leading-tight truncate max-w-full">{s}</span>
+                      <span className="leading-tight truncate max-w-full">{label}</span>
                     </motion.button>
                   );
                 })}
@@ -5339,7 +5358,7 @@ export default function App() {
       <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="bg-zinc-950 p-2 rounded-xl border border-white/10 shadow-lg">
+          <div className="p-2">
             <Logo className="h-10 w-auto" />
           </div>
           <div>
@@ -7353,9 +7372,9 @@ export default function App() {
                           ) : (
                             <div className="p-5 bg-green-500/[0.015] border border-green-500/10 rounded-2xl space-y-3 text-left">
                               {parsedExp.text && (
-                                <p className="text-sm text-zinc-700 dark:text-zinc-300 font-medium whitespace-pre-line leading-relaxed text-left">
-                                  {parsedExp.text}
-                                </p>
+                                <div className="text-sm text-zinc-700 dark:text-zinc-300 font-semibold leading-relaxed text-left">
+                                  <MathRenderer text={parsedExp.text} />
+                                </div>
                               )}
                               {parsedExp.explanation_image && (
                                 <div className="rounded-xl overflow-hidden border border-zinc-200/50 dark:border-zinc-800 max-w-lg">
@@ -8010,17 +8029,22 @@ export default function App() {
       <div className="w-full max-w-full px-3 sm:px-6 space-y-6 sm:space-y-10 pb-20 overflow-x-hidden">
         {renderFilters()}
 
-        {!subjectFilter ? (
-          <div className="py-20 text-center rounded-[32px] border-2 border-dashed border-zinc-200/60 dark:border-zinc-800/60 bg-zinc-50/20 dark:bg-zinc-900/10 p-8 space-y-4 animate-in fade-in duration-500 max-w-4xl mx-auto flex flex-col items-center justify-center">
-            <BookOpen className="text-zinc-400 dark:text-zinc-600 animate-bounce" size={56} />
-            <h4 className="text-xl font-bold text-zinc-700 dark:text-zinc-300">রিসোর্সগুলো দেখতে শ্রেণী ও বিষয় নির্বাচন করুন</h4>
-            <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
-              দয়া করে উপরে আপনার শ্রেণী এবং বিষয় নির্বাচন সম্পন্ন করুন। নির্বাচন সম্পন্ন করা হলে সংশ্লিষ্ট নোট, বই, শীট ও ভিডিও কন্টেন্টসমূহ এখানে লোড হবে।
-            </p>
-          </div>
-        ) : (
-          <>
-            {contentTypeFilter === 'premium' && user && hasPremiumAccess && (
+        {(() => {
+          const isFiltersComplete = !!classFilter && (!isGroupNeeded(classFilter) || !!groupFilter);
+          if (!isFiltersComplete || !subjectFilter) {
+            return (
+              <div className="py-20 text-center rounded-[32px] border-2 border-dashed border-zinc-200/60 dark:border-zinc-800/60 bg-zinc-50/20 dark:bg-zinc-900/10 p-8 space-y-4 animate-in fade-in duration-500 max-w-4xl mx-auto flex flex-col items-center justify-center animate-in fade-in slide-in-from-top-2">
+                <BookOpen className="text-zinc-400 dark:text-zinc-600 animate-bounce" size={56} />
+                <h4 className="text-xl font-bold text-zinc-700 dark:text-zinc-300 font-sans tracking-tight">শুরু করতে আপনার শ্রেণি নির্বাচন করুন</h4>
+                <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
+                  উপরের তালিকা থেকে আপনার শ্রেণি নির্বাচন করুন। এরপর প্রয়োজন অনুযায়ী গ্রুপ ও বিষয় নির্বাচন করার অপশন প্রদর্শিত হবে।
+                </p>
+              </div>
+            );
+          }
+          return (
+            <>
+              {contentTypeFilter === 'premium' && user && hasPremiumAccess && (
               <ScrollSection className="w-full max-w-6xl mx-auto px-4 py-8">
                 <div className="relative group cursor-pointer" onClick={handlePremiumExamClick}>
                   {/* Premium Glow Effect */}
@@ -8215,38 +8239,40 @@ export default function App() {
             {renderSection('YouTube Classes', 'YouTube Classes', <Youtube className="text-red-600" size={24} />, 'Add Video', 'video-section')}
             {renderExternalResources()}
           </>
-        )}
+        )})()}
       </div>
     </div>
   );
 
-  const renderContentList = () => (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={resetToHome}>
-            <ChevronLeft size={20} />
-          </Button>
-          <div>
-            <h2 className="text-3xl font-bold text-zinc-900 dark:text-white">
-              {view === 'saved' ? 'Saved Resources' : searchQuery ? `Search Results for "${searchQuery}"` : selectedCategory}
-            </h2>
-            <p className="text-zinc-500 dark:text-zinc-400 text-sm">
-              {!subjectFilter ? "০টি রিসোর্স পাওয়া গেছে" : `${filteredContents.length} items found`}
-            </p>
+  const renderContentList = () => {
+    const isFiltersComplete = !!classFilter && (!isGroupNeeded(classFilter) || !!groupFilter);
+    return (
+      <div className="space-y-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={resetToHome}>
+              <ChevronLeft size={20} />
+            </Button>
+            <div>
+              <h2 className="text-3xl font-bold text-zinc-900 dark:text-white">
+                {view === 'saved' ? 'Saved Resources' : searchQuery ? `Search Results for "${searchQuery}"` : selectedCategory}
+              </h2>
+              <p className="text-zinc-500 dark:text-zinc-400 text-sm">
+                {!isFiltersComplete || !subjectFilter ? "০টি রিসোর্স পাওয়া গেছে" : `${filteredContents.length} items found`}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
 
-      {!subjectFilter ? (
-        <div className="py-20 text-center rounded-[32px] border-2 border-dashed border-zinc-200/60 dark:border-zinc-800/60 bg-zinc-50/20 dark:bg-zinc-900/10 p-8 space-y-4 animate-in fade-in duration-500 w-full flex flex-col items-center justify-center">
-          <BookOpen className="text-zinc-400 dark:text-zinc-600 animate-bounce" size={56} />
-          <h4 className="text-xl font-bold text-zinc-700 dark:text-zinc-300">রিসোর্সগুলো দেখতে শ্রেণী ও বিষয় নির্বাচন করুন</h4>
-          <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
-            দয়া করে উপরে আপনার শ্রেণী এবং বিষয় নির্বাচন সম্পন্ন করুন। নির্বাচন সম্পন্ন করা হলে সংশ্লিষ্ট নোট, বই, শীট ও ভিডিও কন্টেন্টসমূহ এখানে লোড হবে।
-          </p>
-        </div>
-      ) : (
+        {!isFiltersComplete || !subjectFilter ? (
+          <div className="py-20 text-center rounded-[32px] border-2 border-dashed border-zinc-200/60 dark:border-zinc-800/60 bg-zinc-50/20 dark:bg-zinc-900/10 p-8 space-y-4 animate-in fade-in duration-500 w-full flex flex-col items-center justify-center">
+            <BookOpen className="text-zinc-400 dark:text-zinc-600 animate-bounce" size={56} />
+            <h4 className="text-xl font-bold text-zinc-700 dark:text-zinc-300 font-sans tracking-tight">শুরু করতে আপনার শ্রেণি নির্বাচন করুন</h4>
+            <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
+              উপরের তালিকা থেকে আপনার শ্রেণি নির্বাচন করুন। এরপর প্রয়োজন অনুযায়ী গ্রুপ ও বিষয় নির্বাচন করার অপশন প্রদর্শিত হবে।
+            </p>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           <AnimatePresence mode="popLayout">
             {filteredContents.length > 0 ? (
@@ -8273,6 +8299,7 @@ export default function App() {
       )}
     </div>
   );
+};
 
   const handleNewsletter = async (e: FormEvent) => {
     e.preventDefault();
@@ -8480,7 +8507,7 @@ export default function App() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12 mb-12">
           <div className="space-y-6">
             <div className="flex items-center gap-3">
-              <div className="bg-black p-3 rounded-2xl border border-white/10 shadow-lg group">
+              <div className="group">
                 <Logo className="h-20 w-auto" />
               </div>
             </div>
@@ -9643,7 +9670,16 @@ export default function App() {
         subject: newQuestion.subject || '',
         chapter: (newQuestion.chapter === 'All Chapters' || !newQuestion.chapter) ? null : newQuestion.chapter,
         topicId: newQuestion.topicId || null,
-        explanation: newQuestion.explanation || '',
+        explanation: serializeExplanation(newQuestion.explanation || '', {
+          difficulty: newQuestion.difficulty || 'medium',
+          is_premium: !!newQuestion.isPremium,
+          tags: newQuestion.tags || [],
+          status: newQuestion.status || 'published',
+          explanation_image: finalExplanationImage || '',
+          negative_marks: newQuestion.negativeMarks !== undefined ? Number(newQuestion.negativeMarks) : 0.25,
+          answer_explanation: (newQuestion as any).answerExplanation || '',
+          premium_explanation: (newQuestion as any).premiumExplanation || '',
+        }),
         difficulty: newQuestion.difficulty || 'medium',
         isPremium: !!newQuestion.isPremium,
         tags: newQuestion.tags || [],
@@ -9705,8 +9741,15 @@ export default function App() {
         points: 1,
         class: newExam.class,
         subject: newExam.subject,
-        chapter: newExam.chapter
+        chapter: newExam.chapter,
+        answerExplanation: '',
+        premiumExplanation: ''
       });
+
+      setAdminQuestionFormat('text');
+      setAdminOptionsFormat(['text', 'text', 'text', 'text']);
+      setAdminExplanationFormat('text');
+      setMathLiveBuffer('');
 
       setQuestionImageFile(null);
       setQuestionImagePreview(null);
@@ -9788,7 +9831,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
         <div className="flex flex-col items-center gap-10">
-          <div className="bg-black p-10 rounded-[48px] shadow-[0_0_80px_rgba(37,99,235,0.15)] border border-blue-500/10">
+          <div className="flex justify-center items-center">
             <Logo className="h-40 sm:h-72 w-auto animate-pulse" />
           </div>
           <div className="flex flex-col items-center gap-4">
@@ -9899,10 +9942,9 @@ export default function App() {
               }}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="flex items-center bg-zinc-950 rounded-xl sm:rounded-2xl p-2 sm:p-2 border-2 border-blue-500/30 shadow-[0_0_30px_rgba(37,99,235,0.2)] transition-all duration-300 hover:border-blue-500 hover:shadow-blue-500/40 group relative overflow-visible"
+              className="flex items-center bg-transparent transition-all duration-300 group relative overflow-visible"
               aria-label="Website Logo - Home"
             >
-              <div className="absolute -inset-2 bg-blue-500/20 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
               <Logo className="h-10 sm:h-16 w-auto block relative z-10" alt="Parodorshhi Logo - Home" />
             </motion.button>
           </div>
@@ -10097,10 +10139,9 @@ export default function App() {
                   }}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  className="bg-zinc-950 p-4 rounded-3xl border-2 border-blue-500/20 shadow-[0_0_40px_rgba(37,99,235,0.15)] group relative overflow-visible"
+                  className="bg-transparent group relative overflow-visible"
                   aria-label="Website Logo - Home"
                 >
-                  <div className="absolute -inset-2 bg-blue-500/10 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
                   <Logo className="h-12 w-auto relative z-10" />
                 </motion.button>
                 <button 
@@ -11204,14 +11245,118 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1">Question Text</label>
-                <textarea 
-                  className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl outline-none dark:text-white text-sm h-32"
-                  placeholder="Enter the question..."
-                  value={newQuestion.questionText || ''}
-                  onChange={e => setNewQuestion({...newQuestion, questionText: e.target.value})}
-                />
+              <div className="space-y-3 p-4 bg-zinc-50 dark:bg-zinc-950/20 border border-zinc-100 dark:border-zinc-800/80 rounded-[22px]">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-100 dark:border-zinc-800/80 pb-3">
+                  <label className="text-xs font-black uppercase text-zinc-500 tracking-wider text-left">Question Text Format</label>
+                  <div className="flex flex-wrap items-center gap-1 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setAdminQuestionFormat('text')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${adminQuestionFormat === 'text' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500'}`}
+                    >
+                      📝 Text
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminQuestionFormat('math')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${adminQuestionFormat === 'math' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500'}`}
+                    >
+                      📐 Visual Math
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminQuestionFormat('mixed')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${adminQuestionFormat === 'mixed' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500'}`}
+                    >
+                      🧩 Mixed
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminQuestionFormat('image')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${adminQuestionFormat === 'image' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500'}`}
+                    >
+                      🖼️ Image Only
+                    </button>
+                  </div>
+                </div>
+
+                {adminQuestionFormat === 'text' && (
+                  <textarea 
+                    className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl outline-none dark:text-white text-sm h-32"
+                    placeholder="Enter the question plain text..."
+                    value={newQuestion.questionText || ''}
+                    onChange={e => setNewQuestion({...newQuestion, questionText: e.target.value})}
+                    onFocus={e => mathInputRegistry.register(
+                      'Question Text',
+                      e.target,
+                      newQuestion.questionText || '',
+                      val => setNewQuestion({...newQuestion, questionText: val})
+                    )}
+                  />
+                )}
+
+                {adminQuestionFormat === 'math' && (
+                  <div className="space-y-2">
+                    <MathEditor 
+                      value={newQuestion.questionText || ''} 
+                      onChange={val => setNewQuestion({...newQuestion, questionText: val})}
+                      placeholder="Type or format your math formula visually..."
+                      label="Question Text Formula"
+                    />
+                  </div>
+                )}
+
+                {adminQuestionFormat === 'mixed' && (
+                  <div className="space-y-4">
+                    <textarea 
+                      className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl outline-none dark:text-white text-sm h-32 font-semibold"
+                      placeholder="Write standard text questions, and insert math equations using the tools below (e.g. $x^2 = 3$)"
+                      value={newQuestion.questionText || ''}
+                      onChange={e => setNewQuestion({...newQuestion, questionText: e.target.value})}
+                      onFocus={e => mathInputRegistry.register(
+                        'Mixed Question',
+                        e.target,
+                        newQuestion.questionText || '',
+                        val => setNewQuestion({...newQuestion, questionText: val})
+                      )}
+                    />
+                    <div className="space-y-2.5 pt-3 border-t border-dashed border-zinc-200 dark:border-zinc-800">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Mixed Formula Builder Bench</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (mathLiveBuffer) {
+                              const inserted = ` $${mathLiveBuffer}$ `;
+                              setNewQuestion({
+                                ...newQuestion,
+                                questionText: (newQuestion.questionText || '') + inserted
+                              });
+                              setMathLiveBuffer('');
+                            }
+                          }}
+                          disabled={!mathLiveBuffer}
+                          className="px-3 py-1.5 bg-blue-600 disabled:bg-zinc-200 dark:disabled:bg-zinc-850 hover:bg-blue-700 disabled:text-zinc-400 dark:disabled:text-zinc-500 text-white font-black text-xs rounded-xl flex items-center gap-1.5 shadow-sm transition-all"
+                        >
+                          ➕ Insert Formula into Question
+                        </button>
+                      </div>
+                      <MathEditor 
+                        value={mathLiveBuffer} 
+                        onChange={setMathLiveBuffer}
+                        placeholder="Build inline math segment, then click 'Insert' above..."
+                        label="Mixed Question Formula"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {adminQuestionFormat === 'image' && (
+                  <div className="py-6 px-4 border-2 border-dashed border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/40 rounded-2xl text-center">
+                    <p className="text-zinc-500 text-xs font-bold leading-relaxed">This question has no text statement. The mathematical diagram or formula image below is sufficient.</p>
+                    <p className="text-[10px] text-zinc-400 mt-1 uppercase tracking-wider">Ensure to upload a descriptive image in the "Question Image" attachments option below.</p>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -11221,7 +11366,7 @@ export default function App() {
                     <img 
                       src={questionImagePreview} 
                       alt="Question preview" 
-                      className="w-20 h-20 object-contain rounded-xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-90 w-20"
+                      className="w-20 h-20 object-contain rounded-xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-90 flex-0 shadow-sm"
                     />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 truncate">Question Attachment</p>
@@ -11288,23 +11433,81 @@ export default function App() {
                           <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${newQuestion.correctAnswer === idx ? 'bg-green-600 text-white' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500'}`}>
                             {String.fromCharCode(65 + idx)}
                           </div>
-                          <input 
-                            className={`flex-1 bg-white dark:bg-zinc-900 border p-3 rounded-xl outline-none dark:text-white text-sm ${newQuestion.correctAnswer === idx ? 'border-green-500/50 ring-1 ring-green-500/20' : 'border-zinc-200 dark:border-zinc-700'}`}
-                            value={opt}
-                            placeholder={`Option ${String.fromCharCode(65 + idx)} text`}
-                            onChange={e => {
-                              const opts = [...(newQuestion.options || [])];
-                              opts[idx] = e.target.value;
-                              setNewQuestion({...newQuestion, options: opts});
-                            }}
-                          />
-                          <button 
-                            type="button"
-                            onClick={() => setNewQuestion({...newQuestion, correctAnswer: idx})}
-                            className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center transition-all ${newQuestion.correctAnswer === idx ? 'bg-green-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 hover:text-green-500'}`}
-                          >
-                            <Check size={18} />
-                          </button>
+                        <div className="flex flex-col flex-1 gap-1.5 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1 bg-zinc-150 dark:bg-zinc-805 p-0.5 rounded-md border border-zinc-200/50 dark:border-zinc-700/60 scale-90 origin-left">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = [...adminOptionsFormat];
+                                  next[idx] = 'text';
+                                  setAdminOptionsFormat(next);
+                                }}
+                                className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider transition-all ${adminOptionsFormat[idx] === 'text' ? 'bg-white dark:bg-zinc-90 w-16 text-blue-600 shadow-sm' : 'text-zinc-500'}`}
+                              >
+                                Text Option
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = [...adminOptionsFormat];
+                                  next[idx] = 'math';
+                                  setAdminOptionsFormat(next);
+                                }}
+                                className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider transition-all ${adminOptionsFormat[idx] === 'math' ? 'bg-white dark:bg-zinc-90 w-16 text-blue-600 shadow-sm' : 'text-zinc-500'}`}
+                              >
+                                Math Option
+                              </button>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            {adminOptionsFormat[idx] === 'text' ? (
+                              <input 
+                                className={`flex-1 bg-white dark:bg-zinc-900 border p-3 rounded-xl outline-none dark:text-white text-sm ${newQuestion.correctAnswer === idx ? 'border-green-500/50 ring-1 ring-green-500/20' : 'border-zinc-200 dark:border-zinc-700'}`}
+                                value={opt}
+                                placeholder={`Option ${String.fromCharCode(65 + idx)} text`}
+                                onChange={e => {
+                                  const opts = [...(newQuestion.options || [])];
+                                  opts[idx] = e.target.value;
+                                  setNewQuestion({...newQuestion, options: opts});
+                                }}
+                                onFocus={e => {
+                                  mathInputRegistry.register(
+                                    `Option ${String.fromCharCode(65 + idx)}`,
+                                    e.target,
+                                    opt,
+                                    val => {
+                                      const opts = [...(newQuestion.options || [])];
+                                      opts[idx] = val;
+                                      setNewQuestion({...newQuestion, options: opts});
+                                    }
+                                  );
+                                }}
+                              />
+                            ) : (
+                              <div className="flex-1 min-w-0">
+                                <MathEditor 
+                                  value={opt} 
+                                  onChange={val => {
+                                    const opts = [...(newQuestion.options || [])];
+                                    opts[idx] = val;
+                                    setNewQuestion({...newQuestion, options: opts});
+                                  }}
+                                  placeholder={`Option ${String.fromCharCode(65 + idx)} LaTeX formula...`}
+                                  label={`Option ${String.fromCharCode(65 + idx)} Formula`}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <button 
+                          type="button"
+                          onClick={() => setNewQuestion({...newQuestion, correctAnswer: idx})}
+                          className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center transition-all mt-auto ${newQuestion.correctAnswer === idx ? 'bg-green-600 text-white' : 'bg-zinc-150 dark:bg-zinc-800 text-zinc-400 hover:text-green-500'}`}
+                        >
+                          <Check size={18} />
+                        </button>
                         </div>
                         
                         {/* Option Image Attachment Section */}
@@ -11462,14 +11665,82 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase text-zinc-400 tracking-widest pl-1 text-left block">Solution / Explanation (Text)</label>
-                <textarea 
-                  className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl outline-none dark:text-white text-sm h-24"
-                  placeholder="Explain how to solve this question..."
-                  value={newQuestion.explanation || ''}
-                  onChange={e => setNewQuestion({...newQuestion, explanation: e.target.value})}
-                />
+              <div className="space-y-3 p-4 bg-zinc-50 dark:bg-zinc-950/20 border border-zinc-100 dark:border-zinc-800/80 rounded-[22px]">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-100 dark:border-zinc-800/80 pb-3">
+                  <label className="text-xs font-black uppercase text-zinc-500 tracking-wider text-left">Solution Format</label>
+                  <div className="flex flex-wrap items-center gap-1 bg-zinc-100 dark:bg-zinc-805 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setAdminExplanationFormat('text')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${adminExplanationFormat === 'text' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500'}`}
+                    >
+                      ✏️ Text Solution
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminExplanationFormat('math')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${adminExplanationFormat === 'math' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500'}`}
+                    >
+                      📐 Math / Mixed Solution
+                    </button>
+                  </div>
+                </div>
+
+                {adminExplanationFormat === 'text' ? (
+                  <textarea 
+                    className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 p-4 rounded-2xl outline-none dark:text-white text-sm h-28"
+                    placeholder="Explain how to solve this question in plain text..."
+                    value={newQuestion.explanation || ''}
+                    onChange={e => setNewQuestion({...newQuestion, explanation: e.target.value})}
+                    onFocus={e => mathInputRegistry.register(
+                      'Explanation',
+                      e.target,
+                      newQuestion.explanation || '',
+                      val => setNewQuestion({...newQuestion, explanation: val})
+                    )}
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    <MathEditor 
+                      value={newQuestion.explanation || ''} 
+                      onChange={val => setNewQuestion({...newQuestion, explanation: val})}
+                      placeholder="Use visual equations or standard text blocks intermixed (e.g., $E = mc^2$)..."
+                      label="Explanation Formula"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Answer Explanation Card with MathLive */}
+              <div className="space-y-3 p-4 bg-zinc-50 dark:bg-zinc-950/20 border border-zinc-100 dark:border-zinc-800/80 rounded-[22px]">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-100 dark:border-zinc-800/80 pb-3">
+                  <span className="text-xs font-black uppercase text-zinc-500 tracking-wider text-left">Answer Explanation</span>
+                  <span className="text-[10px] text-zinc-400 font-bold">Visual derivation of why the answer key is correct</span>
+                </div>
+                <div className="space-y-2">
+                  <MathEditor 
+                    value={(newQuestion as any).answerExplanation || ''} 
+                    onChange={val => setNewQuestion({...newQuestion, answerExplanation: val} as any)}
+                    placeholder="Type mathematical proof or explanation why this option is correct... (e.g., θ = π/6)"
+                    label="Answer Explanation"
+                  />
+                </div>
+              </div>
+
+              {/* Premium Explanation Card with MathLive */}
+              <div className="space-y-3 p-4 bg-zinc-50 dark:bg-zinc-950/20 border border-zinc-100 dark:border-zinc-800/80 rounded-[22px]">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-zinc-100 dark:border-zinc-800/80 pb-3">
+                  <span className="text-xs font-black uppercase text-amber-500 tracking-wider text-left flex items-center gap-1">✨ Premium Explanation</span>
+                  <span className="text-[10px] text-zinc-400 font-bold">Comprehensive derivations shown only to premium members</span>
+                </div>
+                <div className="space-y-2">
+                  <MathEditor 
+                    value={(newQuestion as any).premiumExplanation || ''} 
+                    onChange={val => setNewQuestion({...newQuestion, premiumExplanation: val} as any)}
+                    placeholder="Provide deep mathematical explanations, alternative techniques, or visual rules..."
+                    label="Premium Explanation"
+                  />
+                </div>
               </div>
 
               <div className="space-y-2 text-left">
@@ -12600,6 +12871,7 @@ export default function App() {
       )}
 
       {renderFooter()}
+      <FloatingMathKeyboard />
     </div>
     </div>
   );

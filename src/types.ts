@@ -159,6 +159,8 @@ export interface Question {
   explanationText?: string;
   isPlaceholder?: boolean;
   negativeMarks?: number;
+  answerExplanation?: string;
+  premiumExplanation?: string;
 }
 
 export interface Exam {
@@ -460,6 +462,8 @@ export function serializeExplanation(explanationText: string, meta: {
   status?: string;
   explanation_image?: string;
   negative_marks?: number;
+  answer_explanation?: string;
+  premium_explanation?: string;
 }) {
   const metaStr = JSON.stringify(meta);
   return `${explanationText || ''} [META:${metaStr}]`;
@@ -474,7 +478,9 @@ export function deserializeExplanation(fullExplanation: string) {
       tags: [],
       status: 'published',
       explanation_image: '',
-      negative_marks: 0
+      negative_marks: 0,
+      answer_explanation: '',
+      premium_explanation: ''
     };
   }
   const match = fullExplanation.match(/\[META:(.*?)\]$/);
@@ -489,7 +495,9 @@ export function deserializeExplanation(fullExplanation: string) {
         tags: meta.tags || [],
         status: meta.status || 'published',
         explanation_image: meta.explanation_image || '',
-        negative_marks: meta.negative_marks || 0
+        negative_marks: meta.negative_marks || 0,
+        answer_explanation: meta.answer_explanation || '',
+        premium_explanation: meta.premium_explanation || ''
       };
     } catch (e) {
       // fallback
@@ -502,7 +510,9 @@ export function deserializeExplanation(fullExplanation: string) {
     tags: [],
     status: 'published',
     explanation_image: '',
-    negative_marks: 0
+    negative_marks: 0,
+    answer_explanation: '',
+    premium_explanation: ''
   };
 }
 

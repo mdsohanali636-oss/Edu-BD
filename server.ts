@@ -67,7 +67,57 @@ async function startServer() {
   const PORT = 3000;
 
   // JSON Parser Middleware
-  app.use(express.json());
+  app.use(express.json({ limit: "15mb" }));
+
+  // API Route to dynamically serve parodorshi-logo.png if captured, otherwise fallback to parodorshi-logo.svg
+  app.get("/api/logo.png", (req, res) => {
+    try {
+      const pngPath = path.join(process.cwd(), "src", "assets", "logo", "parodorshi-logo.png");
+      const svgPath = path.join(process.cwd(), "src", "assets", "logo", "parodorshi-logo.svg");
+
+      if (fs.existsSync(pngPath)) {
+        res.setHeader("Content-Type", "image/png");
+        return res.sendFile(pngPath);
+      } else if (fs.existsSync(svgPath)) {
+        res.setHeader("Content-Type", "image/svg+xml");
+        return res.sendFile(svgPath);
+      } else {
+        return res.status(404).send("Logo not found");
+      }
+    } catch (err: any) {
+      console.error("Error serving logo image:", err);
+      return res.status(500).send("Internal server error");
+    }
+  });
+
+  // API Route to receive a Base64-encoded logo image and write it directly to the local filesystem
+  app.post("/api/save-logo", (req, res) => {
+    try {
+      const { base64 } = req.body;
+      if (!base64) {
+        return res.status(400).json({ error: "Missing base64 data" });
+      }
+
+      // Extract the raw base64 data
+      const matches = base64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      if (!matches || matches.length !== 3) {
+        return res.status(400).json({ error: "Malformed base64 representation" });
+      }
+
+      const imageBuffer = Buffer.from(matches[2], "base64");
+      const targetPath = path.join(process.cwd(), "src", "assets", "logo", "parodorshi-logo.png");
+      
+      // Ensure target directory exists
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.writeFileSync(targetPath, imageBuffer);
+
+      console.log("==> SUCCESS: Saved original high-quality logo image to filesystem:", targetPath);
+      return res.json({ success: true, path: targetPath });
+    } catch (err: any) {
+      console.error("Failed to write logo to file:", err);
+      return res.status(500).json({ error: err.message });
+    }
+  });
 
   // API routes
   app.get("/api/health", (req, res) => {

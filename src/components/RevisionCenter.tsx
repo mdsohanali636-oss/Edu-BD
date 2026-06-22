@@ -18,6 +18,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Card, Button, Badge } from './ui/Base';
 import { MathQuestionContent, MathOptionContent } from './Exam/MathQuestionContent';
+import { MathRenderer } from './Math/MathEditorAndRenderer';
 import { supabaseService } from '../services/supabaseService';
 import { Question } from '../types';
 
@@ -522,7 +523,7 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
                            <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/50">
                              <p className="text-[10px] uppercase font-black tracking-widest text-zinc-400 mb-1">ব্যাখ্যা (Solution Explanation)</p>
                              <div className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed font-semibold">
-                               {q.explanation}
+                               <MathRenderer text={q.explanation} />
                              </div>
                            </div>
                          )}

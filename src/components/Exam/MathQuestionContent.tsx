@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ZoomIn, X, Play, Image as ImageIcon } from 'lucide-react';
+import { MathRenderer } from '../Math/MathEditorAndRenderer';
 
 export interface ParsedQuestionText {
   text: string;
@@ -112,8 +113,8 @@ export function MathQuestionContent({ questionText, questionImage, className = "
   return (
     <div className={`space-y-4 text-left ${className}`}>
       {parsed.text && (
-        <h3 className="text-xl sm:text-2xl font-bold text-zinc-900 dark:text-white leading-tight break-words">
-          {parsed.text}
+        <h3 className="text-xl sm:text-2xl font-bold text-zinc-900 dark:text-white leading-tight break-words w-full">
+          <MathRenderer text={parsed.text} />
         </h3>
       )}
       
@@ -201,8 +202,8 @@ export function MathOptionContent({
             {String.fromCharCode(65 + idx)}
           </div>
           {parsed.text && (
-            <span className={`text-base font-bold transition-colors ${textClass}`}>
-              {parsed.text}
+            <span className={`text-base font-bold transition-colors flex-1 min-w-0`}>
+              <MathRenderer text={parsed.text} className={textClass} />
             </span>
           )}
         </div>
