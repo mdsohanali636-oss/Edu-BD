@@ -968,16 +968,9 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                  </div>
 
                  <div className="flex gap-4 mt-8">
+                   
                    <Button 
-                    variant="outline" 
-                    className="flex-1 py-4"
-                    icon={Save}
-                    onClick={() => onSaveTemplate(settings)}
-                   >
-                     টেমপ্লেট হিসেবে সেভ করুন
-                   </Button>
-                   <Button 
-                    className="flex-[1.5] py-4 bg-primary-palette text-white"
+                    className="flex-1 py-4 bg-primary-palette text-white"
                     icon={Play}
                     onClick={() => onGenerate(settings)}
                    >

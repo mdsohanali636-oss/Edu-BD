@@ -430,19 +430,44 @@ export const PremiumExamSection: React.FC<Props> = ({
   // Mock Templates (Updated to be empty by default or fetched if I had a templates collection)
   const [templates, setTemplates] = useState<ExamTemplate[]>([]);
 
-  // We should also fetch templates from firestore if possible
+  // Load templates (Supabase + LocalStorage fallback)
   useEffect(() => {
-    if (!user) return;
     const fetchTemplates = async () => {
+      // 1. Load local templates from localStorage
+      let localTemplates: ExamTemplate[] = [];
+      try {
+        const storedStr = localStorage.getItem('local_exam_templates');
+        if (storedStr) {
+          localTemplates = JSON.parse(storedStr);
+        }
+      } catch (err) {
+        console.error("Error reading local templates:", err);
+      }
+
+      if (!user) {
+        setTemplates(localTemplates);
+        return;
+      }
+
       try {
         const { data, error } = await supabase
           .from('exam_templates')
           .select('*')
           .eq('user_id', user.id);
         if (error) throw error;
-        setTemplates(data as ExamTemplate[]);
+        
+        // Merge Supabase templates and local templates safely
+        const combined = [...(data as ExamTemplate[])];
+        // Only append local templates if their id doesn't exist in Supabase templates
+        localTemplates.forEach(lt => {
+          if (!combined.some(ct => ct.id === lt.id)) {
+            combined.push(lt);
+          }
+        });
+        setTemplates(combined);
       } catch (err) {
         console.error("Error fetching templates:", err);
+        setTemplates(localTemplates);
       }
     };
     fetchTemplates();
@@ -889,8 +914,7 @@ export const PremiumExamSection: React.FC<Props> = ({
             {[
               { id: 'dashboard', name: 'ড্যাশবোর্ড', icon: LayoutGrid },
               { id: 'builder', name: 'পরীক্ষা তৈরি', icon: Settings },
-              { id: 'analytics', name: 'পারফরম্যান্স', icon: BarChart3 },
-              { id: 'templates', name: 'প্রিসেট', icon: History }
+              { id: 'analytics', name: 'পারফরম্যান্স', icon: BarChart3 }
             ].map((navItem) => (
               <button
                 key={navItem.id}
@@ -934,9 +958,7 @@ export const PremiumExamSection: React.FC<Props> = ({
                        <Button onClick={() => setView('builder')} className="bg-primary-palette text-white py-5 px-10 rounded-3xl text-sm font-black uppercase tracking-widest" icon={ChevronRight}>
                          ইঞ্জিন ওপেন করুন
                        </Button>
-                       <Button onClick={() => setView('templates')} variant="outline" className="border-zinc-700 text-white hover:bg-zinc-800 py-5 px-10 rounded-3xl text-sm font-black uppercase tracking-widest">
-                         ভল্ট চেক করুন
-                       </Button>
+                       
                      </div>
                    </div>
 
@@ -962,7 +984,7 @@ export const PremiumExamSection: React.FC<Props> = ({
                 </div>
 
                 {/* Smart Features Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div className="hidden grid-cols-1 md:grid-cols-3 gap-8">
                     <Card className="p-6 sm:p-10 border-none bg-white dark:bg-zinc-900 group hover:shadow-[0_20px_50px_rgba(0,0,0,0.1)] transition-all">
                        <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-[28px] flex items-center justify-center mb-8 group-hover:scale-110 transition-transform">
                          <Zap size={28} />
@@ -1038,33 +1060,7 @@ export const PremiumExamSection: React.FC<Props> = ({
                          আমার ভল্ট দেখুন
                       </Button>
                    </Card>
-                </div>
-
-                {/* Templates Preview */}
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-2xl font-black dark:text-white">সাম্প্রতিক প্রিসেটসমূহ</h3>
-                    <Button onClick={() => setView('templates')} variant="ghost" size="sm" className="text-primary-palette font-black">সবগুলো দেখুন</Button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {templates.map(template => (
-                      <Card key={template.id} className="p-6 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 hover:border-primary-palette/50 flex items-center justify-between group">
-                        <div className="flex items-center gap-4">
-                           <div className="w-12 h-12 bg-zinc-50 dark:bg-zinc-800 rounded-2xl flex items-center justify-center text-zinc-400 group-hover:bg-primary-palette group-hover:text-white transition-all">
-                              <Plus size={20} />
-                           </div>
-                           <div>
-                              <h4 className="font-bold text-zinc-900 dark:text-white">{template.name}</h4>
-                              <p className="text-[10px] text-zinc-600 dark:text-zinc-400 font-bold uppercase tracking-widest">{template.settings.duration} মি. • {template.settings.mcqCount}টি MCQ</p>
-                           </div>
-                        </div>
-                        <button onClick={() => handleGenerate(template.settings)} className="w-10 h-10 rounded-full bg-zinc-50 dark:bg-zinc-800 text-zinc-400 flex items-center justify-center hover:scale-110 transition-all">
-                          <ChevronRight size={20} />
-                        </button>
-                      </Card>
-                    ))}
-                  </div>
-                </div>
+                 </div>
               </div>
             )}
 
@@ -1072,23 +1068,63 @@ export const PremiumExamSection: React.FC<Props> = ({
               <PremiumExamBuilder 
                 onGenerate={handleGenerate}
                 onSaveTemplate={async (s) => {
-                  if (!user) return;
-                  const newTemplate = {
-                    user_id: user.id,
-                    name: `Template ${templates.length + 1}`,
+                  const defaultName = `টেমপ্লেট ${templates.length + 1}`;
+                  const templateNameInput = window.prompt("টেমপ্লেটের জন্য একটি নাম দিন (ঐচ্ছিক):", defaultName);
+                  if (templateNameInput === null) return; // User cancelled
+                  const templateName = templateNameInput.trim() || defaultName;
+
+                  const newTemplate: any = {
+                    id: crypto?.randomUUID ? crypto.randomUUID() : new Date().getTime().toString(),
+                    user_id: user?.id || null,
+                    name: templateName,
                     settings: s,
                     created_at: new Date().toISOString()
                   };
+
+                  if (!user) {
+                    try {
+                      let localTemplates: any[] = [];
+                      const storedStr = localStorage.getItem('local_exam_templates');
+                      if (storedStr) {
+                        localTemplates = JSON.parse(storedStr);
+                      }
+                      localTemplates.push(newTemplate);
+                      localStorage.setItem('local_exam_templates', JSON.stringify(localTemplates));
+                      setTemplates(prev => [...prev, newTemplate]);
+                      alert("টেমপ্লেটটি লোকালি সফলভাবে সংরক্ষণ করা হয়েছে! (লগইন করা না থাকায় এটি ব্রাউজারে সংরক্ষিত থাকবে)");
+                    } catch (err) {
+                      console.error("Error saving local template", err);
+                      alert("টেমপ্লেট সংরক্ষণ করতে ব্যর্থ হয়েছে।");
+                    }
+                    return;
+                  }
+
                   try {
+                    // Remove the local uuid so database auto-generates id (unless needed, but we don't need it)
+                    const { id, ...newTemplateDb } = newTemplate;
                     const { data, error } = await supabase
                       .from('exam_templates')
-                      .insert([newTemplate])
+                      .insert([newTemplateDb])
                       .select()
                       .single();
                     if (error) throw error;
                     setTemplates(prev => [...prev, data as ExamTemplate]);
-                  } catch (err) {
-                    console.error("Error saving template:", err);
+                    alert(`"${templateName}" টেমপ্লেটটি সফলভাবে সেভ করা হয়েছে!`);
+                  } catch (err: any) {
+                    console.error("Error saving template to cloud:", err);
+                    try {
+                      let localTemplates: any[] = [];
+                      const storedStr = localStorage.getItem('local_exam_templates');
+                      if (storedStr) {
+                        localTemplates = JSON.parse(storedStr);
+                      }
+                      localTemplates.push(newTemplate);
+                      localStorage.setItem('local_exam_templates', JSON.stringify(localTemplates));
+                      setTemplates(prev => [...prev, newTemplate]);
+                      alert(`"${templateName}" টেমপ্লেটটি ক্লাউডে সেভ করার সময় সমস্যা হয়েছে, তবে অফলাইনে লোকালি সফলভাবে ব্যাকআপ নেওয়া হয়েছে!`);
+                    } catch (localErr) {
+                      alert("টেমপ্লেটটি সেভ করা যায়নি।");
+                    }
                   }
                 }}
                 weakChapters={analytics.weakChapters}
@@ -1101,45 +1137,7 @@ export const PremiumExamSection: React.FC<Props> = ({
 
             {view === 'analytics' && <PremiumAnalytics analytics={analytics} />}
 
-            {view === 'templates' && (
-               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                  <button 
-                  onClick={() => setView( 'builder' )}
-                  className="aspect-video rounded-[32px] border-4 border-dashed border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center gap-4 group hover:border-primary-palette transition-all"
-                  >
-                    <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-900 rounded-[28px] flex items-center justify-center text-zinc-400 group-hover:bg-primary-palette group-hover:text-white transition-all">
-                      <Plus size={32} />
-                    </div>
-                    <span className="text-sm font-black text-zinc-400 uppercase tracking-widest">নতুন প্রিসেট তৈরি করুন</span>
-                  </button>
-                  {templates.map(template => (
-                    <Card key={template.id} className="p-8 bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 relative overflow-hidden group">
-                       <div className="absolute top-0 right-0 p-6 pointer-events-none opacity-0 group-hover:opacity-10 dark:text-white transition-opacity"><Save size={100} /></div>
-                       <h4 className="text-2xl font-black mb-1 text-zinc-900 dark:text-white">{template.name}</h4>
-                       <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold mb-8 uppercase tracking-widest italic tracking-[0.2em]">{new Date(template.created_at).toLocaleDateString()}-এ তৈরি করা হয়েছে</p>
-                       
-                       <div className="space-y-3 mb-8">
-                          <div className="flex justify-between text-xs font-bold"><span className="text-zinc-600 dark:text-zinc-500">সময়সীমা</span><span className="text-zinc-900 dark:text-white">{template.settings.duration}মি.</span></div>
-                          <div className="flex justify-between text-xs font-bold"><span className="text-zinc-600 dark:text-zinc-500">MCQ</span><span className="text-zinc-900 dark:text-white text-primary-palette">{template.settings.mcqCount}টি</span></div>
-                          <div className="flex justify-between text-xs font-bold"><span className="text-zinc-600 dark:text-zinc-500">লিখিত</span><span className="text-zinc-900 dark:text-white text-emerald-500">{template.settings.writtenCount}টি</span></div>
-                       </div>
-
-                       <div className="flex gap-3">
-                         <Button onClick={() => handleGenerate(template.settings)} className="flex-1 bg-primary-palette text-white">শুরু করুন</Button>
-                         <Button variant="outline" className="px-4" onClick={() => {
-                           const shareText = `Challenge: Try my '${template.name}' exam on PREMIUM X!`;
-                           navigator.clipboard.writeText(shareText).then(() => {
-                             alert("চ্যালেঞ্জ লিঙ্ক ক্লিপবোর্ডে কপি করা হয়েছে! প্রতিযোগিতার জন্য বন্ধুদের সাথে শেয়ার করুন।");
-                           });
-                         }}>
-                           <ChevronRight className="rotate-45" size={16} /> {/* Share/Link icon replacement */}
-                         </Button>
-                         <Button variant="outline" className="px-4" onClick={() => setView('analytics')}><History size={16} /></Button>
-                       </div>
-                    </Card>
-                  ))}
-               </div>
-            )}
+            
           </motion.div>
         </AnimatePresence>
       </div>
