@@ -13,11 +13,12 @@ import {
 } from 'lucide-react';
 import { Button, Card } from '../ui/Base';
 import parodorshiLogo from '../../assets/logo/parodorshi-logo.svg';
+import parodorshiLogoPng from '../../assets/logo/parodorshi-logo.png';
 
 const LandingLogo = ({ className = "h-14 w-auto" }: { className?: string }) => {
   return (
     <img 
-      src="/api/logo.png?v=clear_art_v5" 
+      src={parodorshiLogoPng} 
       alt="পারদর্শী Logo" 
       className={className}
       referrerPolicy="no-referrer"

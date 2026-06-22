@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import React, { useState, useMemo, useEffect, useRef, ChangeEvent, FormEvent, cloneElement, useCallback } from 'react';
+import parodorshiLogoPng from './assets/logo/parodorshi-logo.png';
 import { MathRenderer, MathEditor } from './components/Math/MathEditorAndRenderer';
 import { mathInputRegistry, FloatingMathKeyboard } from './components/Math/MathKeyboard';
 import { 
@@ -454,7 +455,7 @@ const FeedbackCard: React.FC<FeedbackCardProps> = ({ feedback, onUpdate }) => {
 const Logo = ({ className = "h-10 w-auto", alt = "Parodorshhi Logo" }: { className?: string, alt?: string }) => {
   return (
     <img 
-      src="/api/logo.png?v=clear_art_v5" 
+      src={parodorshiLogoPng} 
       alt={alt} 
       className={className}
       referrerPolicy="no-referrer"
