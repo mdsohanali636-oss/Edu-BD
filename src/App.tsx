@@ -528,6 +528,403 @@ const HeroSection = React.memo(({
 });
 HeroSection.displayName = 'HeroSection';
 
+interface ContentCardProps {
+  item: ContentItem;
+  hasPremiumAccess: boolean;
+  canUpload: boolean;
+  userRole: string;
+  dynamicTopics: any[];
+  bookmarks: string[];
+  toggleBookmark: (id: string) => void;
+  getDirectImageUrl: (path: string) => string;
+  handleEditContent: (item: ContentItem) => void;
+  handleDeleteContent: (id: string) => void;
+  ensureFullUrl: (url: string) => string;
+  prefetchPdfUrl: (url: string) => void;
+  setActiveVideo: (id: string | null) => void;
+  setActivePdf: (pdf: { url: string; isRestricted: boolean } | null) => void;
+  setShowPremiumPromptModal: (show: boolean) => void;
+}
+
+const ContentCard = React.memo(({
+  item,
+  hasPremiumAccess,
+  canUpload,
+  userRole,
+  dynamicTopics,
+  bookmarks,
+  toggleBookmark,
+  getDirectImageUrl,
+  handleEditContent,
+  handleDeleteContent,
+  ensureFullUrl,
+  prefetchPdfUrl,
+  setActiveVideo,
+  setActivePdf,
+  setShowPremiumPromptModal
+}: ContentCardProps) => {
+  const isLocked = item.isPremium && !hasPremiumAccess;
+  const hasEditPermission = canUpload || userRole === 'admin';
+  const isBookmarked = bookmarks.includes(item.id);
+  
+  return (
+    <TiltContainer className="h-full">
+      <motion.div
+        key={item.id}
+        layout
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        className="h-full relative overflow-visible"
+      >
+        {/* Main Card Content */}
+        <Card className={`flex flex-col h-full group border-none bg-white dark:bg-zinc-900/40 backdrop-blur-md overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-500 ${isLocked ? 'filter grayscale-[0.2]' : ''}`}>
+          <div className="aspect-[16/10] overflow-hidden relative bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+            {/* Fallback Icon */}
+            <div className="text-zinc-300 dark:text-zinc-700">
+              {item.category === 'YouTube Classes' ? <Youtube size={48} strokeWidth={1.5} /> : 
+               item.category === 'Books' ? <BookOpen size={48} strokeWidth={1.5} /> :
+               item.category === 'Question Papers' ? <History size={48} strokeWidth={1.5} /> :
+               <FileText size={48} strokeWidth={1.5} />}
+            </div>
+
+            {/* Actual Thumbnail or Auto-YouTube Thumbnail */}
+            {(item.thumbnail || (item.category === 'YouTube Classes' && item.url)) && (
+              <img 
+                src={item.thumbnail ? getDirectImageUrl(item.thumbnail) : (item.category === 'YouTube Classes' ? `https://img.youtube.com/vi/${getYouTubeId(item.url)}/mqdefault.jpg` : '')} 
+                alt={item.title} 
+                className={`absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out z-10 ${isLocked ? 'blur-sm opacity-50' : ''}`} 
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  console.warn(`[IMAGE] Failed to load thumbnail for: ${item.title}. URL: ${item.thumbnail}`);
+                  e.currentTarget.style.opacity = '0.4';
+                }}
+              />
+            )}
+
+            {/* Edit/Delete Overlay for authorized users */}
+            {hasEditPermission && (
+              <div className="absolute bottom-3 right-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-50">
+                <Button 
+                  variant="secondary" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full bg-white/90 backdrop-blur-sm text-zinc-900 hover:bg-white shadow-lg"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEditContent(item);
+                  }}
+                >
+                  <Pencil size={14} />
+                </Button>
+                <Button 
+                  variant="secondary" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full bg-red-500/90 backdrop-blur-sm text-white hover:bg-red-600 shadow-lg"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteContent(item.id);
+                  }}
+                >
+                  <Trash2 size={14} />
+                </Button>
+              </div>
+            )}
+
+            {/* Locked Overlay */}
+            {isLocked && (
+              <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/40 backdrop-blur-md p-4 text-center">
+                <motion.div 
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="w-12 h-12 bg-amber-500 rounded-full flex items-center justify-center text-white shadow-xl shadow-amber-500/30 mb-3"
+                >
+                  <Lock size={20} fill="currentColor" />
+                </motion.div>
+                <p className="text-white text-[10px] font-black uppercase tracking-widest leading-tight">Premium Content</p>
+                <p className="text-zinc-200 text-[8px] font-bold mt-1">Upgrade to reach this resource</p>
+              </div>
+            )}
+
+            {/* YouTube Play Button Overlay */}
+            {item.category === 'YouTube Classes' && !isLocked && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-black/30 transition-colors duration-300 z-20">
+                <div className="w-12 h-12 bg-red-600/90 rounded-full flex items-center justify-center text-white shadow-2xl backdrop-blur-sm group-hover:scale-110 transition-transform duration-300">
+                  <Youtube size={24} fill="currentColor" />
+                </div>
+              </div>
+            )}
+
+            {/* Badges */}
+            <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-[45]">
+              <div className="flex gap-1.5">
+                <Badge className="bg-blue-600 text-white text-[9px] px-2 py-1 shadow-lg backdrop-blur-md border-none">
+                  {item.category.toUpperCase()}
+                </Badge>
+                <Badge className="bg-zinc-900/80 text-white text-[9px] px-2 py-1 shadow-lg backdrop-blur-md border-none">
+                  {item.academicClass}
+                </Badge>
+              </div>
+              {item.isPremium && (
+                <Badge className={`${isLocked ? 'bg-amber-600' : 'bg-amber-500'} text-white text-[9px] px-2 py-1 shadow-lg backdrop-blur-md border-none flex items-center gap-1 w-fit animate-pulse`}>
+                  <Lock size={10} fill="currentColor" /> PREMIUM
+                </Badge>
+              )}
+            </div>
+          </div>
+
+          <div className={`p-4 flex-1 flex flex-col ${isLocked ? 'opacity-60' : ''}`}>
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+              <Badge className="bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20 text-[9px]">
+                {item.academicClass}
+              </Badge>
+              <Badge className="bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400 border border-orange-100 dark:border-orange-500/20 text-[9px]">
+                {item.subject}
+              </Badge>
+              {item.chapter && (
+                <Badge className="bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-500/20 text-[9px] max-w-[120px] truncate">
+                  {item.chapter}
+                </Badge>
+              )}
+              {(() => {
+                const tId = item.topicId || item.topic_id;
+                const matched = tId ? dynamicTopics.find(t => t.id === tId) : null;
+                if (!matched) return null;
+                return (
+                  <Badge className="bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400 border border-purple-100 dark:border-purple-500/20 text-[9px] max-w-[124px] truncate">
+                    {matched.name}
+                  </Badge>
+                );
+              })()}
+            </div>
+            <h4 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white mb-2 line-clamp-1 leading-tight tracking-tight">{item.title}</h4>
+            <p className="text-zinc-500 dark:text-zinc-400 text-[10px] sm:text-xs mb-4 line-clamp-2 leading-relaxed font-bold italic">
+              {item.description}
+            </p>
+            
+            <div className="flex items-center gap-2 mt-auto relative z-50">
+              <Button 
+                className={`flex-1 text-xs sm:text-sm py-2 sm:py-2.5 rounded-xl ${isLocked ? 'bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500' : ''}`} 
+                size="sm" 
+                icon={isLocked ? Lock : (item.category === 'YouTube Classes' ? Youtube : (item.category === 'Books' ? Download : (item.category === 'Practice Sheet' ? Eye : FileText)))} 
+                onMouseEnter={() => {
+                  if (!isLocked && item.category !== 'YouTube Classes' && item.url) {
+                    prefetchPdfUrl(ensureFullUrl(item.url));
+                  }
+                }}
+                onClick={() => {
+                  if (isLocked) {
+                    setShowPremiumPromptModal(true);
+                    return;
+                  }
+                  if (item.category === 'YouTube Classes') setActiveVideo(getYouTubeId(item.url));
+                  else setActivePdf({ url: ensureFullUrl(item.url), isRestricted: item.category === 'Practice Sheet' });
+                }}
+              >
+                {isLocked ? 'Unlock Now' : (item.category === 'YouTube Classes' ? 'Watch' : (item.category === 'Books' ? 'Download PDF' : (item.category === 'Practice Sheet' ? 'Read' : 'View')))}
+              </Button>
+              <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={() => toggleBookmark(item.id)}
+                className={`rounded-xl h-10 w-10 ${isBookmarked ? 'text-blue-600 border-blue-200 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-800' : 'text-zinc-400 border-zinc-200 dark:border-zinc-800'}`}
+              >
+                <Bookmark size={16} fill={isBookmarked ? 'currentColor' : 'none'} strokeWidth={2.5} />
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </motion.div>
+    </TiltContainer>
+  );
+});
+ContentCard.displayName = 'ContentCard';
+
+interface PlaylistCardProps {
+  playlist: Playlist;
+  hasPremiumAccess: boolean;
+  canUpload: boolean;
+  userRole: string;
+  bookmarks: string[];
+  toggleBookmark: (id: string) => void;
+  getDirectImageUrl: (path: string) => string;
+  setNewPlaylist: (playlist: any) => void;
+  setEditingPlaylistId: (id: string | null) => void;
+  setIsAddingPlaylist: (show: boolean) => void;
+  handleDeletePlaylist: (id: string) => void;
+  setActiveVideo: (id: string | null) => void;
+  setActivePlaylist: (playlist: Playlist | null) => void;
+  setShowPremiumPromptModal: (show: boolean) => void;
+}
+
+const PlaylistCard = React.memo(({
+  playlist,
+  hasPremiumAccess,
+  canUpload,
+  userRole,
+  bookmarks,
+  toggleBookmark,
+  getDirectImageUrl,
+  setNewPlaylist,
+  setEditingPlaylistId,
+  setIsAddingPlaylist,
+  handleDeletePlaylist,
+  setActiveVideo,
+  setActivePlaylist,
+  setShowPremiumPromptModal
+}: PlaylistCardProps) => {
+  const isLocked = playlist.isPremium && !hasPremiumAccess;
+  const hasEditPermission = canUpload || userRole === 'admin';
+  const isBookmarked = bookmarks.includes(playlist.id);
+  
+  return (
+    <TiltContainer className="h-full">
+      <motion.div
+        key={playlist.id}
+        layout
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        className="cursor-pointer relative overflow-visible h-full"
+        onClick={() => {
+          if (isLocked) {
+            setShowPremiumPromptModal(true);
+            return;
+          }
+          setActiveVideo(null);
+          setActivePlaylist(playlist);
+        }}
+      >
+        <Card className={`flex flex-col h-full group border-none bg-white dark:bg-zinc-900/40 backdrop-blur-md overflow-hidden relative ${isLocked ? 'filter grayscale-[0.2]' : ''}`}>
+          <div className="aspect-[16/10] overflow-hidden relative bg-zinc-100 dark:bg-zinc-800">
+            <img 
+              src={playlist.thumbnail ? getDirectImageUrl(playlist.thumbnail) : `https://img.youtube.com/vi/playlist/mqdefault.jpg`} 
+              alt={playlist.title} 
+              className={`absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out ${isLocked ? 'blur-sm opacity-50' : ''}`} 
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                console.warn(`[IMAGE] Failed to load playlist thumbnail: ${playlist.title}. URL: ${playlist.thumbnail}`);
+                e.currentTarget.style.opacity = '0.4';
+              }}
+            />
+            <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-colors duration-300" />
+            
+            {/* Locked Overlay */}
+            {isLocked && (
+              <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/40 backdrop-blur-md p-4 text-center">
+                <motion.div 
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center text-white shadow-xl shadow-amber-500/30 mb-2"
+                >
+                  <Lock size={18} fill="currentColor" />
+                </motion.div>
+                <p className="text-white text-[9px] font-black uppercase tracking-widest leading-tight">Premium Playlist</p>
+              </div>
+            )}
+            
+            {/* Playlist Stack Effect */}
+            <div className="absolute right-0 top-0 bottom-0 w-1/4 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center text-white z-20">
+              <Youtube size={24} className="mb-1" />
+              <span className="text-xs font-black">
+                {playlist.type === 'youtube' ? 'YT' : (playlist.videoIds?.length || 0)}
+              </span>
+              <span className="text-[8px] font-bold uppercase tracking-tighter opacity-70">VIDEOS</span>
+            </div>
+
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleBookmark(playlist.id);
+              }}
+              className={`absolute top-3 right-3 z-30 w-8 h-8 rounded-full flex items-center justify-center transition-all ${isBookmarked ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20' : 'bg-black/20 hover:bg-black/40 text-white backdrop-blur-md'}`}
+            >
+              <Bookmark size={14} fill={isBookmarked ? 'currentColor' : 'none'} />
+            </button>
+
+            <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-30">
+              <Badge className="bg-red-600 text-white text-[9px] px-2 py-1 shadow-lg border-none w-fit uppercase font-black">
+                PLAYLIST
+              </Badge>
+              {playlist.isPremium && (
+                <Badge className="bg-amber-500 text-white text-[9px] px-2 py-1 shadow-lg backdrop-blur-md border-none flex items-center gap-1 w-fit animate-pulse">
+                  <Lock size={10} fill="currentColor" /> PREMIUM
+                </Badge>
+              )}
+            </div>
+
+            {hasEditPermission && (
+              <div className="absolute bottom-3 left-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                <Button 
+                  variant="secondary" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full bg-white/90 backdrop-blur-sm text-zinc-900 hover:bg-white shadow-lg"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setNewPlaylist({
+                      title: playlist.title,
+                      description: playlist.description,
+                      type: playlist.type,
+                      youtubePlaylistId: playlist.youtubePlaylistId || '',
+                      videoIds: playlist.videoIds || [],
+                      academicClass: playlist.academicClass,
+                      subject: playlist.subject,
+                      thumbnail: playlist.thumbnail || ''
+                    });
+                    setEditingPlaylistId(playlist.id);
+                    setIsAddingPlaylist(true);
+                  }}
+                >
+                  <Pencil size={14} />
+                </Button>
+                <Button 
+                  variant="secondary" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full bg-red-500/90 backdrop-blur-sm text-white hover:bg-red-600 shadow-lg"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeletePlaylist(playlist.id);
+                  }}
+                >
+                  <Trash2 size={14} />
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className={`p-4 flex-1 flex flex-col ${isLocked ? 'opacity-60' : ''}`}>
+            <div className="flex items-center gap-2 mb-3">
+              <Badge className="bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20">
+                {playlist.academicClass}
+              </Badge>
+              <Badge className="bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400 border border-orange-100 dark:border-orange-500/20">
+                {playlist.subject}
+              </Badge>
+            </div>
+            <h4 className="text-lg font-black text-zinc-900 dark:text-white mb-2 line-clamp-2 leading-tight tracking-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+              {playlist.title}
+            </h4>
+            <p className="text-zinc-500 dark:text-zinc-400 text-xs line-clamp-2 leading-relaxed font-medium mb-4">
+              {playlist.description}
+            </p>
+            
+            <div className="flex items-center justify-between mt-auto pt-4 border-t border-zinc-100 dark:border-zinc-800">
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">
+                  {playlist.type === 'youtube' ? 'YouTube Playlist' : 'Custom Playlist'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1 text-blue-600 font-black text-[10px] uppercase tracking-widest">
+                Play Now <ChevronRight size={12} />
+              </div>
+            </div>
+          </div>
+        </Card>
+      </motion.div>
+    </TiltContainer>
+  );
+});
+PlaylistCard.displayName = 'PlaylistCard';
+
 export default function App() {
   const queryClient = useQueryClient();
   const [contents, setContents] = useState<ContentItem[]>([]);
@@ -4141,6 +4538,15 @@ export default function App() {
   const examSubjectsFilterList = useMemo(() => examSubjects, [examSubjects]);
   const questionSubjectsFilterList = useMemo(() => questionSubjects, [questionSubjects]);
 
+  const filteredQuestions = useMemo(() => {
+    if (!questionSubjectFilter) return [];
+    return allQuestions.filter(q => 
+      q.class === questionClassFilter && 
+      (!isGroupNeeded(questionClassFilter) || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter) && 
+      q.subject === questionSubjectFilter
+    );
+  }, [allQuestions, questionClassFilter, questionGroupFilter, questionSubjectFilter]);
+
   const years = ['All Years', '2024', '2023', '2022', '2021'];
   const [yearFilter, setYearFilter] = useState('All Years');
   const [chapterFilter, setChapterFilter] = useState<string>('');
@@ -4168,331 +4574,45 @@ export default function App() {
   }, [dynamicChapters, examSubjectFilter, examClassFilter, dynamicClasses, dynamicSubjects]);
 
   const renderContentCard = (item: ContentItem) => {
-    const isLocked = item.isPremium && !hasPremiumAccess;
-    const hasEditPermission = canUpload || userRole === 'admin';
-    
     return (
-      <TiltContainer className="h-full">
-        <motion.div
-          key={item.id}
-          layout
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          className="h-full relative overflow-visible"
-        >
-          {/* Main Card Content */}
-          <Card className={`flex flex-col h-full group border-none bg-white dark:bg-zinc-900/40 backdrop-blur-md overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-500 ${isLocked ? 'filter grayscale-[0.2]' : ''}`}>
-            <div className="aspect-[16/10] overflow-hidden relative bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
-              {/* Fallback Icon */}
-              <div className="text-zinc-300 dark:text-zinc-700">
-                {item.category === 'YouTube Classes' ? <Youtube size={48} strokeWidth={1.5} /> : 
-                 item.category === 'Books' ? <BookOpen size={48} strokeWidth={1.5} /> :
-                 item.category === 'Question Papers' ? <History size={48} strokeWidth={1.5} /> :
-                 <FileText size={48} strokeWidth={1.5} />}
-              </div>
-
-              {/* Actual Thumbnail or Auto-YouTube Thumbnail */}
-              {(item.thumbnail || (item.category === 'YouTube Classes' && item.url)) && (
-                <img 
-                  src={item.thumbnail ? getDirectImageUrl(item.thumbnail) : (item.category === 'YouTube Classes' ? `https://img.youtube.com/vi/${getYouTubeId(item.url)}/mqdefault.jpg` : '')} 
-                  alt={item.title} 
-                  className={`absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out z-10 ${isLocked ? 'blur-sm opacity-50' : ''}`} 
-                  referrerPolicy="no-referrer"
-                  onError={(e) => {
-                    console.warn(`[IMAGE] Failed to load thumbnail for: ${item.title}. URL: ${item.thumbnail}`);
-                    if (e.currentTarget) {
-                      e.currentTarget.style.opacity = '0.4';
-                    }
-                  }}
-                />
-              )}
-
-              {/* Edit/Delete Overlay for authorized users */}
-              {hasEditPermission && (
-                <div className="absolute bottom-3 right-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-50">
-                  <Button 
-                    variant="secondary" 
-                    size="icon" 
-                    className="h-8 w-8 rounded-full bg-white/90 backdrop-blur-sm text-zinc-900 hover:bg-white shadow-lg"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEditContent(item);
-                    }}
-                  >
-                    <Pencil size={14} />
-                  </Button>
-                  <Button 
-                    variant="secondary" 
-                    size="icon" 
-                    className="h-8 w-8 rounded-full bg-red-500/90 backdrop-blur-sm text-white hover:bg-red-600 shadow-lg"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteContent(item.id);
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </Button>
-                </div>
-              )}
-
-              {/* Locked Overlay */}
-              {isLocked && (
-                <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/40 backdrop-blur-md p-4 text-center">
-                  <motion.div 
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="w-12 h-12 bg-amber-500 rounded-full flex items-center justify-center text-white shadow-xl shadow-amber-500/30 mb-3"
-                  >
-                    <Lock size={20} fill="currentColor" />
-                  </motion.div>
-                  <p className="text-white text-[10px] font-black uppercase tracking-widest leading-tight">Premium Content</p>
-                  <p className="text-zinc-200 text-[8px] font-bold mt-1">Upgrade to reach this resource</p>
-                </div>
-              )}
-
-              {/* YouTube Play Button Overlay */}
-              {item.category === 'YouTube Classes' && !isLocked && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-black/30 transition-colors duration-300 z-20">
-                  <div className="w-12 h-12 bg-red-600/90 rounded-full flex items-center justify-center text-white shadow-2xl backdrop-blur-sm group-hover:scale-110 transition-transform duration-300">
-                    <Youtube size={24} fill="currentColor" />
-                  </div>
-                </div>
-              )}
-
-              {/* Badges */}
-              <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-[45]">
-                <div className="flex gap-1.5">
-                  <Badge className="bg-blue-600 text-white text-[9px] px-2 py-1 shadow-lg backdrop-blur-md border-none">
-                    {item.category.toUpperCase()}
-                  </Badge>
-                  <Badge className="bg-zinc-900/80 text-white text-[9px] px-2 py-1 shadow-lg backdrop-blur-md border-none">
-                    {item.academicClass}
-                  </Badge>
-                </div>
-                {item.isPremium && (
-                  <Badge className={`${isLocked ? 'bg-amber-600' : 'bg-amber-500'} text-white text-[9px] px-2 py-1 shadow-lg backdrop-blur-md border-none flex items-center gap-1 w-fit animate-pulse`}>
-                    <Lock size={10} fill="currentColor" /> PREMIUM
-                  </Badge>
-                )}
-              </div>
-            </div>
-
-            <div className={`p-4 flex-1 flex flex-col ${isLocked ? 'opacity-60' : ''}`}>
-              <div className="flex flex-wrap items-center gap-2 mb-4">
-                <Badge className="bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20 text-[9px]">
-                  {item.academicClass}
-                </Badge>
-                <Badge className="bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400 border border-orange-100 dark:border-orange-500/20 text-[9px]">
-                  {item.subject}
-                </Badge>
-                {item.chapter && (
-                  <Badge className="bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-500/20 text-[9px] max-w-[120px] truncate">
-                    {item.chapter}
-                  </Badge>
-                )}
-                {(() => {
-                  const tId = item.topicId || item.topic_id;
-                  const matched = tId ? dynamicTopics.find(t => t.id === tId) : null;
-                  if (!matched) return null;
-                  return (
-                    <Badge className="bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400 border border-purple-100 dark:border-purple-500/20 text-[9px] max-w-[124px] truncate">
-                      {matched.name}
-                    </Badge>
-                  );
-                })()}
-              </div>
-              <h4 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white mb-2 line-clamp-1 leading-tight tracking-tight">{item.title}</h4>
-              <p className="text-zinc-500 dark:text-zinc-400 text-[10px] sm:text-xs mb-4 line-clamp-2 leading-relaxed font-bold italic">
-                {item.description}
-              </p>
-              
-              <div className="flex items-center gap-2 mt-auto relative z-50">
-                <Button 
-                  className={`flex-1 text-xs sm:text-sm py-2 sm:py-2.5 rounded-xl ${isLocked ? 'bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500' : ''}`} 
-                  size="sm" 
-                  icon={isLocked ? Lock : (item.category === 'YouTube Classes' ? Youtube : (item.category === 'Books' ? Download : (item.category === 'Practice Sheet' ? Eye : FileText)))} 
-                  onMouseEnter={() => {
-                    if (!isLocked && item.category !== 'YouTube Classes' && item.url) {
-                      prefetchPdfUrl(ensureFullUrl(item.url));
-                    }
-                  }}
-                  onClick={() => {
-                    if (isLocked) {
-                      setShowPremiumPromptModal(true);
-                      return;
-                    }
-                    if (item.category === 'YouTube Classes') setActiveVideo(getYouTubeId(item.url));
-                    else setActivePdf({ url: ensureFullUrl(item.url), isRestricted: item.category === 'Practice Sheet' });
-                  }}
-                >
-                  {isLocked ? 'Unlock Now' : (item.category === 'YouTube Classes' ? 'Watch' : (item.category === 'Books' ? 'Download PDF' : (item.category === 'Practice Sheet' ? 'Read' : 'View')))}
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="icon" 
-                  onClick={() => toggleBookmark(item.id)}
-                  className={`rounded-xl h-10 w-10 ${bookmarks.includes(item.id) ? 'text-blue-600 border-blue-200 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-800' : 'text-zinc-400 border-zinc-200 dark:border-zinc-800'}`}
-                >
-                  <Bookmark size={16} fill={bookmarks.includes(item.id) ? 'currentColor' : 'none'} strokeWidth={2.5} />
-                </Button>
-              </div>
-            </div>
-          </Card>
-        </motion.div>
-      </TiltContainer>
+      <ContentCard
+        item={item}
+        hasPremiumAccess={hasPremiumAccess}
+        canUpload={canUpload}
+        userRole={userRole}
+        dynamicTopics={dynamicTopics}
+        bookmarks={bookmarks}
+        toggleBookmark={toggleBookmark}
+        getDirectImageUrl={getDirectImageUrl}
+        handleEditContent={handleEditContent}
+        handleDeleteContent={handleDeleteContent}
+        ensureFullUrl={ensureFullUrl}
+        prefetchPdfUrl={prefetchPdfUrl}
+        setActiveVideo={setActiveVideo}
+        setActivePdf={setActivePdf}
+        setShowPremiumPromptModal={setShowPremiumPromptModal}
+      />
     );
   };
 
   const renderPlaylistCard = (playlist: Playlist) => {
-    const isLocked = playlist.isPremium && !hasPremiumAccess;
-    const hasEditPermission = canUpload || userRole === 'admin';
-    
     return (
-      <TiltContainer className="h-full">
-        <motion.div
-          key={playlist.id}
-          layout
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          className="cursor-pointer relative overflow-visible h-full"
-          onClick={() => {
-            if (isLocked) {
-              setShowPremiumPromptModal(true);
-              return;
-            }
-            setActiveVideo(null);
-            setActivePlaylist(playlist);
-          }}
-        >
-          <Card className={`flex flex-col h-full group border-none bg-white dark:bg-zinc-900/40 backdrop-blur-md overflow-hidden relative ${isLocked ? 'filter grayscale-[0.2]' : ''}`}>
-            <div className="aspect-[16/10] overflow-hidden relative bg-zinc-100 dark:bg-zinc-800">
-              <img 
-                src={playlist.thumbnail ? getDirectImageUrl(playlist.thumbnail) : `https://img.youtube.com/vi/playlist/mqdefault.jpg`} 
-                alt={playlist.title} 
-                className={`absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out ${isLocked ? 'blur-sm opacity-50' : ''}`} 
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  console.warn(`[IMAGE] Failed to load playlist thumbnail: ${playlist.title}. URL: ${playlist.thumbnail}`);
-                  e.currentTarget.style.opacity = '0.4';
-                }}
-              />
-              <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-colors duration-300" />
-              
-              {/* Locked Overlay */}
-              {isLocked && (
-                <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/40 backdrop-blur-md p-4 text-center">
-                  <motion.div 
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center text-white shadow-xl shadow-amber-500/30 mb-2"
-                  >
-                    <Lock size={18} fill="currentColor" />
-                  </motion.div>
-                  <p className="text-white text-[9px] font-black uppercase tracking-widest leading-tight">Premium Playlist</p>
-                </div>
-              )}
-              
-              {/* Playlist Stack Effect */}
-              <div className="absolute right-0 top-0 bottom-0 w-1/4 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center text-white z-20">
-                <Youtube size={24} className="mb-1" />
-                <span className="text-xs font-black">
-                  {playlist.type === 'youtube' ? 'YT' : (playlist.videoIds?.length || 0)}
-                </span>
-                <span className="text-[8px] font-bold uppercase tracking-tighter opacity-70">VIDEOS</span>
-              </div>
-
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleBookmark(playlist.id);
-                }}
-                className={`absolute top-3 right-3 z-30 w-8 h-8 rounded-full flex items-center justify-center transition-all ${bookmarks.includes(playlist.id) ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20' : 'bg-black/20 hover:bg-black/40 text-white backdrop-blur-md'}`}
-              >
-                <Bookmark size={14} fill={bookmarks.includes(playlist.id) ? 'currentColor' : 'none'} />
-              </button>
-
-              <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-30">
-                <Badge className="bg-red-600 text-white text-[9px] px-2 py-1 shadow-lg border-none w-fit uppercase font-black">
-                  PLAYLIST
-                </Badge>
-                {playlist.isPremium && (
-                  <Badge className="bg-amber-500 text-white text-[9px] px-2 py-1 shadow-lg backdrop-blur-md border-none flex items-center gap-1 w-fit animate-pulse">
-                    <Lock size={10} fill="currentColor" /> PREMIUM
-                  </Badge>
-                )}
-              </div>
-
-              {hasEditPermission && (
-                <div className="absolute bottom-3 left-3 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                  <Button 
-                    variant="secondary" 
-                    size="icon" 
-                    className="h-8 w-8 rounded-full bg-white/90 backdrop-blur-sm text-zinc-900 hover:bg-white shadow-lg"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setNewPlaylist({
-                        title: playlist.title,
-                        description: playlist.description,
-                        type: playlist.type,
-                        youtubePlaylistId: playlist.youtubePlaylistId || '',
-                        videoIds: playlist.videoIds || [],
-                        academicClass: playlist.academicClass,
-                        subject: playlist.subject,
-                        thumbnail: playlist.thumbnail || ''
-                      });
-                      setEditingPlaylistId(playlist.id);
-                      setIsAddingPlaylist(true);
-                    }}
-                  >
-                    <Pencil size={14} />
-                  </Button>
-                  <Button 
-                    variant="secondary" 
-                    size="icon" 
-                    className="h-8 w-8 rounded-full bg-red-500/90 backdrop-blur-sm text-white hover:bg-red-600 shadow-lg"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeletePlaylist(playlist.id);
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            <div className={`p-4 flex-1 flex flex-col ${isLocked ? 'opacity-60' : ''}`}>
-              <div className="flex items-center gap-2 mb-3">
-                <Badge className="bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20">
-                  {playlist.academicClass}
-                </Badge>
-                <Badge className="bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400 border border-orange-100 dark:border-orange-500/20">
-                  {playlist.subject}
-                </Badge>
-              </div>
-              <h4 className="text-lg font-black text-zinc-900 dark:text-white mb-2 line-clamp-2 leading-tight tracking-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                {playlist.title}
-              </h4>
-              <p className="text-zinc-500 dark:text-zinc-400 text-xs line-clamp-2 leading-relaxed font-medium mb-4">
-                {playlist.description}
-              </p>
-              
-              <div className="flex items-center justify-between mt-auto pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">
-                    {playlist.type === 'youtube' ? 'YouTube Playlist' : 'Custom Playlist'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1 text-blue-600 font-black text-[10px] uppercase tracking-widest">
-                  Play Now <ChevronRight size={12} />
-                </div>
-              </div>
-            </div>
-          </Card>
-        </motion.div>
-      </TiltContainer>
+      <PlaylistCard
+        playlist={playlist}
+        hasPremiumAccess={hasPremiumAccess}
+        canUpload={canUpload}
+        userRole={userRole}
+        bookmarks={bookmarks}
+        toggleBookmark={toggleBookmark}
+        getDirectImageUrl={getDirectImageUrl}
+        setNewPlaylist={setNewPlaylist}
+        setEditingPlaylistId={setEditingPlaylistId}
+        setIsAddingPlaylist={setIsAddingPlaylist}
+        handleDeletePlaylist={handleDeletePlaylist}
+        setActiveVideo={setActiveVideo}
+        setActivePlaylist={setActivePlaylist}
+        setShowPremiumPromptModal={setShowPremiumPromptModal}
+      />
     );
   };
 
@@ -6223,7 +6343,7 @@ export default function App() {
                 <span>
                   {!questionSubjectFilter 
                     ? "রিসোর্স দেখতে উপরে শ্রেণী ও বিষয় নির্বাচন করুন" 
-                    : `Showing ${allQuestions.filter(q => q.class === questionClassFilter && (!isGroupNeeded(questionClassFilter) || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter) && q.subject === questionSubjectFilter).length} Questions`}
+                    : `Showing ${filteredQuestions.length} Questions`}
                 </span>
               </div>
               {(questionClassFilter || questionGroupFilter || questionSubjectFilter) && (
@@ -6246,7 +6366,7 @@ export default function App() {
 
           {!questionSubjectFilter ? (
             <div className="py-20 text-center rounded-[32px] border-2 border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50/20 dark:bg-zinc-900/10 p-8 space-y-4 animate-in fade-in duration-500 flex flex-col items-center justify-center">
-              <Database className="text-zinc-400 dark:text-zinc-600 animate-bounce" size={56} />
+               <Database className="text-zinc-400 dark:text-zinc-600 animate-bounce" size={56} />
               <h4 className="text-xl font-bold text-zinc-700 dark:text-zinc-300">প্রশ্ন ব্যাংক দেখতে শ্রেণী ও বিষয় নির্বাচন করুন</h4>
               <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
                 দয়া করে উপরে শ্রেণী এবং বিষয় নির্বাচন সম্পন্ন করুন। নির্বাচন সম্পন্ন করা হলে সংশ্লিষ্ট বিষয়ভিত্তিক প্রশ্নসমুহ লোড হবে।
@@ -6254,7 +6374,7 @@ export default function App() {
             </div>
           ) : (
             <>
-              {allQuestions.filter(q => q.class === questionClassFilter && (!isGroupNeeded(questionClassFilter) || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter) && q.subject === questionSubjectFilter).length === 0 && (
+              {filteredQuestions.length === 0 && (
                 <div className="bg-blue-500/5 border border-blue-500/20 rounded-3xl p-8 text-center space-y-4">
                   <div className="w-16 h-16 bg-blue-500/10 text-blue-600 rounded-2xl flex items-center justify-center mx-auto">
                     <Database size={32} />
@@ -6267,9 +6387,8 @@ export default function App() {
               )}
 
               <div className="grid grid-cols-1 gap-4">
-                {allQuestions
-                  .filter(q => q.class === questionClassFilter && (!isGroupNeeded(questionClassFilter) || q.academicGroup === questionGroupFilter || (q as any).academic_group === questionGroupFilter) && q.subject === questionSubjectFilter)
-              .map((q, qIdx) => (
+                {filteredQuestions
+                  .map((q, qIdx) => (
               <div key={`${q.id || 'q'}-${qIdx}`} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 flex flex-col md:flex-row items-center gap-6 shadow-sm hover:shadow-md transition-all group">
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${q.type === 'mcq' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'bg-purple-100 dark:bg-purple-900/30 text-purple-600'}`}>
                   {q.type === 'mcq' ? <HelpCircle size={24} /> : <FileText size={24} />}

@@ -33,24 +33,63 @@ export const TiltContainer = ({ children, className = "" }: { children: React.Re
   const containerRef = useRef<HTMLDivElement>(null);
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
   const [isResetting, setIsResetting] = useState(false);
+  const rectRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const handleMouseEnter = () => {
+    if (containerRef.current) {
+      rectRef.current = containerRef.current.getBoundingClientRect();
+    }
+  };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width - 0.5;
-    const y = (e.clientY - rect.top) / rect.height - 0.5;
-    setTilt({ x: x * 8, y: -y * 8 });
+    if (!rectRef.current) {
+      if (containerRef.current) {
+        rectRef.current = containerRef.current.getBoundingClientRect();
+      } else {
+        return;
+      }
+    }
+    
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+    }
+
+    rafRef.current = requestAnimationFrame(() => {
+      const rect = rectRef.current;
+      if (!rect) return;
+      const x = (clientX - rect.left) / rect.width - 0.5;
+      const y = (clientY - rect.top) / rect.height - 0.5;
+      setTilt({ x: x * 8, y: -y * 8 });
+    });
   };
 
   const resetTilt = () => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    rectRef.current = null;
     setIsResetting(true);
     setTilt({ x: 0, y: 0 });
     setTimeout(() => setIsResetting(false), 400);
   };
 
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
+
   return (
     <div 
       ref={containerRef}
+      onMouseEnter={handleMouseEnter}
       onMouseMove={handleMouseMove}
       onMouseLeave={resetTilt}
       className={`${className} tilt ${isResetting ? 'reset' : ''}`}
