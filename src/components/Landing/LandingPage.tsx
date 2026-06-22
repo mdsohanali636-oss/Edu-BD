@@ -244,33 +244,77 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     }
     schedBlink();
 
+    // Cache bounding rect of charsvg to fully prevent layout thrashing (forced reflow) on mousemove
+    let rect = charsvg ? charsvg.getBoundingClientRect() : null;
+    const handleResize = () => {
+      if (charsvg) {
+        rect = charsvg.getBoundingClientRect();
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    // Coordinate tracking state for unified, zero-overhead mouse movements
+    let lastClientX = window.innerWidth / 2;
+    let lastClientY = window.innerHeight / 2;
+    let isTrackingTicking = false;
+
     // Eye base positions
     const LB = { x: 119, y: 114 }, RB = { x: 181, y: 114 }, MAX = 7.5;
 
-    // ── EYE TRACK ──
-    const handleEyeTrack = (e: MouseEvent) => {
-      if (!charsvg || !pul || !irl || !pur || !irr) return;
-      const rect = charsvg.getBoundingClientRect();
-      const sx = 300 / rect.width;
-      const sy = 420 / rect.height;
-      const mx = (e.clientX - rect.left) * sx;
-      const my = (e.clientY - rect.top) * sy;
+    const updateMouseMovements = () => {
+      if (!isTrackingTicking) return;
 
-      function moveEye(mx: number, my: number, base: typeof LB, pEl: HTMLElement, iEl: HTMLElement) {
-        const dx = mx - base.x;
-        const dy = my - base.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const ang = Math.atan2(dy, dx);
-        const off = Math.min(dist * 0.09, MAX);
-        pEl.setAttribute('cx', String(base.x + Math.cos(ang) * off));
-        pEl.setAttribute('cy', String(base.y + Math.sin(ang) * off));
-        iEl.setAttribute('cx', String(base.x + Math.cos(ang) * off * 0.5));
-        iEl.setAttribute('cy', String(base.y + Math.sin(ang) * off * 0.5));
+      // ── EYE TRACK ──
+      if (charsvg && pul && irl && pur && irr) {
+        if (!rect) {
+          rect = charsvg.getBoundingClientRect();
+        }
+        if (rect && rect.width > 0) {
+          const sx = 300 / rect.width;
+          const sy = 420 / rect.height;
+          const mx = (lastClientX - rect.left) * sx;
+          const my = (lastClientY - rect.top) * sy;
+
+          const moveEye = (mx: number, my: number, base: typeof LB, pEl: HTMLElement, iEl: HTMLElement) => {
+            const dx = mx - base.x;
+            const dy = my - base.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const ang = Math.atan2(dy, dx);
+            const off = Math.min(dist * 0.09, MAX);
+            pEl.setAttribute('cx', String(base.x + Math.cos(ang) * off));
+            pEl.setAttribute('cy', String(base.y + Math.sin(ang) * off));
+            iEl.setAttribute('cx', String(base.x + Math.cos(ang) * off * 0.5));
+            iEl.setAttribute('cy', String(base.y + Math.sin(ang) * off * 0.5));
+          };
+          moveEye(mx, my, LB, pul, irl);
+          moveEye(mx, my, RB, pur, irr);
+        }
       }
-      moveEye(mx, my, LB, pul, irl);
-      moveEye(mx, my, RB, pur, irr);
+
+      // ── PARALLAX ──
+      const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+      const dx = (lastClientX - cx) / cx, dy = (lastClientY - cy) / cy;
+      const win = $('win');
+      const stamp = $('lampglow');
+      if (win) {
+        win.style.transform = `translate(${dx * 7}px,${dy * 4}px)`;
+      }
+      if (stamp) {
+        stamp.style.transform = `translateX(calc(-50% + ${dx * -5}px))`;
+      }
+
+      isTrackingTicking = false;
     };
-    document.addEventListener('mousemove', handleEyeTrack);
+
+    const onMouseMove = (e: MouseEvent) => {
+      lastClientX = e.clientX;
+      lastClientY = e.clientY;
+      if (!isTrackingTicking) {
+        requestAnimationFrame(updateMouseMovements);
+        isTrackingTicking = true;
+      }
+    };
+    document.addEventListener('mousemove', onMouseMove);
 
     // ── FAIRY LIGHTS ──
     const fairyEl = $('fairy');
@@ -403,16 +447,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       animRain();
     }
 
-    // ── PARALLAX ──
-    const handleParallaxMove = (e: MouseEvent) => {
-      const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
-      const dx = (e.clientX - cx) / cx, dy = (e.clientY - cy) / cy;
-      const win = $('win');
-      const stamp = $('lampglow');
-      if (win) win.style.transform = `translate(${dx * 7}px,${dy * 4}px)`;
-      if (stamp) stamp.style.transform = `translateX(calc(-50% + ${dx * -5}px))`;
-    };
-    document.addEventListener('mousemove', handleParallaxMove);
+    // ── PARALLAX (Logic fully optimized and integrated inside the main onMouseMove tick loop above) ──
 
     // ── INPUT & EXPRESSIONS DIALOG ENGINE ──
     const loginWords = ['login', 'log in', 'sign in', 'signin', 'let me in', 'enter here'];
@@ -633,7 +668,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       activeTimers.current.push(userIdle);
     }
     
-    document.addEventListener('mousemove', resetUserIdle);
+    let lastIdleResetTime = 0;
+    const throttledResetUserIdle = () => {
+      const now = Date.now();
+      if (now - lastIdleResetTime > 200) {
+        resetUserIdle();
+        lastIdleResetTime = now;
+      }
+    };
+    
+    document.addEventListener('mousemove', throttledResetUserIdle);
     document.addEventListener('keydown', resetUserIdle);
     resetUserIdle();
 
@@ -695,10 +739,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
     return () => {
       // ── CLEANUP ON UNMOUNT ──
-      document.removeEventListener('mousemove', handleEyeTrack);
-      document.removeEventListener('mousemove', handleParallaxMove);
-      document.removeEventListener('mousemove', resetUserIdle);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mousemove', throttledResetUserIdle);
       document.removeEventListener('keydown', resetUserIdle);
+      window.removeEventListener('resize', handleResize);
       
       if (bbackBtn) bbackBtn.removeEventListener('click', handleGoBack);
       if (maininput) maininput.removeEventListener('input', handleInput);

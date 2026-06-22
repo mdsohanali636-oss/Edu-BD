@@ -486,14 +486,6 @@ export default function App() {
   const [canManageResources, setCanManageResources] = useState(false);
   const [isPremium, setIsPremium] = useState(false);
   const [globalPremiumMode, setGlobalPremiumMode] = useState(false);
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTick(t => t + 1);
-    }, 10000); // Dynamic timer that ticks every 10 seconds to ensure real-time subscription expiry checks
-    return () => clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     const syncGlobalPremium = async () => {
@@ -536,7 +528,7 @@ export default function App() {
       }
     }
     return basePremium;
-  }, [isPremium, firestoreUser?.hasPremiumAccess, firestoreUser?.premiumExpiry, userRole, tick, globalPremiumMode]);
+  }, [isPremium, firestoreUser?.hasPremiumAccess, firestoreUser?.premiumExpiry, userRole, globalPremiumMode]);
 
   const hasAdminAccess = useMemo(() => {
     return userRole === 'admin' || canUpload || canManageExams || canManageQuestions || canManageResources;
@@ -554,7 +546,7 @@ export default function App() {
       }
       return u;
     });
-  }, [allUsers, tick]);
+  }, [allUsers]);
 
   const filteredUsers = useMemo(() => {
     let users = usersWithRealtimeExpiry;
@@ -3647,56 +3639,51 @@ export default function App() {
     }
   }, [userRole, fetchUsersInfo]);
 
-  // Automatic background DB & State updates for Expired subscriptions (Admin-side & general check on tick state update)
+  // Client-side real-time auto-deactivation of currently logged-in user's subscription with dynamic, zero-overhead timeout scheduled on expiry
   useEffect(() => {
-    if (userRole !== 'admin' || !allUsers || allUsers.length === 0) return;
+    if (!user || userRole === 'admin' || !firestoreUser?.premiumExpiry) return;
 
-    const autoCleanExpired = async () => {
-      let databaseUpdated = false;
-      for (const u of allUsers) {
-        const isExpired = u.premium_expiry && new Date(u.premium_expiry).getTime() < Date.now();
-        const currentlyPremiumInDBRec = u.hasPremiumAccess || u.isPremium;
-        if (isExpired && currentlyPremiumInDBRec) {
+    const expiryTime = new Date(firestoreUser.premiumExpiry).getTime();
+    const timeUntilExpiry = expiryTime - Date.now();
+
+    if (timeUntilExpiry > 0) {
+      console.log(`[Auto-Expiry Timer] Scheduling subscription check in ${Math.round(timeUntilExpiry / 1000)} seconds.`);
+      const timer = setTimeout(() => {
+        console.log("[Client Auto-Expiry] Current user subscription expired. Lock active.");
+        setIsPremium(false);
+        setFirestoreUser((prev: any) => prev ? { ...prev, hasPremiumAccess: false } : null);
+        
+        const deactivateInDB = async () => {
           try {
-            console.log(`[Admin Auto-Expiry] Deactivating expired subscription for user ${u.name} (${u.id})`);
-            await supabase.from('profiles').update({ has_premium_access: false }).eq('id', u.id);
-            await supabase.from('user_roles').update({ is_premium: false }).eq('user_id', u.id);
-            databaseUpdated = true;
-          } catch (e) {
-            console.warn("Soft error deactivating expired subscription in background:", e);
+            await supabase.from('profiles').update({ has_premium_access: false }).eq('id', user.id);
+            await supabase.from('user_roles').update({ is_premium: false }).eq('user_id', user.id);
+          } catch (err) {
+            console.warn("Client failed to update database with expired subscription:", err);
           }
-        }
+        };
+        deactivateInDB();
+      }, timeUntilExpiry + 1000); // add 1 second buffer
+      return () => clearTimeout(timer);
+    } else {
+      // Already expired
+      const currentlyActive = isPremium || firestoreUser?.hasPremiumAccess === true;
+      if (currentlyActive) {
+        console.log("[Client Auto-Expiry] Current user subscription is already expired.");
+        setIsPremium(false);
+        setFirestoreUser((prev: any) => prev ? { ...prev, hasPremiumAccess: false } : null);
+        
+        const deactivateInDB = async () => {
+          try {
+            await supabase.from('profiles').update({ has_premium_access: false }).eq('id', user.id);
+            await supabase.from('user_roles').update({ is_premium: false }).eq('user_id', user.id);
+          } catch (err) {
+            console.warn("Client failed to update database with expired subscription:", err);
+          }
+        };
+        deactivateInDB();
       }
-      if (databaseUpdated) {
-        fetchUsersInfo();
-      }
-    };
-    autoCleanExpired();
-  }, [userRole, allUsers, tick, fetchUsersInfo]);
-
-  // Client-side real-time auto-deactivation of currently logged-in user's subscription
-  useEffect(() => {
-    if (!user || userRole === 'admin') return;
-
-    const isExpired = firestoreUser?.premiumExpiry && new Date(firestoreUser.premiumExpiry).getTime() < Date.now();
-    const currentlyActive = isPremium || firestoreUser?.hasPremiumAccess === true;
-
-    if (isExpired && currentlyActive) {
-      console.log("[Client Auto-Expiry] Current user subscription expired. Lock active.");
-      setIsPremium(false);
-      setFirestoreUser((prev: any) => prev ? { ...prev, hasPremiumAccess: false } : null);
-
-      const deactivateInDB = async () => {
-        try {
-          await supabase.from('profiles').update({ has_premium_access: false }).eq('id', user.id);
-          await supabase.from('user_roles').update({ is_premium: false }).eq('user_id', user.id);
-        } catch (err) {
-          console.warn("Client failed to update database with expired subscription:", err);
-        }
-      };
-      deactivateInDB();
     }
-  }, [user, userRole, firestoreUser?.premiumExpiry, isPremium, firestoreUser?.hasPremiumAccess, tick]);
+  }, [user, userRole, firestoreUser?.premiumExpiry, isPremium, firestoreUser?.hasPremiumAccess]);
 
   const handleLogin = async () => {
     if (isAuthLoading) return;
