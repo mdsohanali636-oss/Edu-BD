@@ -45,6 +45,7 @@ export function loadMathLive(): Promise<any> {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
       link.href = 'https://cdnjs.cloudflare.com/ajax/libs/mathlive/0.98.5/mathlive-static.css';
+      link.crossOrigin = 'anonymous';
       document.head.appendChild(link);
 
       // Inject MathLive JS CDN

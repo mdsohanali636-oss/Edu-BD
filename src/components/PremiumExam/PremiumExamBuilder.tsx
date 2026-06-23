@@ -341,21 +341,21 @@ export const PremiumExamBuilder: React.FC<Props> = ({
           className="min-h-[500px] pb-24"
         >
           {activeSteps[currentStep]?.id === 'class' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {dynamicClasses.map((cls) => {
                 const isSelected = settings.classId === cls.id;
                 return (
                   <Card 
                     key={cls.id}
                     onClick={() => toggleClass(cls.id)}
-                    className={`relative p-8 text-center group transition-all duration-500 cursor-pointer
+                    className={`relative p-5 text-center group transition-all duration-500 cursor-pointer
                       ${isSelected ? 'border-2 border-primary-palette bg-primary-palette/5' : 'border border-zinc-100 dark:border-zinc-800 hover:border-primary-palette/30'}`}
                   >
-                    <div className={`w-20 h-20 rounded-[24px] mx-auto mb-6 flex items-center justify-center transition-all duration-500 group-hover:scale-110 bg-zinc-50 dark:bg-zinc-900 text-zinc-400 group-hover:text-primary-palette`}>
-                      <GraduationCap size={32} />
+                    <div className={`w-12 h-12 rounded-[16px] mx-auto mb-4 flex items-center justify-center transition-all duration-500 group-hover:scale-110 bg-zinc-50 dark:bg-zinc-900 text-zinc-400 group-hover:text-primary-palette`}>
+                      <GraduationCap size={22} />
                     </div>
-                    <h3 className="text-xl font-bold mb-2 text-zinc-900 dark:text-white">{cls.name}</h3>
-                    <p className="text-sm text-zinc-600 dark:text-zinc-400">আপনার একাডেমিক লেভেল বেছে নিন</p>
+                    <h3 className="text-base font-black mb-1 text-zinc-900 dark:text-white">{cls.name}</h3>
+                    <p className="text-[11px] text-zinc-600 dark:text-zinc-400">আপনার একাডেমিক লেভেল বেছে নিন</p>
                     {isSelected && (
                       <motion.div 
                         layoutId="check-class"
@@ -388,24 +388,24 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                   <span className="text-sm text-zinc-500 font-bold">লোডিং হচ্ছে...</span>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {academicGroups.map((group) => {
                     const isSelected = settings.academicGroup === group.name;
                     return (
                       <Card 
                         key={group.id}
                         onClick={() => toggleGroup(group.name)}
-                        className={`relative p-8 text-center group transition-all duration-500 cursor-pointer overflow-hidden
-                          ${isSelected ? 'border-2 border-primary-palette bg-primary-palette/5 shadow-lg shadow-purple-500/5' : 'border border-zinc-100 dark:border-zinc-800 hover:border-primary-palette/30'}`}
+                        className={`relative p-5 text-center group transition-all duration-500 cursor-pointer overflow-hidden
+                          ${isSelected ? 'border-2 border-primary-palette bg-primary-palette/5 shadow-md shadow-purple-500/5' : 'border border-zinc-100 dark:border-zinc-800 hover:border-primary-palette/30'}`}
                       >
                         <div 
-                          className={`w-20 h-20 rounded-[24px] mx-auto mb-6 flex items-center justify-center transition-all duration-500 group-hover:scale-110
+                          className={`w-12 h-12 rounded-[16px] mx-auto mb-4 flex items-center justify-center transition-all duration-500 group-hover:scale-110
                             ${isSelected ? 'bg-primary-palette text-white' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-400 group-hover:text-primary-palette'}`}
                         >
-                          <List size={32} />
+                          <List size={22} />
                         </div>
-                        <h3 className="text-xl font-bold mb-2 text-zinc-900 dark:text-white">{group.name}</h3>
-                        <p className="text-sm text-zinc-600 dark:text-zinc-400">গ্রুপের বিষয়সমূহ উন্মোচন করতে ক্লিক করুন</p>
+                        <h3 className="text-base font-black mb-1 text-zinc-900 dark:text-white">{group.name}</h3>
+                        <p className="text-[11px] text-zinc-600 dark:text-zinc-400">গ্রুপের বিষয়সমূহ উন্মোচন করতে ক্লিক করুন</p>
                         {isSelected && (
                           <motion.div 
                             initial={{ scale: 0, opacity: 0 }}
@@ -430,24 +430,24 @@ export const PremiumExamBuilder: React.FC<Props> = ({
           )}
 
           {activeSteps[currentStep]?.id === 'subjects' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {currentSubjects.map((subject) => {
                 const isSelected = settings.subjects.includes(subject.id);
                 return (
                   <Card 
                     key={subject.id}
                     onClick={() => toggleSubject(subject.id)}
-                    className={`relative p-8 text-center group transition-all duration-500 cursor-pointer
+                    className={`relative p-5 text-center group transition-all duration-500 cursor-pointer
                       ${isSelected ? 'border-2 border-primary-palette bg-primary-palette/5' : 'border border-zinc-100 dark:border-zinc-800 hover:border-primary-palette/30'}`}
                   >
                     <div 
-                      className={`w-20 h-20 rounded-[24px] mx-auto mb-6 flex items-center justify-center transition-all duration-500 group-hover:scale-110
+                      className={`w-12 h-12 rounded-[16px] mx-auto mb-4 flex items-center justify-center transition-all duration-500 group-hover:scale-110
                         ${isSelected ? 'bg-primary-palette text-white' : 'bg-zinc-50 dark:bg-zinc-900 text-zinc-400'}`}
                     >
-                      <Layers size={32} />
+                      <Layers size={22} />
                     </div>
-                    <h3 className="text-xl font-bold mb-2 text-zinc-900 dark:text-white">{subject.name}</h3>
-                    <p className="text-sm text-zinc-600 dark:text-zinc-400">এই বিষয়ে দক্ষ হয়ে উঠুন</p>
+                    <h3 className="text-base font-black mb-1 text-zinc-900 dark:text-white">{subject.name}</h3>
+                    <p className="text-[11px] text-zinc-600 dark:text-zinc-400">এই বিষয়ে দক্ষ হয়ে উঠুন</p>
                     {isSelected && (
                       <motion.div 
                         initial={{ scale: 0, opacity: 0 }}
@@ -509,7 +509,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                   <p className="text-zinc-500">Please select at least one subject first</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {filteredChapters.map((chapter) => {
                     const isSelected = settings.chapters.includes(chapter.id);
                     const isWeak = weakChapters.includes(chapter.id);
@@ -518,17 +518,17 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                       <Card 
                         key={chapter.id}
                         onClick={() => toggleChapter(chapter.id)}
-                        className={`p-6 flex items-center justify-between border transition-all duration-300
-                          ${isSelected ? 'border-primary-palette bg-primary-palette/5 shadow-md' : 'border-zinc-100 dark:border-zinc-800'}`}
+                        className={`p-3.5 flex items-center justify-between border transition-all duration-300
+                          ${isSelected ? 'border-primary-palette bg-primary-palette/5 shadow-sm' : 'border-zinc-100 dark:border-zinc-800'}`}
                       >
-                        <div className="flex items-center gap-4">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0
                             ${isSelected ? 'bg-primary-palette text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'}`}>
-                            {isSelected ? <Check size={18} /> : <BookOpen size={18} />}
+                            {isSelected ? <Check size={14} /> : <BookOpen size={14} />}
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <h4 className="font-bold text-zinc-900 dark:text-white">{chapter.name}</h4>
+                              <h4 className="font-bold text-sm text-zinc-900 dark:text-white">{chapter.name}</h4>
                               {isWeak && <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">প্র্যাকটিস প্রয়োজন</Badge>}
                             </div>
                             <div className="flex gap-3 mt-1">
@@ -585,7 +585,7 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                   <p className="text-zinc-500">Please select at least one chapter first</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {filteredTopics.map((topic) => {
                     const isSelected = settings.topics.includes(topic.id);
                     const parentChapter = dynamicChapters.find(c => c.id === topic.chapterId);
@@ -593,8 +593,8 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                       <Card 
                         key={topic.id}
                         onClick={() => toggleTopic(topic.id)}
-                        className={`p-5 flex flex-col justify-between border transition-all duration-300 relative overflow-hidden group
-                          ${isSelected ? 'border-primary-palette bg-primary-palette/5 shadow-lg shadow-purple-500/10' : 'border-zinc-100 dark:border-zinc-800 hover:border-primary-palette/30'}`}
+                        className={`p-3.5 flex flex-col justify-between border transition-all duration-300 relative overflow-hidden group
+                          ${isSelected ? 'border-primary-palette bg-primary-palette/5 shadow-md shadow-purple-500/10' : 'border-zinc-100 dark:border-zinc-800 hover:border-primary-palette/30'}`}
                       >
                         {isSelected && (
                           <motion.div 
@@ -602,25 +602,25 @@ export const PremiumExamBuilder: React.FC<Props> = ({
                             className="absolute -inset-1 bg-gradient-to-br from-primary-palette/15 to-transparent blur-lg -z-10"
                           />
                         )}
-                        <div className="flex items-start justify-between mb-4">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0
+                        <div className="flex items-start justify-between mb-2">
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0
                             ${isSelected ? 'bg-primary-palette text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'}`}>
-                            {isSelected ? <Check size={18} /> : <Zap size={18} />}
+                            {isSelected ? <Check size={13} /> : <Zap size={13} />}
                           </div>
                           <div className="text-right">
-                             <span className="text-[9px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest block">MCQ</span>
-                             <span className="font-bold text-sm text-zinc-900 dark:text-white">{topic.mcqCount || 0}</span>
+                             <span className="text-[8px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest block">MCQ</span>
+                             <span className="font-bold text-xs text-zinc-900 dark:text-white">{topic.mcqCount || 0}</span>
                           </div>
                         </div>
                         
                         <div>
                           {parentChapter && (
-                            <span className="flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-violet-600 dark:text-violet-400 mb-1 leading-relaxed">
-                              <BookOpen size={10} className="shrink-0" />
+                            <span className="flex items-center gap-1 text-[9px] font-bold text-violet-600 dark:text-violet-400 mb-0.5 leading-relaxed">
+                              <BookOpen size={9} className="shrink-0" />
                               <span className="truncate max-w-full">{parentChapter.name}</span>
                             </span>
                           )}
-                          <h4 className="font-bold text-zinc-900 dark:text-white text-sm mb-2">{topic.name}</h4>
+                          <h4 className="font-bold text-zinc-900 dark:text-white text-xs mb-1.5">{topic.name}</h4>
                           {topic.tags && topic.tags.length > 0 && (
                             <div className="flex flex-wrap gap-1">
                               {topic.tags.map(tag => (
