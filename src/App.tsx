@@ -8755,7 +8755,7 @@ export default function App() {
               Empowering students across Bangladesh with free, high-quality educational resources. Notes, books, and video classes all in one place.
             </p>
             <div className="flex items-center gap-4">
-              <a href="#" className="hover:text-blue-400 transition-colors"><Facebook size={20} /></a>
+              <a href="https://www.facebook.com/parodorshhi" target="_blank" rel="noopener noreferrer" className="hover:text-blue-400 transition-colors"><Facebook size={20} /></a>
               <a href="#" className="hover:text-blue-400 transition-colors"><Twitter size={20} /></a>
               <a href="#" className="hover:text-blue-400 transition-colors"><Instagram size={20} /></a>
               <a href="#" className="hover:text-blue-400 transition-colors"><Github size={20} /></a>
