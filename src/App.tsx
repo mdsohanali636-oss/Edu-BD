@@ -136,6 +136,27 @@ import { TiltContainer, FlyInteraction, MiniRobot, WaveDivider, ScrollSection } 
 import { supabaseService, TABLE_MAP } from './services/supabaseService';
 import { User } from '@supabase/supabase-js';
 
+// React Router and Context Imports
+import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { useAppContext } from './context/AppContext';
+import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute';
+
+// Page Component Imports
+import { HomePage } from './pages/HomePage';
+import { DashboardPage } from './pages/DashboardPage';
+import { ExamPage } from './pages/ExamPage';
+import { PremiumExamPage } from './pages/PremiumExamPage';
+import { AdminPage } from './pages/AdminPage';
+import { LeaderboardPage } from './pages/LeaderboardPage';
+import { SavedPage } from './pages/SavedPage';
+import { RevisionPage } from './pages/RevisionPage';
+import { PremiumPage } from './pages/PremiumPage';
+import { CategoryPage } from './pages/CategoryPage';
+import { PrivacyPage } from './pages/PrivacyPage';
+import { TermsPage } from './pages/TermsPage';
+import { CookiesPage } from './pages/CookiesPage';
+
+
 // Firebase utilities from types.ts were already imported, removing local duplicates.
 
 function handleSupabaseError(error: any, operationType: OperationType, path: string | null, setError?: (err: string | null) => void) {
@@ -1033,74 +1054,72 @@ export const getDirectImageUrl = (url: string) => {
 
 export default function App() {
   const queryClient = useQueryClient();
-  const [contents, setContents] = useState<ContentItem[]>([]);
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [externalResources, setExternalResources] = useState<ExternalResource[]>([]);
-  const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [adminUserSearchQuery, setAdminUserSearchQuery] = useState('');
-  const [adminUserCategory, setAdminUserCategory] = useState<'all' | 'normal' | 'premium'>('all');
-  const [bookmarks, setBookmarks] = useState<string[]>([]);
-  const [user, setUser] = useState<User | null>(null);
-  const [firestoreUser, setFirestoreUser] = useState<any>(null);
-  const [userRole, setUserRole] = useState<'user' | 'admin'>('user');
-  const [dynamicClasses, setDynamicClasses] = useState<AcademicClassInfo[]>([]);
-  const [dynamicSubjects, setDynamicSubjects] = useState<AcademicSubject[]>([]);
-  const [dynamicChapters, setDynamicChapters] = useState<AcademicChapter[]>([]);
-  const [dynamicTopics, setDynamicTopics] = useState<AcademicTopic[]>([]);
-  const [academicGroups, setAcademicGroups] = useState<AcademicGroup[]>([]);
-  const [canUpload, setCanUpload] = useState(false);
-  const [canManageExams, setCanManageExams] = useState(false);
-  const [canManageQuestions, setCanManageQuestions] = useState(false);
-  const [canManageResources, setCanManageResources] = useState(false);
-  const [isPremium, setIsPremium] = useState(false);
-  const [globalPremiumMode, setGlobalPremiumMode] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  useEffect(() => {
-    const syncGlobalPremium = async () => {
-      try {
-        const settings = await supabaseService.getSubscriptionSettings();
-        setGlobalPremiumMode(!!settings.global_premium_mode);
-      } catch (err) {
-        console.error("Failed loading subscription settings for global premium:", err);
-      }
-    };
+  const {
+    user, setUser,
+    firestoreUser, setFirestoreUser,
+    userRole, setUserRole,
+    isAuthReady, setIsAuthReady,
+    canUpload, setCanUpload,
+    canManageExams, setCanManageExams,
+    canManageQuestions, setCanManageQuestions,
+    canManageResources, setCanManageResources,
+    isPremium, setIsPremium,
+    globalPremiumMode, setGlobalPremiumMode,
+    hasPremiumAccess,
+    hasAdminAccess,
+    isDarkMode, setIsDarkMode,
+    bookmarks, setBookmarks,
+    globalError, setGlobalError,
+    isMobileMenuOpen, setIsMobileMenuOpen,
+    contents, setContents,
+    allContents, setAllContents,
+    playlists, setPlaylists,
+    allPlaylists, setAllPlaylists,
+    externalResources, setExternalResources,
+    dynamicClasses, setDynamicClasses,
+    dynamicSubjects, setDynamicSubjects,
+    dynamicChapters, setDynamicChapters,
+    dynamicTopics, setDynamicTopics,
+    academicGroups, setAcademicGroups,
+    allUsers, setAllUsers,
+    adminUserSearchQuery, setAdminUserSearchQuery,
+    adminUserCategory, setAdminUserCategory,
+    filteredUsers,
+    allFeedback, setAllFeedback,
+    allExams, setAllExams,
+    allQuestions, setAllQuestions,
+    premiumStudents,
+    savedQuestionIds, setSavedQuestionIds,
+    handleToggleSaveQuestion,
+    qSavedQuestionsData,
+    qWrongQuestionsData,
+    qExamAttemptsData,
+    qLeaderboardData,
+    refetchSavedQuestions,
+    refetchWrongQuestions,
+    classes,
+    subjectsFilterList,
+    getSubjectNamesForClass,
+    currentSubjects,
+    isGroupNeeded,
+    refreshAcademicData,
+    classFilter, setClassFilter,
+    groupFilter, setGroupFilter,
+    subjectFilter, setSubjectFilter,
+    chapterFilter, setChapterFilter,
+    topicFilter, setTopicFilter,
+    yearFilter, setYearFilter,
+    contentTypeFilter, setContentTypeFilter,
+    selectedCategory, setSelectedCategory,
+    searchQuery, setSearchQuery,
+    showPremiumPromptModal, setShowPremiumPromptModal,
+    ai
+  } = useAppContext();
 
-    syncGlobalPremium();
-
-    const channel = supabase
-      .channel('public:subscription_settings_app_sync')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'subscription_settings'
-      }, (payload: any) => {
-        console.log("[SETTINGS REALTIME APP SYNC PAYLOAD]:", payload);
-        if (payload.new) {
-          setGlobalPremiumMode(!!payload.new.global_premium_mode);
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  const hasPremiumAccess = useMemo(() => {
-    if (userRole === 'admin') return true;
-    if (globalPremiumMode) return true;
-    const basePremium = isPremium || firestoreUser?.hasPremiumAccess === true;
-    if (basePremium && firestoreUser?.premiumExpiry) {
-      if (new Date(firestoreUser.premiumExpiry).getTime() < Date.now()) {
-        return false;
-      }
-    }
-    return basePremium;
-  }, [isPremium, firestoreUser?.hasPremiumAccess, firestoreUser?.premiumExpiry, userRole, globalPremiumMode]);
-
-  const hasAdminAccess = useMemo(() => {
-    return userRole === 'admin' || canUpload || canManageExams || canManageQuestions || canManageResources;
-  }, [userRole, canUpload, canManageExams, canManageQuestions, canManageResources]);
+  const [isSeeding, setIsSeeding] = useState(false);
 
   const usersWithRealtimeExpiry = useMemo(() => {
     return allUsers.map(u => {
@@ -1116,48 +1135,109 @@ export default function App() {
     });
   }, [allUsers]);
 
-  const filteredUsers = useMemo(() => {
-    let users = usersWithRealtimeExpiry;
-    if (adminUserCategory === 'normal') {
-      users = usersWithRealtimeExpiry.filter(u => !(u.hasPremiumAccess || u.isPremium));
-    } else if (adminUserCategory === 'premium') {
-      users = usersWithRealtimeExpiry.filter(u => (u.hasPremiumAccess || u.isPremium));
+  const { data: qNewsletterSubscribers = [] } = useQuery({
+    queryKey: ['newsletter_subscribers'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('newsletter_subscribers')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: userRole === 'admin',
+  });
+
+  const { data: qNewsletterEmailLogs = [] } = useQuery({
+    queryKey: ['newsletter_email_logs'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('newsletter_email_logs')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: userRole === 'admin',
+  });
+
+  const { data: qPublicSubscriberCount = null } = useQuery({
+    queryKey: ['public_subscriber_count'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('newsletter_subscribers')
+        .select('*', { count: 'exact', head: true });
+      if (error) throw error;
+      return count || 0;
+    },
+  });
+
+  // Compute view dynamically from path to support existing conditional render helpers and paths
+  const view = useMemo(() => {
+    const path = location.pathname;
+    if (path === '/') return 'home';
+    if (path === '/dashboard') return 'dashboard';
+    if (path === '/exam') return 'exam';
+    if (path === '/premium-exam') return 'premium-exam';
+    if (path === '/admin') return 'admin';
+    if (path === '/leaderboard') return 'leaderboard';
+    if (path === '/saved') return 'saved';
+    if (path === '/revision') return 'revision';
+    if (path === '/premium') return 'premium-subscription';
+    if (path === '/privacy') return 'privacy';
+    if (path === '/terms') return 'terms';
+    if (path === '/cookies') return 'cookies';
+    if (path === '/category' || path === '/notes' || path === '/sheets' || path === '/books' || path === '/papers' || path === '/videos') return 'category';
+    if (path === '/reset-password') return 'reset-password';
+    return 'home';
+  }, [location.pathname]);
+
+  const setView = useCallback((newView: string) => {
+    if (newView === 'home') navigate('/');
+    else if (newView === 'dashboard') navigate('/dashboard');
+    else if (newView === 'exam') navigate('/exam');
+    else if (newView === 'premium-exam') navigate('/premium-exam');
+    else if (newView === 'admin') navigate('/admin');
+    else if (newView === 'leaderboard') navigate('/leaderboard');
+    else if (newView === 'saved') navigate('/saved');
+    else if (newView === 'revision') navigate('/revision');
+    else if (newView === 'premium-subscription') navigate('/premium');
+    else if (newView === 'privacy') navigate('/privacy');
+    else if (newView === 'terms') navigate('/terms');
+    else if (newView === 'cookies') navigate('/cookies');
+    else if (newView === 'category') {
+      if (selectedCategory === 'Notes') navigate('/notes');
+      else if (selectedCategory === 'Practice Sheet') navigate('/sheets');
+      else if (selectedCategory === 'Books') navigate('/books');
+      else if (selectedCategory === 'Question Papers') navigate('/papers');
+      else if (selectedCategory === 'YouTube Classes') navigate('/videos');
+      else navigate('/category');
     }
+    else if (newView === 'reset-password') navigate('/reset-password');
+  }, [navigate, selectedCategory]);
 
-    if (!adminUserSearchQuery.trim()) return users;
-    const query = adminUserSearchQuery.trim().toLowerCase();
-    return users.filter(u => 
-      (u.email && u.email.toLowerCase().includes(query)) ||
-      (u.name && u.name.toLowerCase().includes(query)) ||
-      (u.id && u.id.toLowerCase().includes(query))
-    );
-  }, [usersWithRealtimeExpiry, adminUserSearchQuery, adminUserCategory]);
-
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [view, setView] = useState<'home' | 'category' | 'saved' | 'admin' | 'dashboard' | 'exam' | 'leaderboard' | 'privacy' | 'terms' | 'cookies' | 'premium-exam' | 'premium-subscription' | 'revision' | 'reset-password'>('home');
-  const [savedQuestionIds, setSavedQuestionIds] = useState<Set<string>>(new Set());
-
-  const handleToggleSaveQuestion = async (questionId: string) => {
-    if (!user) {
-      setGlobalError("দয়া করে প্রশ্ন সেভ করতে প্রথমে লগইন করুন।");
-      return;
+  useEffect(() => {
+    const path = location.pathname;
+    if (path === '/notes') {
+      setSelectedCategory('Notes');
+    } else if (path === '/sheets') {
+      setSelectedCategory('Practice Sheet');
+    } else if (path === '/books') {
+      setSelectedCategory('Books');
+    } else if (path === '/papers') {
+      setSelectedCategory('Question Papers');
+    } else if (path === '/videos') {
+      setSelectedCategory('YouTube Classes');
     }
-    try {
-      const isCurrentlySaved = savedQuestionIds.has(questionId);
-      if (isCurrentlySaved) {
-        await supabaseService.unsaveQuestion(user.id, questionId);
-      } else {
-        await supabaseService.saveQuestion(user.id, questionId);
-      }
-      refetchSavedQuestions();
-    } catch (err: any) {
-      console.error("Error toggling saved question:", err);
-      setGlobalError("প্রশ্নটি সেভ করতে সমস্যা হয়েছে। দয়া করে আবার চেষ্টা করুন।");
-    }
-  };
+  }, [location.pathname, setSelectedCategory]);
 
-  const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [adminTab, setAdminTab] = useState<'resources' | 'playlists' | 'users' | 'feedback' | 'exams' | 'questions' | 'leaderboards' | 'academics' | 'newsletter' | 'subscriptions'>('resources');
+  const [examToDelete, setExamToDelete] = useState<string | null>(null);
+  const [isDeletingExam, setIsDeletingExam] = useState(false);
+  
+  // Header suggestions & menu dropdown local states
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -1178,20 +1258,6 @@ export default function App() {
     };
   }, [isUserMenuOpen]);
 
-  const [isDarkMode, setIsDarkMode] = useLocalStorage('parodorshhi_darkmode', false);
-  const [isAuthLoading, setIsAuthLoading] = useState(false);
-  const [adminTab, setAdminTab] = useState<'resources' | 'playlists' | 'users' | 'feedback' | 'exams' | 'questions' | 'leaderboards' | 'academics' | 'newsletter' | 'subscriptions'>('resources');
-  const [allFeedback, setAllFeedback] = useState<Feedback[]>([]);
-  const [allExams, setAllExams] = useState<Exam[]>([]);
-  const [allQuestions, setAllQuestions] = useState<Question[]>([]);
-  const [globalError, setGlobalError] = useState<string | null>(null);
-  const [isSeeding, setIsSeeding] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [examToDelete, setExamToDelete] = useState<string | null>(null);
-  const [isDeletingExam, setIsDeletingExam] = useState(false);
-
-  const [contentTypeFilter, setContentTypeFilter] = useState<'free' | 'premium'>('free');
-  const [showPremiumPromptModal, setShowPremiumPromptModal] = useState(false);
 
   // Newsletter Admin States
   const [newsletterSubject, setNewsletterSubject] = useState('');
@@ -1202,28 +1268,11 @@ export default function App() {
   const [newsletterSearchFilter, setNewsletterSearchFilter] = useState('');
   const [newsletterSubTab, setNewsletterSubTab] = useState<'subscribers' | 'logs'>('subscribers');
 
-  // Filters
-  const [classFilter, setClassFilter] = useState<string>('');
-  const [groupFilter, setGroupFilter] = useState<string>('');
-  const [subjectFilter, setSubjectFilter] = useState<string>('');
   const [examClassFilter, setExamClassFilter] = useState<string>('');
   const [examGroupFilter, setExamGroupFilter] = useState<string>('');
+
   const [questionClassFilter, setQuestionClassFilter] = useState<string>('');
   const [questionGroupFilter, setQuestionGroupFilter] = useState<string>('');
-
-  const isGroupNeeded = (className: any) => {
-    if (!className || typeof className !== 'string') return false;
-    const foundClass = dynamicClasses.find(c => c.name === className);
-    if (foundClass) {
-      return foundClass.has_groups ?? (foundClass as any).hasGroups ?? false;
-    }
-    // Fallback default logic if not loaded: SSC, HSC, Admission have groups
-    const nameLower = className.toLowerCase();
-    if (nameLower === 'ssc' || nameLower === 'hsc' || nameLower === 'admission') {
-      return true;
-    }
-    return false;
-  };
 
   // Reset downstream filters for home/classes
   useEffect(() => {
@@ -1249,26 +1298,6 @@ export default function App() {
     setQuestionSubjectFilter('');
   }, [questionGroupFilter]);
 
-  const getSubjectNamesForClass = useCallback((className: string | 'All', groupName: string = 'All') => {
-    if (className === '') return [];
-    if (className === 'All') {
-      // Return unique names if multiple classes have same subject name
-      return Array.from(new Set(dynamicSubjects.map(s => s.name)));
-    }
-    const matchedClass = dynamicClasses.find(c => c.name === className);
-    if (!matchedClass) return [];
-    
-    const subjectNames = dynamicSubjects.filter(s => {
-      const matchClass = s.classId === matchedClass.id;
-      const sGroup = (s.academicGroup || (s as any).academic_group || 'All').trim().toLowerCase();
-      const filterGroup = (groupName || 'All').trim().toLowerCase();
-      const matchGroup = filterGroup === 'all' || filterGroup === '' || sGroup === filterGroup || sGroup === 'all';
-      return matchClass && matchGroup;
-    }).map(s => s.name);
-    return Array.from(new Set(subjectNames));
-  }, [dynamicSubjects, dynamicClasses]);
-
-  const currentSubjects = useMemo(() => getSubjectNamesForClass(classFilter, groupFilter), [getSubjectNamesForClass, classFilter, groupFilter]);
   const examSubjects = useMemo(() => getSubjectNamesForClass(examClassFilter, examGroupFilter), [getSubjectNamesForClass, examClassFilter, examGroupFilter]);
   const questionSubjects = useMemo(() => getSubjectNamesForClass(questionClassFilter, questionGroupFilter), [getSubjectNamesForClass, questionClassFilter, questionGroupFilter]);
 
@@ -1355,16 +1384,7 @@ export default function App() {
     setActiveExam(null);
   };
 
-  const ai = useMemo(() => {
-    try {
-      const key = process.env.GEMINI_API_KEY || "";
-      if (!key) return null;
-      return new GoogleGenAI({ apiKey: key });
-    } catch (err) {
-      console.error("Failed to initialize GoogleGenAI:", err);
-      return null;
-    }
-  }, []);
+
 
   // History management
   const isPopState = useRef(false);
@@ -2746,973 +2766,22 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  useEffect(() => {
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const searchParams = new URLSearchParams(window.location.search);
-    const hasRecovery = hashParams.get('type') === 'recovery' || 
-                        searchParams.get('type') === 'recovery' || 
-                        window.location.hash.includes('type=recovery') || 
-                        window.location.search.includes('type=recovery') ||
-                        window.location.hash.includes('type%3Drecovery') ||
-                        window.location.search.includes('type%3Drecovery');
+  // --- INTEGRATED GLOBAL AUTH & ACADEMIC STATES VIA CONTEXT ---
 
-    console.log("[App.tsx / MOUNT] Initial Route Analysis:", {
-      pathname: window.location.pathname,
-      hasRecovery,
-      hashLength: window.location.hash.length,
-      searchLength: window.location.search.length
-    });
 
-    if (window.location.pathname === '/reset-password' || window.location.pathname.startsWith('/reset-password/') || hasRecovery) {
-      console.log("[App.tsx / ROUTING] Redirecting to dedicated password reset page.");
-      setView('reset-password');
-      if (window.location.pathname !== '/reset-password') {
-        const hash = window.location.hash;
-        const search = window.location.search;
-        window.history.replaceState({}, document.title, `/reset-password${search}${hash}`);
-      }
-    } else if (window.location.pathname === '/dashboard') {
-      console.log("[App.tsx / ROUTING] Direct path /dashboard detected.");
-      setView('dashboard');
-    } else if (window.location.pathname === '/admin') {
-      console.log("[App.tsx / ROUTING] Direct path /admin detected.");
-      setView('admin');
-    } else if (window.location.pathname === '/login') {
-      console.log("[App.tsx / ROUTING] Direct path /login detected.");
-      setView('home');
-    }
 
-    supabase.auth.getSession().then((res) => {
-      const session = res?.data?.session;
-      if (session?.user) {
-        const mappedUser = {
-          id: session.user.id,
-          uid: session.user.id,
-          email: session.user.email,
-          phone: session.user.phone || '',
-          phoneVerified: !!session.user.phone_confirmed_at,
-          displayName: session.user.user_metadata?.full_name || session.user.phone || session.user.email,
-          photoURL: session.user.user_metadata?.avatar_url || null,
-          emailVerified: !!session.user.email_confirmed_at,
-          user_metadata: session.user.user_metadata
-        } as any;
-        setUser(mappedUser);
-      } else {
-        setUser(null);
-        setUserRole('user');
-        setCanUpload(false);
-      }
-    }).catch(err => {
-      console.error("Auth session error:", err);
-    }).finally(() => {
-       setIsAuthReady(true);
-    });
 
-    const { data: { subscription: authListener } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("[Auth Listener] Event fired:", event);
-      if (event === 'PASSWORD_RECOVERY') {
-        setView('reset-password');
-        if (window.location.pathname !== '/reset-password') {
-          window.history.replaceState({}, document.title, `/reset-password${window.location.search}${window.location.hash}`);
-        }
-      }
 
-      if (session?.user) {
-        const mappedUser = {
-          id: session.user.id,
-          uid: session.user.id,
-          email: session.user.email,
-          phone: session.user.phone || '',
-          phoneVerified: !!session.user.phone_confirmed_at,
-          displayName: session.user.user_metadata.full_name || session.user.phone || session.user.email,
-          photoURL: session.user.user_metadata.avatar_url || null,
-          emailVerified: !!session.user.email_confirmed_at,
-          user_metadata: session.user.user_metadata
-        } as any;
-        setUser(mappedUser);
-      } else {
-        setUser(null);
-        setUserRole('user');
-        setCanUpload(false);
-      }
-    });
 
-    return () => authListener.unsubscribe();
-  }, []);
 
-  useEffect(() => {
-    if (!isAuthReady) return;
 
-    const currentPath = window.location.pathname;
-    let targetPath = '/';
 
-    if (view === 'reset-password') {
-      targetPath = '/reset-password';
-    } else if (view === 'dashboard') {
-      targetPath = '/dashboard';
-    } else if (view === 'admin') {
-      targetPath = '/admin';
-    } else if (view === 'home') {
-      targetPath = user ? '/' : '/login';
-    } else {
-      targetPath = '/';
-    }
 
-    if (currentPath !== targetPath && currentPath !== '/reset-password') {
-      const isCustomExplicitPath = currentPath === '/admin' || currentPath === '/dashboard';
-      if (!(isCustomExplicitPath && !user)) {
-        console.log("[App.tsx / PATH_SYNC] Syncing path to match state:", targetPath);
-        window.history.replaceState({}, document.title, targetPath);
-      }
-    }
-  }, [view, user, isAuthReady]);
 
-  // --- QUERY DEFINITIONS ---
 
-  // 1. Profile Query (handles profiles and user_roles)
-  const { data: qProfileData } = useQuery({
-    queryKey: ['profiles', user?.id],
-    queryFn: async () => {
-      if (!user) return null;
-      console.log("[ReactQuery] Fetch profile started for user ID:", user.id);
-      
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
 
-      const isAdminEmail = user.email === 'mdsohanali636@gmail.com';
-      let userRoleData = null;
-      try {
-        const { data, error: rError } = await supabase
-          .from('user_roles')
-          .select('*')
-          .eq('user_id', user.id);
-        if (!rError && data && data.length > 0) {
-          userRoleData = data[0];
-        } else {
-          const { data: dataById } = await supabase
-            .from('user_roles')
-            .select('*')
-            .eq('id', user.id);
-          if (dataById && dataById.length > 0) {
-            userRoleData = dataById[0];
-          }
-        }
-      } catch (err) {
-        console.warn("[ReactQuery] Could not query user_roles:", err);
-      }
 
-      return { profile, userRoleData, isAdminEmail, error };
-    },
-    enabled: !!user,
-  });
 
-  // 2. Leaderboards & User Stats Query
-  const { data: qLeaderboardData } = useQuery({
-    queryKey: ['leaderboards'],
-    queryFn: async () => {
-      console.log("[ReactQuery] Fetching leaderboards and user stats...");
-      const { data: leadData, error: leadErr } = await supabase
-        .from('leaderboards')
-        .select('*')
-        .order('score', { ascending: false })
-        .order('completion_time', { ascending: true })
-        .limit(500);
-
-      if (leadErr) {
-        console.error("[ReactQuery] Leaderboard select failure:", leadErr);
-      }
-
-      const { data: statsData, error: statsErr } = await supabase
-        .from('user_stats')
-        .select('*')
-        .order('total_xp', { ascending: false })
-        .limit(500);
-
-      if (statsErr) {
-        console.error("[ReactQuery] User stats select failure:", statsErr);
-      }
-
-      const uniqueUserIds = Array.from(new Set([
-        ...(leadData || []).map((row: any) => row.user_id),
-        ...(statsData || []).map((row: any) => row.user_id)
-      ].filter(Boolean)));
-
-      let activeProfilesMap: Record<string, { avatar_url: string | null; full_name: string | null }> = {};
-      if (uniqueUserIds.length > 0) {
-        const { data: profileList } = await supabase
-          .from('profiles')
-          .select('id, avatar_url, full_name')
-          .in('id', uniqueUserIds);
-        if (profileList) {
-          profileList.forEach((p: any) => {
-            activeProfilesMap[p.id] = {
-              avatar_url: p.avatar_url,
-              full_name: p.full_name
-            };
-          });
-        }
-      }
-
-      return { leadData, statsData, activeProfilesMap };
-    },
-    enabled: !!user,
-  });
-
-  // 3. Feedback Query
-  const { data: qFeedbackData } = useQuery({
-    queryKey: ['feedbacks'],
-    queryFn: async () => {
-      console.log("[ReactQuery] Fetching feedback...");
-      const { data, error } = await supabase
-        .from('feedback')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
-    },
-    enabled: userRole === 'admin',
-  });
-
-  // Query to fetch active pro students in real-time
-  const { data: premiumStudents = [] } = useQuery({
-    queryKey: ['premiumStudents'],
-    queryFn: async () => {
-      console.log("[ReactQuery] Fetching premium/pro students...");
-      const premiumUserIds = new Set<string>();
-
-      try {
-        const { data: premiumRoles, error: rolesError } = await supabase
-          .from('user_roles')
-          .select('user_id, id')
-          .eq('is_premium', true);
-
-        if (!rolesError && premiumRoles) {
-          premiumRoles.forEach(r => {
-            if (r.user_id) premiumUserIds.add(r.user_id);
-          });
-        }
-      } catch (rolesErr) {
-        console.warn("Could not query user_roles for premium check:", rolesErr);
-      }
-
-      try {
-        const { data: premiumProfilesDirect, error: profilesError } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('has_premium_access', true);
-
-        if (!profilesError && premiumProfilesDirect) {
-          premiumProfilesDirect.forEach(p => {
-            if (p.id) premiumUserIds.add(p.id);
-          });
-        }
-      } catch (profilesErr) {
-        console.warn("Could not query profiles for direct premium check:", profilesErr);
-      }
-
-      if (premiumUserIds.size === 0) {
-        return [];
-      }
-
-      try {
-        const { data: userProfiles, error: detailsError } = await supabase
-          .from('profiles')
-          .select('id, full_name, display_name, avatar_url, created_at')
-          .in('id', Array.from(premiumUserIds))
-          .order('created_at', { ascending: false });
-
-        if (!detailsError && userProfiles) {
-          return userProfiles;
-        }
-      } catch (err) {
-        console.error("Error retrieving premium student profiles details:", err);
-      }
-
-      return [];
-    }
-  });
-
-  // 4. Resources / Content Items Query
-  const { data: qResourcesData } = useQuery({
-    queryKey: ['resources'],
-    queryFn: async () => {
-      console.log("[ReactQuery] Fetching resources...");
-      return await supabaseService.fetchResources();
-    },
-  });
-
-  // 5. Playlists Query
-  const { data: qPlaylistsData } = useQuery({
-    queryKey: ['playlists'],
-    queryFn: async () => {
-      console.log("[ReactQuery] Fetching playlists...");
-      const { data } = await supabase.from('playlists').select('*').order('created_at', { ascending: false });
-      return data || [];
-    },
-  });
-
-  // 6. Exams Query
-  const { data: qExamsData } = useQuery({
-    queryKey: ['exams', userRole, canUpload],
-    queryFn: async () => {
-      console.log("[ReactQuery] Fetching exams...");
-      return await supabaseService.fetchExams(userRole === 'admin' || canUpload);
-    },
-  });
-
-  // 7. Exam Attempts Query
-  const { data: qExamAttemptsData } = useQuery({
-    queryKey: ['exam_attempts', user?.id],
-    queryFn: async () => {
-      if (!user) return [];
-      console.log("[ReactQuery] Fetching exam attempts...");
-      const { data } = await supabase
-        .from('exam_attempts')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-      return data || [];
-    },
-    enabled: !!user,
-  });
-
-  // 7.5. Saved Questions Query
-  const { data: qSavedQuestionsData, refetch: refetchSavedQuestions } = useQuery({
-    queryKey: ['saved_questions', user?.id],
-    queryFn: async () => {
-      if (!user) return [];
-      console.log("[ReactQuery] Fetching saved questions...");
-      return await supabaseService.getSavedQuestions(user.id);
-    },
-    enabled: !!user,
-  });
-
-  // 7.6. Wrong Questions Query
-  const { data: qWrongQuestionsData, refetch: refetchWrongQuestions } = useQuery({
-    queryKey: ['wrong_questions', user?.id],
-    queryFn: async () => {
-      if (!user) return [];
-      console.log("[ReactQuery] Fetching wrong questions...");
-      return await supabaseService.getWrongQuestions(user.id);
-    },
-    enabled: !!user,
-  });
-
-  useEffect(() => {
-    if (qSavedQuestionsData) {
-      setSavedQuestionIds(new Set(qSavedQuestionsData.map((d: any) => d.question_id)));
-    } else {
-      setSavedQuestionIds(new Set());
-    }
-  }, [qSavedQuestionsData]);
-
-  // 8. Performance History Query
-  const { data: qPerformanceHistoryData } = useQuery({
-    queryKey: ['performance_history', user?.id],
-    queryFn: async () => {
-      if (!user) return [];
-      console.log("[ReactQuery] Fetching performance history...");
-      const { data } = await supabase
-        .from('performance_history')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-      return data || [];
-    },
-    enabled: !!user,
-  });
-
-  // 9. Newsletter Subscribers Query
-  const { data: qNewsletterSubscribers } = useQuery({
-    queryKey: ['newsletter_subscribers'],
-    queryFn: async () => {
-      console.log("[ReactQuery] Fetching newsletter subscribers...");
-      const { data, error } = await supabase
-        .from('newsletter_subscribers')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) {
-        if (!error.message.includes('permission denied')) {
-          console.warn("newsletter_subscribers select warning:", error);
-        }
-        return [];
-      }
-      return data || [];
-    },
-  });
-
-  // 10. Newsletter Email Logs Query
-  const { data: qNewsletterEmailLogs } = useQuery({
-    queryKey: ['newsletter_email_logs'],
-    queryFn: async () => {
-      console.log("[ReactQuery] Fetching newsletter email logs...");
-      const { data, error } = await supabase
-        .from('newsletter_email_logs')
-        .select('*')
-        .order('sent_at', { ascending: false });
-      if (error) {
-        if (!error.message.includes('permission denied')) {
-          console.warn("newsletter_email_logs select warning:", error);
-        }
-        return [];
-      }
-      return data || [];
-    },
-    enabled: userRole === 'admin',
-  });
-
-  // 11. Public Subscriber Count Query
-  const { data: qPublicSubscriberCount } = useQuery({
-    queryKey: ['public_subscriber_count'],
-    queryFn: async () => {
-      try {
-        const res = await fetch('/api/newsletter/count');
-        if (res.ok) {
-          const d = await res.json();
-          return d.count || 0;
-        }
-      } catch (e) {
-        console.warn("Failed fetching public subscriber count:", e);
-      }
-      return 0;
-    },
-  });
-
-
-  // --- STATE SYNCHRONIZATION EFFECTS ---
-
-  // 1. Profile Sync Effect
-  useEffect(() => {
-    if (!user || !qProfileData) return;
-
-    const syncProfile = async () => {
-      const { profile, userRoleData, isAdminEmail } = qProfileData;
-
-      const isExpired = !isAdminEmail && profile?.premium_expiry && new Date(profile.premium_expiry).getTime() < Date.now();
-      const defaultRole = isAdminEmail ? 'admin' : (profile?.role || 'user');
-      const defaultCanUpload = isAdminEmail ? true : (profile?.can_upload ?? false);
-      const defaultCanManageExams = isAdminEmail ? true : false;
-      const defaultCanManageQuestions = isAdminEmail ? true : false;
-      const defaultCanManageResources = isAdminEmail ? true : false;
-      const defaultIsPremium = isAdminEmail ? true : (isExpired ? false : (profile?.has_premium_access ?? false));
-
-      let currentRole = defaultRole;
-      let currentCanUpload = defaultCanUpload;
-      let currentCanManageExams = defaultCanManageExams;
-      let currentCanManageQuestions = defaultCanManageQuestions;
-      let currentCanManageResources = defaultCanManageResources;
-      let currentIsPremium = defaultIsPremium;
-
-      if (userRoleData) {
-        currentRole = userRoleData.role || defaultRole;
-        currentCanUpload = userRoleData.can_upload ?? defaultCanUpload;
-        currentCanManageExams = userRoleData.can_manage_exams ?? defaultCanManageExams;
-        currentCanManageQuestions = userRoleData.can_manage_questions ?? defaultCanManageQuestions;
-        currentCanManageResources = userRoleData.can_manage_resources ?? defaultCanManageResources;
-        currentIsPremium = isExpired ? false : (userRoleData.is_premium ?? defaultIsPremium);
-      } else {
-        try {
-          const insertRec = {
-            user_id: user.id,
-            role: defaultRole,
-            can_upload: defaultCanUpload,
-            can_manage_exams: defaultCanManageExams,
-            can_manage_questions: defaultCanManageQuestions,
-            can_manage_resources: defaultCanManageResources,
-            is_premium: defaultIsPremium
-          };
-          const { error: insError } = await supabase.from('user_roles').insert([insertRec]);
-          if (insError) {
-            const altRec = {
-              id: user.id,
-              role: defaultRole,
-              can_upload: defaultCanUpload,
-              can_manage_exams: defaultCanManageExams,
-              can_manage_questions: defaultCanManageQuestions,
-              can_manage_resources: defaultCanManageResources,
-              is_premium: defaultIsPremium
-            };
-            await supabase.from('user_roles').insert([altRec]);
-          }
-        } catch (err) {
-          console.warn("[ReactQuery] Error registering initial user roles:", err);
-        }
-      }
-
-      if (isExpired && (profile?.has_premium_access || (userRoleData && userRoleData.is_premium))) {
-        try {
-          await supabase.from('profiles').update({ has_premium_access: false }).eq('id', user.id);
-          if (userRoleData) {
-            await supabase.from('user_roles').update({ is_premium: false }).eq('user_id', user.id);
-          }
-        } catch (syncErr) {
-          console.warn("Failed to automatically deactivate expired status in DB:", syncErr);
-        }
-      }
-
-      setUserRole(currentRole as any);
-      setCanUpload(currentCanUpload);
-      setCanManageExams(currentCanManageExams);
-      setCanManageQuestions(currentCanManageQuestions);
-      setCanManageResources(currentCanManageResources);
-      setIsPremium(currentIsPremium);
-
-      const hasPremium = currentIsPremium || (profile?.has_premium_access ?? false);
-
-      if (profile) {
-        const mappedProfile = {
-          ...profile,
-          id: profile.id,
-          email: profile.email,
-          display_name: profile.full_name || 'Student',
-          displayName: profile.full_name || 'Student',
-          name: profile.full_name || 'Student',
-          academic_class: profile.academic_class,
-          academicClass: profile.academic_class,
-          academic_group: profile.academic_group,
-          academicGroup: profile.academic_group,
-          hasPremiumAccess: hasPremium,
-          premiumExpiry: profile.premium_expiry,
-          canUpload: currentCanUpload,
-          createdAt: profile.created_at,
-          photoURL: profile.avatar_url || profile.photo_url || '',
-          avatar_url: profile.avatar_url || '',
-          avatarUrl: profile.avatar_url || '',
-          phoneNumber: profile.phone_number
-        };
-        setFirestoreUser(mappedProfile);
-
-        if (isAdminEmail && profile.role !== 'admin') {
-          await supabase.from('profiles').update({ role: 'admin', can_upload: true }).eq('id', user.id);
-        }
-      } else {
-        const { data: newProfile, error: profileInitError } = await supabase
-          .from('profiles')
-          .upsert({
-            id: user.id,
-            email: user.email,
-            full_name: user.user_metadata?.full_name || 'Student',
-            role: currentRole,
-            academic_class: user.user_metadata?.academic_class || (dynamicClasses?.[0]?.name || 'SSC'),
-            can_upload: currentCanUpload,
-          })
-          .select()
-          .single();
-
-        if (profileInitError) {
-          console.error("[ReactQuery] Initial profile insertion failed:", profileInitError);
-        } else if (newProfile) {
-          const mappedNewProfile = {
-            ...newProfile,
-            id: newProfile.id,
-            email: newProfile.email,
-            display_name: newProfile.full_name || 'Student',
-            displayName: newProfile.full_name || 'Student',
-            name: newProfile.full_name || 'Student',
-            academic_class: newProfile.academic_class,
-            academicClass: newProfile.academic_class,
-            academic_group: newProfile.academic_group,
-            academicGroup: newProfile.academic_group,
-            hasPremiumAccess: hasPremium,
-            premiumExpiry: newProfile.premium_expiry,
-            canUpload: currentCanUpload,
-            createdAt: newProfile.created_at,
-            photoURL: newProfile.avatar_url || newProfile.photo_url || '',
-            avatar_url: newProfile.avatar_url || '',
-            avatarUrl: newProfile.avatar_url || '',
-            phoneNumber: newProfile.phone_number
-          };
-          setFirestoreUser(mappedNewProfile);
-        }
-      }
-    };
-
-    syncProfile();
-  }, [qProfileData, user, dynamicClasses]);
-
-  // 2. Leaderboard Sync Effect
-  useEffect(() => {
-    if (!qLeaderboardData) return;
-    const { leadData, statsData, activeProfilesMap } = qLeaderboardData;
-
-    if (leadData) {
-      const mappedLead = leadData.map((row: any) => {
-        const profileOverride = activeProfilesMap[row.user_id];
-        return {
-          id: row.id || `${row.user_id}_${row.exam_id}`,
-          class: row.academic_class || 'SSC',
-          examId: row.exam_id,
-          userId: row.user_id,
-          userName: profileOverride?.full_name || row.user_name || 'Student',
-          userPhoto: profileOverride?.avatar_url !== undefined ? profileOverride.avatar_url : (row.user_photo || row.user_avatar),
-          bestScore: row.score !== undefined ? row.score : (row.best_score || 0),
-          timeTaken: row.completion_time !== undefined ? row.completion_time : (row.time_taken || 0),
-          lastUpdated: row.updated_at || row.last_updated,
-          examTitle: row.exam_title || 'Practice Match',
-          firstSubmissionAt: row.first_submission_at || row.last_updated || new Date().toISOString(),
-          totalAttempts: row.total_attempts || 1,
-          accuracy: row.accuracy || 0,
-          xp: row.xp || 0,
-          streak: row.streak || 0,
-          badge: row.badge || 'Bronze',
-          correctCount: row.correct_answers !== undefined ? row.correct_answers : (row.correct_count || 0),
-          wrongCount: row.wrong_answers !== undefined ? row.wrong_answers : (row.wrong_count || 0),
-          unansweredCount: row.skipped_answers !== undefined ? row.skipped_answers : (row.unanswered_count || 0),
-          totalQuestions: row.total_questions || 0
-        };
-      });
-      setAllLeaderboards(mappedLead);
-    }
-
-    if (statsData) {
-      const mappedStats = statsData.map((row: any) => {
-        const profileOverride = activeProfilesMap[row.user_id];
-        return {
-          userId: row.user_id,
-          userName: profileOverride?.full_name || row.user_name || 'Student',
-          userPhoto: profileOverride?.avatar_url !== undefined ? profileOverride.avatar_url : row.user_photo,
-          totalExams: row.total_exams || 0,
-          averageScore: row.average_score || 0,
-          highestScore: row.highest_score || 0,
-          totalCorrect: row.total_correct || 0,
-          totalWrong: row.total_wrong || 0,
-          totalSkipped: row.total_skipped || 0,
-          totalXp: row.total_xp || 0,
-          streak: row.streak || 0,
-          badge: row.badge || 'Bronze',
-          updatedAt: row.updated_at
-        };
-      });
-      setAllUserStats(mappedStats);
-    }
-  }, [qLeaderboardData]);
-
-  // 3. Feedback Sync Effect
-  useEffect(() => {
-    if (!qFeedbackData) return;
-    const mappedFeedback = qFeedbackData.map((f: any) => ({
-      id: f.id,
-      userId: f.user_id,
-      user_id: f.user_id,
-      userEmail: f.user_email || 'guest@educationalportal.org',
-      user_email: f.user_email || 'guest@educationalportal.org',
-      userName: f.user_name || 'Guest Student',
-      user_name: f.user_name || 'Guest Student',
-      message: f.message || f.content || 'No feedback text provided',
-      createdAt: f.created_at,
-      created_at: f.created_at,
-      status: f.status || 'unread',
-      reply: f.reply || null,
-      admin_reply: f.reply || null
-    }));
-    setAllFeedback(mappedFeedback);
-  }, [qFeedbackData]);
-
-  // 4. Resources Sync Effect
-  useEffect(() => {
-    if (qResourcesData) {
-      setContents(qResourcesData as ContentItem[]);
-      setAllContents(qResourcesData as ContentItem[]);
-    }
-  }, [qResourcesData]);
-
-  // 5. Playlists Sync Effect
-  useEffect(() => {
-    if (qPlaylistsData) {
-      const mappedPlaylists = qPlaylistsData.map((item: any) => ({
-        id: item.id,
-        title: item.title,
-        description: item.description,
-        thumbnailUrl: item.thumbnail_url,
-        thumbnail_url: item.thumbnail_url,
-        type: item.type || 'custom',
-        authorId: item.author_id,
-        youtubePlaylistId: item.youtube_playlist_id,
-        videoIds: item.video_ids,
-        academicClass: item.academic_class,
-        createdAt: item.created_at,
-        isPremium: item.is_premium
-      }));
-      setPlaylists(mappedPlaylists as any as Playlist[]);
-      setAllPlaylists(mappedPlaylists as any as Playlist[]);
-    }
-  }, [qPlaylistsData]);
-
-  // 6. Exams Sync Effect
-  useEffect(() => {
-    if (qExamsData) {
-      setAllExams(qExamsData as Exam[]);
-    }
-  }, [qExamsData]);
-
-  // --- CENTRAL REALTIME SCHEMA-WIDE LISTENER ---
-  useEffect(() => {
-    console.log("[ReactQuery] Registering central realtime sub for all schema changes...");
-    const centralChannel = supabase
-      .channel('schema-changes-sync-all')
-      .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
-        console.log("[ReactQuery] Schema change detected on table", payload.table, payload);
-        const { table } = payload;
-        
-        // Match table to invalidate active React queries instantly
-        if (table === 'profiles' || table === 'user_roles') {
-          queryClient.invalidateQueries({ queryKey: ['profiles', user?.id] });
-          queryClient.invalidateQueries({ queryKey: ['leaderboards'] });
-          queryClient.invalidateQueries({ queryKey: ['premiumStudents'] });
-        } else if (table === 'leaderboards' || table === 'user_stats') {
-          queryClient.invalidateQueries({ queryKey: ['leaderboards'] });
-        } else if (table === 'feedback') {
-          queryClient.invalidateQueries({ queryKey: ['feedbacks'] });
-        } else if (table === 'exam_attempts') {
-          queryClient.invalidateQueries({ queryKey: ['exam_attempts', user?.id] });
-          queryClient.invalidateQueries({ queryKey: ['leaderboards'] });
-        } else if (table === 'performance_history') {
-          queryClient.invalidateQueries({ queryKey: ['performance_history', user?.id] });
-        } else if (['notes', 'books', 'video_classes', 'practice_sheets', 'external_links' ].includes(table)) {
-          queryClient.invalidateQueries({ queryKey: ['resources'] });
-        } else if (table === 'playlists') {
-          queryClient.invalidateQueries({ queryKey: ['playlists'] });
-        } else if (table === 'exams') {
-          queryClient.invalidateQueries({ queryKey: ['exams'] });
-        } else if (table === 'questions') {
-          queryClient.invalidateQueries({ queryKey: ['questions'] });
-        } else if (table === 'newsletter_subscribers') {
-          queryClient.invalidateQueries({ queryKey: ['newsletter_subscribers'] });
-          queryClient.invalidateQueries({ queryKey: ['public_subscriber_count'] });
-        } else if (table === 'newsletter_email_logs') {
-          queryClient.invalidateQueries({ queryKey: ['newsletter_email_logs'] });
-        }
-      })
-      .subscribe();
-
-    return () => {
-      console.log("[ReactQuery] Cleaning up central realtime subscription.");
-      supabase.removeChannel(centralChannel);
-    };
-  }, [user, queryClient]);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Attempt to fetch resources and exams. Playlists/External resources might not exist yet.
-        const resourcePromise = supabaseService.fetchResources().catch(e => {
-          console.warn("Resources table might be missing or empty:", e);
-          return [];
-        });
-        const examPromise = supabaseService.fetchExams(userRole === 'admin' || canUpload).catch(e => {
-          console.warn("Exams table might be missing or empty:", e);
-          return [];
-        });
-        const externalPromise = (async () => {
-          try {
-            return await supabase.from('external_links').select('*').order('created_at', { ascending: false });
-          } catch (e) {
-            console.warn("External links table might be missing or empty:", e);
-            return { data: [], error: e };
-          }
-        })();
-
-        const [dbResources, dbExams, dbExternals] = await Promise.all([
-          resourcePromise,
-          examPromise,
-          externalPromise
-        ]);
-
-        if (dbResources) {
-          setContents(dbResources as ContentItem[]);
-          setAllContents(dbResources as ContentItem[]);
-        }
-        if (dbExternals && 'data' in dbExternals && dbExternals?.data) {
-          const mapped = dbExternals.data.map((r: any) => ({
-            ...r,
-            createdAt: r.created_at
-          }));
-          setExternalResources(mapped as ExternalResource[]);
-        }
-        if (dbExams) setAllExams(dbExams as Exam[]);
-        
-        // Optional: Playlists if needed, but handled gracefully
-        try {
-          const { data: dbPlaylists } = await supabase.from('playlists').select('*').order('created_at', { ascending: false });
-          if (dbPlaylists) {
-            setPlaylists(dbPlaylists as Playlist[]);
-            setAllPlaylists(dbPlaylists as Playlist[]);
-          }
-        } catch (e) {
-          console.warn("Playlists table might be missing:", e);
-        }
-
-      } catch (err) {
-        console.error("Error fetching initial data from Supabase:", err);
-      }
-    };
-
-    fetchData();
-  }, [user, userRole]);
-
-  // Dynamic fetching of academic data
-  const fetchClassesAndGroups = async () => {
-    try {
-      const { data: classData, error: classError } = await supabase
-        .from('academic_classes')
-        .select('*');
-      
-      if (classError) throw classError;
-
-      // Filter out any inactive or older classes
-      const activeDbClasses = (classData || []).filter((c: any) => {
-        if (!c.active) return false;
-        const n = (c.name || '').trim().toLowerCase();
-        return !['class 9', 'class 10', 'class 11', 'class 12'].includes(n) &&
-               !n.includes('class 9') &&
-               !n.includes('class 10') &&
-               !n.includes('class 11') &&
-               !n.includes('class 12');
-      });
-
-      const finalClasses = activeDbClasses.map((c: any) => ({
-        id: c.id?.toString() || c.name,
-        name: c.name,
-        has_groups: c.has_groups ?? false,
-        active: c.active ?? true,
-        order: c.order || 99,
-        createdAt: c.created_at || new Date().toISOString(),
-        updatedAt: c.updated_at || new Date().toISOString()
-      }));
-
-      finalClasses.sort((a, b) => a.order - b.order);
-      setDynamicClasses(finalClasses);
-
-      // Fetch Academic Groups
-      const groupData = await supabaseService.fetchAcademicGroups();
-      const activeDbGroups = (groupData || []).filter((g: any) => g.active);
-
-      const finalGroups = activeDbGroups.map((g: any) => ({
-        id: g.id?.toString() || g.name,
-        name: g.name,
-        active: g.active ?? true,
-        order: g.order || 99,
-        createdAt: g.created_at || new Date().toISOString(),
-        updatedAt: g.updated_at || new Date().toISOString()
-      }));
-
-      finalGroups.sort((a, b) => a.order - b.order);
-      setAcademicGroups(finalGroups);
-    } catch (err) {
-      console.error("Error fetching academic data:", err);
-    }
-  };
-
-  const fetchSubjects = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('subjects')
-        .select('*')
-        .eq('active', true)
-        .order('order', { ascending: true });
-
-      if (data) {
-        const mapped = (data as any[]).map(s => ({
-          ...s,
-          classId: s.class_id,
-          academicGroup: s.academic_group,
-          createdAt: s.created_at,
-          updatedAt: s.updated_at
-        }));
-        setDynamicSubjects(mapped as AcademicSubject[]);
-      }
-    } catch (err) {
-      console.error("Error fetching subjects:", err);
-    }
-  };
-
-  const fetchChapters = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('chapters')
-        .select('*')
-        .eq('active', true)
-        .order('order', { ascending: true });
-
-      if (data) {
-        const mapped = (data as any[]).map(ch => ({
-          ...ch,
-          subjectId: ch.subject_id,
-          classId: ch.class_id,
-          createdAt: ch.created_at,
-          updatedAt: ch.updated_at
-        }));
-        setDynamicChapters(mapped as AcademicChapter[]);
-      }
-    } catch (err) {
-      console.error("Error fetching chapters:", err);
-    }
-  };
-
-  const fetchAllTopics = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('topics')
-        .select('*')
-        .eq('active', true)
-        .order('order', { ascending: true });
-      if (data) {
-        const mapped = (data as any[]).map(t => ({
-          ...t,
-          chapterId: t.chapter_id,
-          subjectId: t.subject_id,
-          classId: t.class_id
-        }));
-        setDynamicTopics(mapped as AcademicTopic[]);
-      }
-    } catch (err) {
-      console.error("Error fetching all topics globally:", err);
-    }
-  };
-
-  const refreshAcademicData = async () => {
-    console.log("--- Refreshing Global Academic Data ---");
-    await fetchClassesAndGroups();
-    await fetchSubjects();
-    await fetchChapters();
-    await fetchAllTopics();
-  };
-
-  useEffect(() => {
-    fetchClassesAndGroups();
-  }, []);
-
-  useEffect(() => {
-    fetchSubjects();
-  }, []);
-
-  useEffect(() => {
-    fetchChapters();
-  }, []);
-
-  // Reset subject filter if it's no longer valid for the selected class
-  useEffect(() => {
-    if (classFilter !== 'All' && subjectFilter !== 'All' && currentSubjects.length > 0) {
-      if (!currentSubjects.includes(subjectFilter)) {
-        setSubjectFilter('All');
-      }
-    }
-  }, [classFilter, currentSubjects, subjectFilter]);
-
-  // Fetch All Active Topics globally to support filters, badges, and all exam/question/content builders
-  useEffect(() => {
-    fetchAllTopics();
-  }, []);
-
-  // Set default leaderboard filter when classes load
-  useEffect(() => {
-    if (dynamicClasses && dynamicClasses.length > 0 && !leaderboardClassFilter) {
-      setLeaderboardClassFilter(dynamicClasses[0]?.name || 'SSC');
-    }
-  }, [dynamicClasses, leaderboardClassFilter]);
 
   const handleSeedDatabase = async () => {
     if (userRole !== 'admin' || isSeeding) return;
@@ -3743,67 +2812,7 @@ export default function App() {
     }
   };
 
-  const [allContents, setAllContents] = useState<ContentItem[]>([]);
-  const [allPlaylists, setAllPlaylists] = useState<Playlist[]>([]);
 
-  const fetchPlaylists = useCallback(async () => {
-    try {
-      const data = await supabaseService.fetchPlaylists(false);
-      if (data) setPlaylists(data as Playlist[]);
-    } catch (err) {
-      console.warn("Soft error in public playlists fetch:", err);
-    }
-  }, []);
-
-  const fetchAllPlaylists = useCallback(async () => {
-    try {
-      const data = await supabaseService.fetchPlaylists(true);
-      if (data) setAllPlaylists(data as Playlist[]);
-    } catch (err) {
-      console.warn("Soft error in admin playlists fetch:", err);
-    }
-  }, []);
-  useEffect(() => {
-    if (userRole !== 'admin') return;
-    
-    const fetchAllContents = async () => {
-      try {
-        const data = await supabaseService.fetchContents();
-        if (data) setAllContents(data as ContentItem[]);
-      } catch (err) {
-        console.warn("Soft error in admin contents fetch:", err);
-      }
-    };
-
-    fetchAllContents();
-    
-    // Subscribe to all relevant content tables
-    const tableNames = ['notes', 'books', 'video_classes', 'practice_sheets', 'external_links'];
-    const channels = tableNames.map(tableName => {
-      return supabase
-        .channel(`admin-all-${tableName}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, () => fetchAllContents())
-        .subscribe();
-    });
-
-    return () => {
-      channels.forEach(channel => supabase.removeChannel(channel));
-    };
-  }, [userRole]);
-
-  useEffect(() => {
-    if (userRole !== 'admin') return;
-    
-    fetchAllPlaylists();
-    const channel = supabase
-      .channel('admin-all-playlists')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'playlists' }, () => fetchAllPlaylists())
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userRole, fetchAllPlaylists]);
 
   const fetchFeedback = useCallback(async () => {
     queryClient.invalidateQueries({ queryKey: ['feedbacks'] });
@@ -4080,17 +3089,7 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    fetchPlaylists();
-    const channel = supabase
-      .channel('public:playlists-approved')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'playlists' }, () => fetchPlaylists())
-      .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [fetchPlaylists]);
 
   useEffect(() => {
     if (!user) {
@@ -4623,10 +3622,6 @@ export default function App() {
     }
   };
 
-  const classes: string[] = useMemo(() => {
-    return Array.from(new Set(dynamicClasses.map(c => c.name))).filter(Boolean) as string[];
-  }, [dynamicClasses]);
-  
   const subjectIcons: Record<string, any> = {
     'Math': Calculator,
     'Physics': Atom,
@@ -4638,9 +3633,6 @@ export default function App() {
     'General': GraduationCap
   };
 
-  const subjectsFilterList = useMemo(() => {
-    return ['All', ...currentSubjects];
-  }, [currentSubjects]);
   const examSubjectsFilterList = useMemo(() => examSubjects, [examSubjects]);
   const questionSubjectsFilterList = useMemo(() => questionSubjects, [questionSubjects]);
 
@@ -4654,9 +3646,6 @@ export default function App() {
   }, [allQuestions, questionClassFilter, questionGroupFilter, questionSubjectFilter]);
 
   const years = ['All Years', '2024', '2023', '2022', '2021'];
-  const [yearFilter, setYearFilter] = useState('All Years');
-  const [chapterFilter, setChapterFilter] = useState<string>('');
-  const [topicFilter, setTopicFilter] = useState<string>('');
   
   // Derive chapters from dynamicChapters based on subject and class
   const chapters = useMemo(() => {
@@ -5087,149 +4076,128 @@ export default function App() {
         {/* Ambient background for filter section */}
         <div className="absolute inset-0 bg-blue-50/20 dark:bg-zinc-900/10 blur-3xl -z-10 rounded-full scale-90" />
         
-        <div className="space-y-4 w-full max-w-6xl px-4">
-          {/* Step 1: Class Selector */}
-          <div className="flex flex-col items-center justify-center gap-1.5 w-full">
-            <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
-              Academic Level
-            </Badge>
-            <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
-              {classes.map(c => (
-                <motion.button 
-                  key={c}
-                  whileHover={{ scale: 1.02, y: -0.5 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setClassFilter(c)}
-                  className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center text-center py-1.5 sm:py-2 px-1 text-[9px] xs:text-[10px] sm:text-xs font-semibold rounded-lg sm:rounded-xl transition-all duration-300 shadow-sm border ${
-                    classFilter === c 
-                    ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-md shadow-zinc-900/10 dark:shadow-white/10' 
-                    : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
-                  }`}
+        <div className="w-full max-w-4xl px-4">
+          <Card className="p-6 bg-white/70 dark:bg-zinc-900/40 backdrop-blur-3xl border border-zinc-200/30 rounded-[32px] shadow-xl space-y-6">
+            <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-4 text-left">
+              
+              {/* 1. Class selector */}
+              <div className="flex flex-col text-left w-full sm:w-auto min-w-[180px]">
+                <label className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-1 mb-1.5">শ্রেণি (Class)</label>
+                <select
+                  value={classFilter}
+                  onChange={(e) => {
+                    const c = e.target.value;
+                    setClassFilter(c);
+                    setGroupFilter(isGroupNeeded(c) ? 'Science' : 'All');
+                    setSubjectFilter('All');
+                    setChapterFilter('');
+                  }}
+                  className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 outline-none pr-8 focus:border-zinc-400 cursor-pointer shadow-sm transition-all"
                 >
-                  <span className="leading-tight truncate max-w-full">{c}</span>
-                </motion.button>
-              ))}
-            </div>
-          </div>
+                  <option value="">শ্রেণি নির্বাচন করুন</option>
+                  {classes.map(cls => (
+                    <option key={cls} value={cls}>{cls}</option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Step 2: Group Selector */}
-          {showGroupSelector && (
-            <div className="flex flex-col items-center justify-center gap-1.5 w-full animate-in fade-in slide-in-from-top-2">
-              <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-bold">
-                Academic Group / Stream
-              </Badge>
-              <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
-                {Array.from(new Set(academicGroups.map(g => g.name))).filter(Boolean).map(g => (
-                  <motion.button 
-                    key={g}
-                    whileHover={{ scale: 1.02, y: -0.5 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => {
-                      setGroupFilter(g);
-                      setSubjectFilter('');
+              {/* 2. Group selector */}
+              {classFilter && isGroupNeeded(classFilter) && (
+                <div className="flex flex-col text-left w-full sm:w-auto min-w-[180px] animate-in fade-in slide-in-from-top-1">
+                  <label className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-1 mb-1.5">গ্রুপ (Group)</label>
+                  <select
+                    value={groupFilter}
+                    onChange={(e) => {
+                      setGroupFilter(e.target.value);
+                      setSubjectFilter('All');
                       setChapterFilter('');
                     }}
-                    className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center text-center py-1.5 sm:py-2 px-1 text-[9px] xs:text-[10px] sm:text-xs font-semibold rounded-lg sm:rounded-xl transition-all duration-300 shadow-sm border ${
-                      groupFilter === g 
-                      ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-md shadow-zinc-900/10 dark:shadow-white/10' 
-                      : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
+                    className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 outline-none pr-8 focus:border-zinc-400 cursor-pointer shadow-sm transition-all"
+                  >
+                    <option value="All">সকল গ্রুপ</option>
+                    {Array.from(new Set(academicGroups.map(g => g.name))).filter(Boolean).map(g => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* 3. Subject selector */}
+              {classFilter && (!isGroupNeeded(classFilter) || (groupFilter && groupFilter !== 'All')) && (
+                <div className="flex flex-col text-left w-full sm:w-auto min-w-[180px] animate-in fade-in slide-in-from-top-1">
+                  <label className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest pl-1 mb-1.5">বিষয় (Subject)</label>
+                  <select
+                    value={subjectFilter}
+                    onChange={(e) => {
+                      setSubjectFilter(e.target.value);
+                      setChapterFilter('');
+                    }}
+                    className="w-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300 outline-none pr-8 focus:border-zinc-400 cursor-pointer shadow-sm transition-all"
+                  >
+                    <option value="All">সকল বিষয়</option>
+                    {subjectsFilterList.filter(s => s !== 'All').map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+            </div>
+
+            {user && (
+              <div className="flex flex-col items-center justify-center gap-2 w-full pt-6 border-t border-zinc-100 dark:border-zinc-800/50">
+                <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-black">
+                  Content Access
+                </Badge>
+                
+                <div className="relative flex p-1 bg-zinc-200/50 dark:bg-zinc-800/50 backdrop-blur-xl rounded-2xl w-full max-w-[280px] border border-zinc-200 dark:border-zinc-700 shadow-inner group/toggle">
+                  {/* Animated Slider */}
+                  <motion.div 
+                    className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-xl shadow-lg z-0 ${
+                      contentTypeFilter === 'free' 
+                      ? 'bg-blue-600 left-1' 
+                      : 'bg-gradient-to-r from-purple-600 to-indigo-600 right-1'
+                    }`}
+                    layoutId="accessToggle"
+                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                  />
+                  
+                  <button 
+                    onClick={() => setContentTypeFilter('free')}
+                    className={`relative z-10 flex-1 py-2 text-xs font-black uppercase tracking-widest transition-colors duration-300 cursor-pointer ${
+                      contentTypeFilter === 'free' ? 'text-white' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
                     }`}
                   >
-                    <span className="leading-tight truncate max-w-full">{g}</span>
-                  </motion.button>
-                ))}
+                    Free
+                  </button>
+                  <button 
+                    onClick={() => {
+                      if (!hasPremiumAccess) {
+                        setShowPremiumPromptModal(true);
+                      } else {
+                        setContentTypeFilter('premium');
+                      }
+                    }}
+                    className={`relative z-10 flex-1 py-2 text-xs font-black uppercase tracking-widest transition-colors duration-300 flex items-center justify-center gap-2 cursor-pointer ${
+                      contentTypeFilter === 'premium' ? 'text-white' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    {contentTypeFilter !== 'premium' && <Lock size={12} className="opacity-50" />}
+                    Premium
+                    {contentTypeFilter === 'premium' && (
+                      <motion.span 
+                        initial={{ scale: 0 }} 
+                        animate={{ scale: 1 }} 
+                        className="bg-white/20 px-1.5 py-0.5 rounded-md text-[8px]"
+                      >
+                        PRO
+                      </motion.span>
+                    )}
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
-
-          {/* Step 3: Subject Selector */}
-          {showSubjectSelector && (
-            <div className="flex flex-col items-center justify-center gap-1 w-full animate-in fade-in slide-in-from-top-2">
-              <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-2 py-0.5 text-[9px] uppercase tracking-[0.25em] font-bold">
-                Subject Focus
-              </Badge>
-              <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 justify-center items-center w-full max-w-4xl mx-auto px-1 sm:px-4">
-                {subjectsFilterList.map(s => {
-                  const isAll = s === 'All';
-                  const label = isAll ? 'All Subjects' : s;
-                  const Icon = isAll ? BookOpen : subjectIcons[s];
-                  return (
-                    <motion.button 
-                      key={s}
-                      whileHover={{ scale: 1.02, y: -0.5 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => {
-                        setSubjectFilter(s);
-                        setChapterFilter('');
-                      }}
-                      className={`w-full sm:w-auto sm:min-w-[90px] flex items-center justify-center gap-0.5 sm:gap-1 px-1 py-1.5 sm:py-2 sm:px-4 rounded-lg sm:rounded-xl text-[9px] xs:text-[10px] sm:text-xs font-semibold transition-all duration-300 shadow-sm border ${
-                        subjectFilter === s 
-                        ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 border-transparent shadow-md shadow-zinc-900/10 dark:shadow-white/10' 
-                        : 'bg-white text-zinc-600 hover:bg-zinc-50 dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:bg-zinc-800 border-zinc-200/50 dark:border-zinc-800/50 backdrop-blur-md'
-                      }`}
-                    >
-                      {Icon && <Icon size={11} className={subjectFilter === s ? 'text-blue-400 shrink-0' : 'text-zinc-400 shrink-0'} strokeWidth={2.5} />}
-                      <span className="leading-tight truncate max-w-full">{label}</span>
-                    </motion.button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {user && (
-            <div className="flex flex-col items-center justify-center gap-6 w-full pt-4">
-              <Badge className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-none px-3 py-1 text-[9px] uppercase tracking-[0.25em] font-black">
-                Content Access
-              </Badge>
-              
-              <div className="relative flex p-1 bg-zinc-200/50 dark:bg-zinc-800/50 backdrop-blur-xl rounded-2xl w-full max-w-[280px] border border-zinc-200 dark:border-zinc-700 shadow-inner group/toggle">
-                {/* Animated Slider */}
-                <motion.div 
-                  className={`absolute top-1 bottom-1 w-[calc(50%-4px)] rounded-xl shadow-lg z-0 ${
-                    contentTypeFilter === 'free' 
-                    ? 'bg-blue-600 left-1' 
-                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 right-1'
-                  }`}
-                  layoutId="accessToggle"
-                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                />
-                
-                <button 
-                  onClick={() => setContentTypeFilter('free')}
-                  className={`relative z-10 flex-1 py-2.5 text-xs font-black uppercase tracking-widest transition-colors duration-300 cursor-pointer ${
-                    contentTypeFilter === 'free' ? 'text-white' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
-                  }`}
-                >
-                  Free
-                </button>
-                <button 
-                  onClick={() => {
-                    if (!hasPremiumAccess) {
-                      setShowPremiumPromptModal(true);
-                    } else {
-                      setContentTypeFilter('premium');
-                    }
-                  }}
-                  className={`relative z-10 flex-1 py-2.5 text-xs font-black uppercase tracking-widest transition-colors duration-300 flex items-center justify-center gap-2 cursor-pointer ${
-                    contentTypeFilter === 'premium' ? 'text-white' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
-                  }`}
-                >
-                  {contentTypeFilter !== 'premium' && <Lock size={12} className="opacity-50" />}
-                  Premium
-                  {contentTypeFilter === 'premium' && (
-                    <motion.span 
-                      initial={{ scale: 0 }} 
-                      animate={{ scale: 1 }} 
-                      className="bg-white/20 px-1.5 py-0.5 rounded-md text-[8px]"
-                    >
-                      PRO
-                    </motion.span>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
+            )}
+          </Card>
         </div>
       </div>
     );
@@ -9300,10 +8268,7 @@ export default function App() {
       }
 
       // Proactively refresh playlist data instantly
-      fetchPlaylists();
-      if (userRole === 'admin') {
-        fetchAllPlaylists();
-      }
+      queryClient.invalidateQueries({ queryKey: ['playlists'] });
 
       setIsAddingPlaylist(false);
       setEditingPlaylistId(null);
@@ -10190,15 +9155,7 @@ export default function App() {
                       </div>
                       
                       <div className="space-y-0.5">
-                        <button 
-                          onClick={() => { setView('dashboard'); setIsUserMenuOpen(false); }}
-                          className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 rounded-xl transition-all"
-                        >
-                          <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 transition-colors">
-                            <Monitor size={18} />
-                          </div>
-                          My Dashboard
-                        </button>
+
                         <button 
                           onClick={() => { setView('leaderboard'); setIsUserMenuOpen(false); }}
                           className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 rounded-xl transition-all"
@@ -10418,23 +9375,15 @@ export default function App() {
                 Admin
               </Button>
             )}
-            <Button 
+             <Button 
               variant="outline" 
               size="sm" 
               icon={FileText} 
-              className="h-9 sm:h-10 rounded-xl px-3 sm:px-4 border-none bg-white dark:bg-zinc-900 shadow-sm shrink-0" 
+              className={`h-9 sm:h-10 rounded-xl px-3 sm:px-4 border-none shadow-sm shrink-0 font-bold transition-all ${view === 'category' && selectedCategory === 'Notes' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300'}`} 
               onClick={() => { 
                 setSearchQuery('');
-                if (view !== 'home') {
-                  setView('home');
-                  setTimeout(() => {
-                    document.getElementById('notes-section')?.scrollIntoView({ behavior: 'smooth' });
-                    triggerHighlight('notes-section');
-                  }, 100);
-                } else {
-                  document.getElementById('notes-section')?.scrollIntoView({ behavior: 'smooth' });
-                  triggerHighlight('notes-section');
-                }
+                setSelectedCategory('Notes');
+                setView('category');
               }}
             >
               Notes
@@ -10443,19 +9392,11 @@ export default function App() {
               variant="outline" 
               size="sm" 
               icon={FileText} 
-              className="h-9 sm:h-10 rounded-xl px-3 sm:px-4 border-none bg-white dark:bg-zinc-900 shadow-sm shrink-0" 
+              className={`h-9 sm:h-10 rounded-xl px-3 sm:px-4 border-none shadow-sm shrink-0 font-bold transition-all ${view === 'category' && selectedCategory === 'Practice Sheet' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300'}`} 
               onClick={() => { 
                 setSearchQuery('');
-                if (view !== 'home') {
-                  setView('home');
-                  setTimeout(() => {
-                    document.getElementById('practice-section')?.scrollIntoView({ behavior: 'smooth' });
-                    triggerHighlight('practice-section');
-                  }, 100);
-                } else {
-                  document.getElementById('practice-section')?.scrollIntoView({ behavior: 'smooth' });
-                  triggerHighlight('practice-section');
-                }
+                setSelectedCategory('Practice Sheet');
+                setView('category');
               }}
             >
               Sheets
@@ -10464,19 +9405,11 @@ export default function App() {
               variant="outline" 
               size="sm" 
               icon={BookOpen} 
-              className="h-9 sm:h-10 rounded-xl px-3 sm:px-4 border-none bg-white dark:bg-zinc-900 shadow-sm shrink-0" 
+              className={`h-9 sm:h-10 rounded-xl px-3 sm:px-4 border-none shadow-sm shrink-0 font-bold transition-all ${view === 'category' && selectedCategory === 'Books' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300'}`} 
               onClick={() => { 
                 setSearchQuery('');
-                if (view !== 'home') {
-                  setView('home');
-                  setTimeout(() => {
-                    document.getElementById('books-section')?.scrollIntoView({ behavior: 'smooth' });
-                    triggerHighlight('books-section');
-                  }, 100);
-                } else {
-                  document.getElementById('books-section')?.scrollIntoView({ behavior: 'smooth' });
-                  triggerHighlight('books-section');
-                }
+                setSelectedCategory('Books');
+                setView('category');
               }}
             >
               Books
@@ -10485,19 +9418,11 @@ export default function App() {
               variant="outline" 
               size="sm" 
               icon={History} 
-              className="h-9 sm:h-10 rounded-xl px-3 sm:px-4 border-none bg-white dark:bg-zinc-900 shadow-sm shrink-0" 
+              className={`h-9 sm:h-10 rounded-xl px-3 sm:px-4 border-none shadow-sm shrink-0 font-bold transition-all ${view === 'category' && selectedCategory === 'Question Papers' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300'}`} 
               onClick={() => { 
                 setSearchQuery('');
-                if (view !== 'home') {
-                  setView('home');
-                  setTimeout(() => {
-                    document.getElementById('papers-section')?.scrollIntoView({ behavior: 'smooth' });
-                    triggerHighlight('papers-section');
-                  }, 100);
-                } else {
-                  document.getElementById('papers-section')?.scrollIntoView({ behavior: 'smooth' });
-                  triggerHighlight('papers-section');
-                }
+                setSelectedCategory('Question Papers');
+                setView('category');
               }}
             >
               Papers
@@ -10506,19 +9431,11 @@ export default function App() {
               variant="outline" 
               size="sm" 
               icon={Youtube} 
-              className="h-9 sm:h-10 rounded-xl px-3 sm:px-4 border-none bg-white dark:bg-zinc-900 shadow-sm shrink-0" 
+              className={`h-9 sm:h-10 rounded-xl px-3 sm:px-4 border-none shadow-sm shrink-0 font-bold transition-all ${view === 'category' && selectedCategory === 'YouTube Classes' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300'}`} 
               onClick={() => { 
                 setSearchQuery('');
-                if (view !== 'home') {
-                  setView('home');
-                  setTimeout(() => {
-                    document.getElementById('video-section')?.scrollIntoView({ behavior: 'smooth' });
-                    triggerHighlight('video-section');
-                  }, 100);
-                } else {
-                  document.getElementById('video-section')?.scrollIntoView({ behavior: 'smooth' });
-                  triggerHighlight('video-section');
-                }
+                setSelectedCategory('YouTube Classes');
+                setView('category');
               }}
             >
               Videos
@@ -10551,7 +9468,6 @@ export default function App() {
         ) : (view === 'home' && !searchQuery) ? renderHome() : 
          view === 'leaderboard' ? renderLeaderboard() :
          view === 'admin' ? renderAdminPortal() :
-         view === 'dashboard' ? renderUserDashboard() :
          view === 'exam' ? renderExamMode() : 
          view === 'premium-exam' ? (
            hasPremiumAccess ? (
@@ -10569,6 +9485,10 @@ export default function App() {
               refetchWrong={refetchWrongQuestions}
               savedQuestionIds={savedQuestionIds}
               onToggleSaveQuestion={handleToggleSaveQuestion}
+              dynamicClasses={dynamicClasses}
+              academicGroups={academicGroups}
+              dynamicSubjects={dynamicSubjects}
+              firestoreUser={firestoreUser}
             />
           ) :
           view === 'privacy' ? renderPrivacyPolicy() : 

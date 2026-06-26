@@ -35,7 +35,7 @@ import {
 import { supabase } from '../../supabaseClient';
 import { supabaseService } from '../../services/supabaseService';
 
-type ViewMode = 'dashboard' | 'builder' | 'analytics' | 'templates';
+type ViewMode = 'builder' | 'analytics' | 'templates';
 
 interface Props {
   user: any; // Using simplified any for user as it's passed from App.tsx (Supabase session user)
@@ -60,7 +60,7 @@ export const PremiumExamSection: React.FC<Props> = ({
   savedQuestionIds = new Set(),
   onToggleSaveQuestion
 }) => {
-  const [view, setView] = useState<ViewMode>('dashboard');
+  const [view, setView] = useState<ViewMode>('builder');
   const [activeExam, setActiveExam] = useState<{ settings: CustomExamSettings; questions: Question[] } | null>(null);
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -466,7 +466,7 @@ export const PremiumExamSection: React.FC<Props> = ({
         });
         setTemplates(combined);
       } catch (err) {
-        console.error("Error fetching templates:", err);
+        console.warn("Soft warning: Could not fetch exam templates from database (table might be missing), falling back to local templates.");
         setTemplates(localTemplates);
       }
     };
@@ -912,7 +912,6 @@ export const PremiumExamSection: React.FC<Props> = ({
 
           <nav className="flex items-center gap-2 p-1.5 bg-white dark:bg-zinc-900 rounded-[28px] border border-zinc-100 dark:border-zinc-800 shadow-xl overflow-x-auto no-scrollbar">
             {[
-              { id: 'dashboard', name: 'ড্যাশবোর্ড', icon: LayoutGrid },
               { id: 'builder', name: 'পরীক্ষা তৈরি', icon: Settings },
               { id: 'analytics', name: 'পারফরম্যান্স', icon: BarChart3 }
             ].map((navItem) => (
@@ -939,131 +938,6 @@ export const PremiumExamSection: React.FC<Props> = ({
             exit={{ opacity: 0, y: -30 }}
             transition={{ type: "spring", damping: 30, stiffness: 400 }}
           >
-            {view === 'dashboard' && (
-              <div className="space-y-12">
-                {/* Hero Section */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center bg-zinc-900 dark:bg-zinc-900 rounded-[32px] sm:rounded-[48px] p-8 sm:p-12 text-white relative overflow-hidden shadow-2xl">
-                   <div className="absolute -right-10 -top-10 w-64 h-64 bg-primary-palette/30 rounded-full blur-2xl" />
-                   
-                   <div className="relative z-10 space-y-8">
-                     <Badge className="bg-primary-palette text-white border-none px-4 py-2">প্রিমিয়াম অভিজ্ঞতা</Badge>
-                     <h2 className="text-3xl sm:text-5xl font-black leading-[1.1]">
-                        সাফল্যের কারিগর <br />
-                        <span className="text-primary-palette">আপনি নিজেই।</span>
-                     </h2>
-                     <p className="text-zinc-200 dark:text-zinc-400 font-medium max-w-md text-lg leading-relaxed">
-                        আপনার লক্ষ্য অনুযায়ী পরীক্ষার প্রতিটি দিক কাস্টমাইজ করুন। উচ্চমানের প্রশ্ন ও রিয়েল-টাইম এনালাইটিক্স দিয়ে নিজেকে প্রস্তুত করুন।
-                     </p>
-                     <div className="flex gap-4">
-                       <Button onClick={() => setView('builder')} className="bg-primary-palette text-white py-5 px-10 rounded-3xl text-sm font-black uppercase tracking-widest" icon={ChevronRight}>
-                         ইঞ্জিন ওপেন করুন
-                       </Button>
-                       
-                     </div>
-                   </div>
-
-                   <div className="relative hidden lg:flex justify-center items-center">
-                      <motion.div 
-                        animate={{ 
-                          y: [0, -10, 0],
-                        }}
-                        transition={{ 
-                          duration: 4, 
-                          repeat: Infinity,
-                          ease: "easeInOut"
-                        }}
-                        className="w-72 h-72 bg-gradient-to-br from-primary-palette to-blue-600 rounded-[64px] shadow-xl flex items-center justify-center relative border-4 border-white/10"
-                      >
-                         <Crown size={120} className="text-white/80" />
-                         <div className="absolute -bottom-6 -right-6 w-32 h-32 bg-white/5 backdrop-blur-lg rounded-[40px] border border-white/20 p-6 shadow-xl">
-                            <Sparkles className="text-amber-400 mb-2" size={32} />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-300">Elite OS</span>
-                         </div>
-                      </motion.div>
-                   </div>
-                </div>
-
-                {/* Smart Features Grid */}
-                <div className="hidden grid-cols-1 md:grid-cols-3 gap-8">
-                    <Card className="p-6 sm:p-10 border-none bg-white dark:bg-zinc-900 group hover:shadow-[0_20px_50px_rgba(0,0,0,0.1)] transition-all">
-                       <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-[28px] flex items-center justify-center mb-8 group-hover:scale-110 transition-transform">
-                         <Zap size={28} />
-                       </div>
-                       <h3 className="text-2xl font-black mb-3 text-zinc-900 dark:text-white">দুর্বলতা শনাক্তকরণ</h3>
-                       <p className="text-zinc-600 dark:text-zinc-500 mb-8 text-sm font-medium leading-relaxed">সিস্টেম আপনার দুর্বলতাগুলো শনাক্ত করবে এবং স্বয়ংক্রিয়ভাবে একটি পরীক্ষা তৈরি করবে।</p>
-                       <Button 
-                        onClick={() => {
-                          if (analytics.weakChapters.length > 0) {
-                            handleGenerate({
-                              subjects: ['General'],
-                              chapters: analytics.weakChapters,
-                              topics: [],
-                              mcqCount: 20,
-                              writtenCount: 2,
-                              duration: 30,
-                              difficulty: 'Easy',
-                              negativeMarking: true,
-                              marksPerMcq: 1,
-                              marksPerWritten: 5,
-                              randomizeQuestions: true,
-                              randomizeOptions: true,
-                              strictMode: false,
-                              fullscreenMode: false,
-                              tabSwitchDetection: false,
-                              preventCopyPaste: false,
-                              instantResult: true
-                            });
-                          } else {
-                            alert("এখনও কোনো দুর্বলতা শনাক্ত করা যায়নি। আরও প্র্যাকটিস করতে ইঞ্জিনিয়ার অপশনে যান!");
-                            setView('builder');
-                          }
-                        }} 
-                        variant="ghost" 
-                        className="p-0 text-emerald-500 font-black hover:bg-transparent" 
-                        icon={ArrowRight}
-                       >
-                          দুর্বল অধ্যায়গুলো টার্গেট করুন
-                       </Button>
-                    </Card>
-
-                   <Card className="p-6 sm:p-10 border-none bg-white dark:bg-zinc-900 group hover:shadow-[0_20px_50px_rgba(0,0,0,0.1)] transition-all">
-                      <div className="w-16 h-16 bg-blue-500/10 text-blue-500 rounded-[28px] flex items-center justify-center mb-8 group-hover:scale-110 transition-transform">
-                    <BrainIcon size={28} />
-                      </div>
-                      <h3 className="text-2xl font-black mb-3 text-zinc-900 dark:text-white">স্মার্ট প্রম্পট</h3>
-                      <p className="text-zinc-600 dark:text-zinc-500 mb-8 text-sm font-medium leading-relaxed">আপনার লক্ষ্য বর্ণনা করুন, আর আমাদের AI আপনার জন্য নিখুঁত পরীক্ষার কাঠামো তৈরি করে দেবে।</p>
-                      <div className="relative">
-                        <input 
-                          type="text"
-                          placeholder="'পদার্থবিজ্ঞান ১ ঘণ্টা মক পরীক্ষা...'"
-                          value={prompt}
-                          onChange={(e) => setPrompt(e.target.value)}
-                          className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-2xl py-4 pl-6 pr-12 text-xs font-bold dark:text-white focus:ring-2 focus:ring-blue-500 transition-all outline-none"
-                        />
-                        <button 
-                          onClick={handleSmartGenerate}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 bg-blue-500 text-white rounded-xl flex items-center justify-center"
-                        >
-                          <ChevronRight size={20} />
-                        </button>
-                      </div>
-                   </Card>
-
-                   <Card className="p-6 sm:p-10 border-none bg-primary-palette text-white relative overflow-hidden shadow-2xl">
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" />
-                      <div className="w-16 h-16 bg-white/20 text-white rounded-[28px] flex items-center justify-center mb-8">
-                        <History size={28} />
-                      </div>
-                      <h3 className="text-2xl font-black mb-3">ওয়ান-ক্লিক রি-রান</h3>
-                      <p className="text-white/70 mb-8 text-sm font-medium leading-relaxed">আপনার পছন্দসহ কনফিগারেশন সেভ করুন এবং কয়েক সেকেন্ডের মধ্যে পরীক্ষা শুরু করুন।</p>
-                      <Button onClick={() => setView('templates')} variant="ghost" className="p-0 text-white font-black hover:bg-transparent" icon={ArrowRight}>
-                         আমার ভল্ট দেখুন
-                      </Button>
-                   </Card>
-                 </div>
-              </div>
-            )}
-
             {view === 'builder' && (
               <PremiumExamBuilder 
                 onGenerate={handleGenerate}

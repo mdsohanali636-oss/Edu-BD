@@ -13,7 +13,16 @@ import {
   X, 
   HelpCircle,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Atom, 
+  FlaskConical, 
+  Dna, 
+  Languages, 
+  Monitor, 
+  Globe, 
+  GraduationCap, 
+  Calculator,
+  List
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Card, Button, Badge } from './ui/Base';
@@ -21,6 +30,17 @@ import { MathQuestionContent, MathOptionContent } from './Exam/MathQuestionConte
 import { MathRenderer } from './Math/MathEditorAndRenderer';
 import { supabaseService } from '../services/supabaseService';
 import { Question } from '../types';
+
+const subjectIcons: Record<string, any> = {
+  'Math': Calculator,
+  'Physics': Atom,
+  'Chemistry': FlaskConical,
+  'Biology': Dna,
+  'English': Languages,
+  'ICT': Monitor,
+  'General Knowledge': Globe,
+  'General': GraduationCap
+};
 
 interface RevisionCenterProps {
   user: any;
@@ -30,6 +50,10 @@ interface RevisionCenterProps {
   refetchWrong: () => void;
   savedQuestionIds: Set<string>;
   onToggleSaveQuestion: (qId: string) => void;
+  dynamicClasses?: any[];
+  academicGroups?: any[];
+  dynamicSubjects?: any[];
+  firestoreUser?: any;
 }
 
 type TabType = 'wrong' | 'saved';
@@ -41,10 +65,25 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
   refetchSaved,
   refetchWrong,
   savedQuestionIds,
-  onToggleSaveQuestion
+  onToggleSaveQuestion,
+  dynamicClasses = [],
+  academicGroups = [],
+  dynamicSubjects = [],
+  firestoreUser
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('wrong');
-  const [subjectFilter, setSubjectFilter] = useState<string>('');
+
+  const defaultClass = useMemo(() => {
+    return firestoreUser?.academic_class || firestoreUser?.academicClass || (dynamicClasses?.[0]?.name || 'SSC');
+  }, [firestoreUser, dynamicClasses]);
+
+  const defaultGroup = useMemo(() => {
+    return firestoreUser?.academic_group || firestoreUser?.academicGroup || 'All';
+  }, [firestoreUser]);
+
+  const [classFilter, setClassFilter] = useState<string>(defaultClass);
+  const [groupFilter, setGroupFilter] = useState<string>(defaultGroup);
+  const [subjectFilter, setSubjectFilter] = useState<string>('All');
   const [chapterFilter, setChapterFilter] = useState<string>('');
   
   // Solution disclosure state: Map of questionId -> boolean
@@ -71,6 +110,54 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
     }));
   };
 
+  const isGroupNeeded = (className: any) => {
+    if (!className || typeof className !== 'string') return false;
+    const foundClass = (dynamicClasses || []).find(c => c.name === className);
+    if (foundClass) {
+      return foundClass.has_groups ?? (foundClass as any).hasGroups ?? false;
+    }
+    const nameLower = className.toLowerCase();
+    if (nameLower === 'ssc' || nameLower === 'hsc' || nameLower === 'admission') {
+      return true;
+    }
+    return false;
+  };
+
+  const getSubjectNamesForClass = (className: string, groupName: string = 'All') => {
+    if (!className) return [];
+    const matchedClass = (dynamicClasses || []).find(c => c.name === className);
+    if (!matchedClass) return [];
+    
+    const subjectNames = (dynamicSubjects || []).filter(s => {
+      const matchClass = s.classId === matchedClass.id;
+      const sGroup = (s.academicGroup || (s as any).academic_group || 'All').trim().toLowerCase();
+      const filterGroup = (groupName || 'All').trim().toLowerCase();
+      const matchGroup = filterGroup === 'all' || filterGroup === '' || sGroup === filterGroup || sGroup === 'all';
+      return matchClass && matchGroup;
+    }).map(s => s.name);
+    return Array.from(new Set(subjectNames));
+  };
+
+  const classes = useMemo(() => {
+    if (dynamicClasses && dynamicClasses.length > 0) {
+      return Array.from(new Set(dynamicClasses.map(c => c.name))).filter(Boolean) as string[];
+    }
+    return ['SSC', 'HSC', 'Admission'];
+  }, [dynamicClasses]);
+
+  const groupsList = useMemo(() => {
+    if (academicGroups && academicGroups.length > 0) {
+      return Array.from(new Set(academicGroups.map(g => g.name))).filter(Boolean) as string[];
+    }
+    return ['Science', 'Arts', 'Commerce'];
+  }, [academicGroups]);
+
+  const subjectsList = useMemo(() => {
+    if (!classFilter) return [];
+    const names = getSubjectNamesForClass(classFilter, groupFilter);
+    return ['All', ...names];
+  }, [classFilter, groupFilter, dynamicClasses, dynamicSubjects]);
+
   // Get subjects / chapters list for filtering from saved & wrong questions
   const uniqueSubjects = useMemo(() => {
     const list = new Set<string>();
@@ -88,7 +175,7 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
     const source = activeTab === 'wrong' ? wrongQuestions : savedQuestions;
     source.forEach(item => {
       const questionSubject = item.question?.subject || item.question?.subject_name || '';
-      if (questionSubject !== subjectFilter) return;
+      if (subjectFilter !== 'All' && questionSubject !== subjectFilter) return;
       const chap = item.question?.chapter || item.question?.chapter_name;
       if (chap) list.add(chap);
     });
@@ -97,18 +184,40 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
 
   // Filter questions
   const filteredItems = useMemo(() => {
-    if (!subjectFilter) return [];
+    if (!classFilter) return [];
     const source = activeTab === 'wrong' ? wrongQuestions : savedQuestions;
     return source.filter(item => {
       if (!item.question) return false;
-      const questionSubject = item.question.subject || item.question.subject_name || '';
-      const questionChapter = item.question.chapter || item.question.chapter_name || '';
+      const q = item.question;
 
-      const matchesSubject = questionSubject === subjectFilter;
-      const matchesChapter = !chapterFilter || questionChapter === chapterFilter;
-      return matchesSubject && matchesChapter;
+      // Class matching
+      const questionClass = q.class || (q as any).class_name || '';
+      if (classFilter && questionClass !== classFilter) return false;
+
+      // Group matching (if group is needed)
+      if (classFilter && isGroupNeeded(classFilter)) {
+        const qGroup = (q.academicGroup || (q as any).academic_group || 'All').trim().toLowerCase();
+        const filterGroup = (groupFilter || 'All').trim().toLowerCase();
+        if (filterGroup !== 'all' && qGroup !== 'all' && qGroup !== filterGroup) {
+          return false;
+        }
+      }
+
+      // Subject matching
+      if (subjectFilter && subjectFilter !== 'All') {
+        const questionSubject = q.subject || q.subject_name || '';
+        if (questionSubject !== subjectFilter) return false;
+      }
+
+      // Chapter matching
+      if (chapterFilter) {
+        const questionChapter = q.chapter || q.chapter_name || '';
+        if (questionChapter !== chapterFilter) return false;
+      }
+
+      return true;
     });
-  }, [activeTab, savedQuestions, wrongQuestions, subjectFilter, chapterFilter]);
+  }, [activeTab, savedQuestions, wrongQuestions, classFilter, groupFilter, subjectFilter, chapterFilter]);
 
   // Handle manual removal of wrong question tracking row
   const handleRemoveWrong = async (questionId: string) => {
@@ -385,10 +494,10 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
 
       {/* 4. Filter / Interactive controls */}
       <Card className="p-6 bg-white/50 dark:bg-zinc-900/40 backdrop-blur-3xl border border-zinc-200/30 rounded-[32px] space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800 pb-6 text-left">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-800 pb-6 text-left">
+          <div className="flex items-center gap-2 shrink-0">
             <button 
-              onClick={() => { setActiveTab('wrong'); setChapterFilter(''); setSubjectFilter(''); }}
+              onClick={() => { setActiveTab('wrong'); setChapterFilter(''); setSubjectFilter('All'); }}
               className={`px-5 py-2.5 rounded-full font-black text-xs uppercase tracking-wider transition-all duration-300 ${
                 activeTab === 'wrong' 
                   ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20' 
@@ -398,7 +507,7 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
               ❌ ভুল উত্তরের তালিকা {wrongQuestions.length > 0 && `(${wrongQuestions.length})`}
             </button>
             <button 
-              onClick={() => { setActiveTab('saved'); setChapterFilter(''); setSubjectFilter(''); }}
+              onClick={() => { setActiveTab('saved'); setChapterFilter(''); setSubjectFilter('All'); }}
               className={`px-5 py-2.5 rounded-full font-black text-xs uppercase tracking-wider transition-all duration-300 ${
                 activeTab === 'saved' 
                   ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20' 
@@ -409,30 +518,77 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Subject filter dropdown */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* 1. Class selector */}
             <div className="flex flex-col text-left">
-              <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest pl-1 mb-1">বিষয় ফিল্টার</label>
+              <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest pl-1 mb-1">শ্রেণি ফিল্টার</label>
               <select
-                value={subjectFilter}
-                onChange={(e) => { setSubjectFilter(e.target.value); setChapterFilter(''); }}
-                className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-300 outline-none pr-6 focus:border-zinc-400"
+                value={classFilter}
+                onChange={(e) => {
+                  const c = e.target.value;
+                  setClassFilter(c);
+                  setGroupFilter(isGroupNeeded(c) ? 'Science' : 'All');
+                  setSubjectFilter('All');
+                  setChapterFilter('');
+                }}
+                className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-300 outline-none pr-6 focus:border-zinc-400 cursor-pointer"
               >
-                <option value="">বিষয় নির্বাচন করুন</option>
-                {uniqueSubjects.map(sub => (
-                  <option key={sub} value={sub}>{sub}</option>
+                <option value="">শ্রেণি নির্বাচন করুন</option>
+                {classes.map(cls => (
+                  <option key={cls} value={cls}>{cls}</option>
                 ))}
               </select>
             </div>
 
-            {/* Chapter filter dropdown (conditionally rendered) */}
-            {subjectFilter && uniqueChapters.length > 0 && (
+            {/* 2. Group selector */}
+            {classFilter && isGroupNeeded(classFilter) && (
+              <div className="flex flex-col text-left animate-in fade-in slide-in-from-top-1">
+                <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest pl-1 mb-1">গ্রুপ ফিল্টার</label>
+                <select
+                  value={groupFilter}
+                  onChange={(e) => {
+                    setGroupFilter(e.target.value);
+                    setSubjectFilter('All');
+                    setChapterFilter('');
+                  }}
+                  className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-300 outline-none pr-6 focus:border-zinc-400 cursor-pointer"
+                >
+                  <option value="All">সকল গ্রুপ</option>
+                  {groupsList.map(g => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* 3. Subject selector */}
+            {classFilter && (!isGroupNeeded(classFilter) || (groupFilter && groupFilter !== 'All')) && (
+              <div className="flex flex-col text-left animate-in fade-in slide-in-from-top-1">
+                <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest pl-1 mb-1">বিষয় ফিল্টার</label>
+                <select
+                  value={subjectFilter}
+                  onChange={(e) => {
+                    setSubjectFilter(e.target.value);
+                    setChapterFilter('');
+                  }}
+                  className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-300 outline-none pr-6 focus:border-zinc-400 cursor-pointer"
+                >
+                  <option value="All">সকল বিষয়</option>
+                  {subjectsList.filter(sub => sub !== 'All').map(sub => (
+                    <option key={sub} value={sub}>{sub}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* 4. Chapter Selector */}
+            {subjectFilter && subjectFilter !== 'All' && uniqueChapters.length > 0 && (
               <div className="flex flex-col text-left animate-in fade-in slide-in-from-top-1">
                 <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest pl-1 mb-1">অধ্যায় ফিল্টার</label>
                 <select
                   value={chapterFilter}
                   onChange={(e) => setChapterFilter(e.target.value)}
-                  className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-300 outline-none pr-6 focus:border-zinc-400"
+                  className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-300 outline-none pr-6 focus:border-zinc-400 cursor-pointer"
                 >
                   <option value="">সকল অধ্যায়</option>
                   {uniqueChapters.map(chap => (
@@ -590,7 +746,21 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
               <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-zinc-400">
                 <Bookmark size={24} />
               </div>
-              {!subjectFilter ? (
+              {!classFilter ? (
+                <>
+                  <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200">অনুশীলন শুরু করতে আপনার শ্রেণি নির্বাচন করুন</h3>
+                  <p className="text-zinc-500 text-xs max-w-sm mx-auto">
+                    উপরে ফিল্টার সেকশন হতে আপনার শ্রেণি নির্বাচন করুন। এরপর প্রয়োজন অনুযায়ী গ্রুপ ও বিষয় নির্বাচন করার অপশন প্রদর্শিত হবে।
+                  </p>
+                </>
+              ) : isGroupNeeded(classFilter) && (!groupFilter || groupFilter === 'All') ? (
+                <>
+                  <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200">অনুশীলন শুরু করতে গ্রুপ নির্বাচন করুন</h3>
+                  <p className="text-zinc-500 text-xs max-w-sm mx-auto">
+                    উপরে ফিল্টার সেকশন হতে আপনার গ্রুপ নির্বাচন করুন।
+                  </p>
+                </>
+              ) : !subjectFilter ? (
                 <>
                   <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200">অনুশীলন শুরু করতে বিষয় নির্বাচন করুন</h3>
                   <p className="text-zinc-500 text-xs max-w-sm mx-auto">
@@ -599,9 +769,9 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
                 </>
               ) : (
                 <>
-                  <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200">এই বিষয়ে কোনো প্রশ্ন পাওয়া যায়নি</h3>
+                  <h3 className="text-xl font-bold text-zinc-800 dark:text-zinc-200">কোনো প্রশ্ন পাওয়া যায়নি</h3>
                   <p className="text-zinc-500 text-xs max-w-sm mx-auto">
-                    আপনার বাছাইকৃত বিষয়ে এই মুহূর্তে কোনো বুকমার্ক বা ভুল করা প্রশ্ন নেই। অন্য কোনো বিষয় চেষ্টা করুন।
+                    আপনার বাছাইকৃত কনফিগারেশনে এই মুহূর্তে কোনো বুকমার্ক বা ভুল করা প্রশ্ন নেই। অন্য কোনো বিষয় বা শ্রেণি চেষ্টা করুন।
                   </p>
                 </>
               )}
