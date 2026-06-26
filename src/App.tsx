@@ -1192,7 +1192,7 @@ export default function App() {
     return 'home';
   }, [location.pathname]);
 
-  const setView = useCallback((newView: string) => {
+  const setView = useCallback((newView: string, customCategory?: string) => {
     if (newView === 'home') navigate('/');
     else if (newView === 'dashboard') navigate('/dashboard');
     else if (newView === 'exam') navigate('/exam');
@@ -1206,11 +1206,12 @@ export default function App() {
     else if (newView === 'terms') navigate('/terms');
     else if (newView === 'cookies') navigate('/cookies');
     else if (newView === 'category') {
-      if (selectedCategory === 'Notes') navigate('/notes');
-      else if (selectedCategory === 'Practice Sheet') navigate('/sheets');
-      else if (selectedCategory === 'Books') navigate('/books');
-      else if (selectedCategory === 'Question Papers') navigate('/papers');
-      else if (selectedCategory === 'YouTube Classes') navigate('/videos');
+      const activeCat = customCategory || selectedCategory;
+      if (activeCat === 'Notes') navigate('/notes');
+      else if (activeCat === 'Practice Sheet') navigate('/sheets');
+      else if (activeCat === 'Books') navigate('/books');
+      else if (activeCat === 'Question Papers') navigate('/papers');
+      else if (activeCat === 'YouTube Classes') navigate('/videos');
       else navigate('/category');
     }
     else if (newView === 'reset-password') navigate('/reset-password');
@@ -3768,7 +3769,7 @@ export default function App() {
             }}>{addLabel}</Button>
           )}
           <button 
-            onClick={() => { setSelectedCategory(category); setView('category'); }}
+            onClick={() => { setSelectedCategory(category); setView('category', category); }}
             className="text-blue-600 font-bold text-xs sm:text-sm hover:underline flex items-center gap-1"
           >
             See all <ChevronRight size={14} className="sm:w-4 sm:h-4" />
@@ -9073,7 +9074,7 @@ export default function App() {
                         onClick={() => {
                           setSearchQuery(item.title);
                           setShowSuggestions(false);
-                          if (view === 'home') setView('category');
+                          if (view === 'home') setView('category', item.category);
                           setSelectedCategory(item.category);
                         }}
                         className="w-full flex items-center gap-4 p-3 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-xl transition-colors text-left group"
@@ -9383,7 +9384,7 @@ export default function App() {
               onClick={() => { 
                 setSearchQuery('');
                 setSelectedCategory('Notes');
-                setView('category');
+                setView('category', 'Notes');
               }}
             >
               Notes
@@ -9396,7 +9397,7 @@ export default function App() {
               onClick={() => { 
                 setSearchQuery('');
                 setSelectedCategory('Practice Sheet');
-                setView('category');
+                setView('category', 'Practice Sheet');
               }}
             >
               Sheets
@@ -9409,7 +9410,7 @@ export default function App() {
               onClick={() => { 
                 setSearchQuery('');
                 setSelectedCategory('Books');
-                setView('category');
+                setView('category', 'Books');
               }}
             >
               Books
@@ -9422,7 +9423,7 @@ export default function App() {
               onClick={() => { 
                 setSearchQuery('');
                 setSelectedCategory('Question Papers');
-                setView('category');
+                setView('category', 'Question Papers');
               }}
             >
               Papers
@@ -9435,7 +9436,7 @@ export default function App() {
               onClick={() => { 
                 setSearchQuery('');
                 setSelectedCategory('YouTube Classes');
-                setView('category');
+                setView('category', 'YouTube Classes');
               }}
             >
               Videos
