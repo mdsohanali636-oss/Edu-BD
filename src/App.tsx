@@ -141,20 +141,22 @@ import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-
 import { useAppContext } from './context/AppContext';
 import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute';
 
+import { lazy, Suspense } from 'react';
+
 // Page Component Imports
-import { HomePage } from './pages/HomePage';
-import { DashboardPage } from './pages/DashboardPage';
-import { ExamPage } from './pages/ExamPage';
-import { PremiumExamPage } from './pages/PremiumExamPage';
-import { AdminPage } from './pages/AdminPage';
-import { LeaderboardPage } from './pages/LeaderboardPage';
-import { SavedPage } from './pages/SavedPage';
-import { RevisionPage } from './pages/RevisionPage';
-import { PremiumPage } from './pages/PremiumPage';
-import { CategoryPage } from './pages/CategoryPage';
-import { PrivacyPage } from './pages/PrivacyPage';
-import { TermsPage } from './pages/TermsPage';
-import { CookiesPage } from './pages/CookiesPage';
+const HomePage = lazy(() => import('./pages/HomePage').then(module => ({ default: module.HomePage })));
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(module => ({ default: module.DashboardPage })));
+const ExamPage = lazy(() => import('./pages/ExamPage').then(module => ({ default: module.ExamPage })));
+const PremiumExamPage = lazy(() => import('./pages/PremiumExamPage').then(module => ({ default: module.PremiumExamPage })));
+const AdminPage = lazy(() => import('./pages/AdminPage').then(module => ({ default: module.AdminPage })));
+const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage').then(module => ({ default: module.LeaderboardPage })));
+const SavedPage = lazy(() => import('./pages/SavedPage').then(module => ({ default: module.SavedPage })));
+const RevisionPage = lazy(() => import('./pages/RevisionPage').then(module => ({ default: module.RevisionPage })));
+const PremiumPage = lazy(() => import('./pages/PremiumPage').then(module => ({ default: module.PremiumPage })));
+const CategoryPage = lazy(() => import('./pages/CategoryPage').then(module => ({ default: module.CategoryPage })));
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then(module => ({ default: module.PrivacyPage })));
+const TermsPage = lazy(() => import('./pages/TermsPage').then(module => ({ default: module.TermsPage })));
+const CookiesPage = lazy(() => import('./pages/CookiesPage').then(module => ({ default: module.CookiesPage })));
 
 
 // Firebase utilities from types.ts were already imported, removing local duplicates.
@@ -9464,42 +9466,54 @@ export default function App() {
       </div>
 
       <main className="w-full max-w-full px-3 sm:px-4 py-6 sm:py-10 overflow-x-hidden">
-        {view === 'premium-subscription' ? (
-          <PremiumSubscriptionPage user={user} onNavigateHome={() => setView('home')} />
-        ) : (view === 'home' && !searchQuery) ? renderHome() : 
-         view === 'leaderboard' ? renderLeaderboard() :
-         view === 'admin' ? renderAdminPortal() :
-         view === 'exam' ? renderExamMode() : 
-         view === 'premium-exam' ? (
-           hasPremiumAccess ? (
-             <PremiumExamSection user={user} dynamicClasses={dynamicClasses} dynamicSubjects={dynamicSubjects} dynamicChapters={dynamicChapters} dynamicTopics={dynamicTopics} fetchLeaderboards={fetchLeaderboards} onCustomExamFinished={handleCustomExamFinished} savedQuestionIds={savedQuestionIds} onToggleSaveQuestion={handleToggleSaveQuestion} />
-           ) : (
-             <PremiumSubscriptionPage user={user} onNavigateHome={() => setView('home')} />
-           )
-         ) :
-         view === 'revision' ? (
-            <RevisionCenter
-              user={user}
-              savedQuestions={qSavedQuestionsData || []}
-              wrongQuestions={qWrongQuestionsData || []}
-              refetchSaved={refetchSavedQuestions}
-              refetchWrong={refetchWrongQuestions}
-              savedQuestionIds={savedQuestionIds}
-              onToggleSaveQuestion={handleToggleSaveQuestion}
-              dynamicClasses={dynamicClasses}
-              academicGroups={academicGroups}
-              dynamicSubjects={dynamicSubjects}
-              firestoreUser={firestoreUser}
-            />
-          ) :
-          view === 'privacy' ? renderPrivacyPolicy() : 
-         view === 'terms' ? renderTermsOfService() : 
-         view === 'cookies' ? renderCookiePolicy() : (
-          <div className="space-y-10">
-            {renderFilters()}
-            {renderContentList()}
+        <Suspense fallback={
+          <div className="flex items-center justify-center min-h-[400px]">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
           </div>
-        )}
+        }>
+          <Routes>
+            <Route path="/" element={
+              searchQuery ? (
+                <div className="space-y-10">
+                  {renderFilters()}
+                  {renderContentList()}
+                </div>
+              ) : (
+                <HomePage renderHome={renderHome} />
+              )
+            } />
+            <Route path="/dashboard" element={<DashboardPage renderUserDashboard={renderUserDashboard} />} />
+            <Route path="/leaderboard" element={<LeaderboardPage renderLeaderboard={renderLeaderboard} />} />
+            <Route path="/admin" element={
+              <AdminRoute>
+                <AdminPage renderAdminPortal={renderAdminPortal} />
+              </AdminRoute>
+            } />
+            <Route path="/exam" element={<ExamPage renderExamMode={renderExamMode} />} />
+            <Route path="/premium-exam" element={
+              hasPremiumAccess ? (
+                <PremiumExamPage />
+              ) : (
+                <PremiumPage />
+              )
+            } />
+            <Route path="/revision" element={
+              <RevisionPage />
+            } />
+            <Route path="/premium" element={<PremiumPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
+            <Route path="/cookies" element={<CookiesPage />} />
+            <Route path="/category" element={<CategoryPage renderFilters={renderFilters} renderContentList={renderContentList} />} />
+            <Route path="/notes" element={<CategoryPage renderFilters={renderFilters} renderContentList={renderContentList} />} />
+            <Route path="/sheets" element={<CategoryPage renderFilters={renderFilters} renderContentList={renderContentList} />} />
+            <Route path="/books" element={<CategoryPage renderFilters={renderFilters} renderContentList={renderContentList} />} />
+            <Route path="/papers" element={<CategoryPage renderFilters={renderFilters} renderContentList={renderContentList} />} />
+            <Route path="/videos" element={<CategoryPage renderFilters={renderFilters} renderContentList={renderContentList} />} />
+            <Route path="/saved" element={<SavedPage renderContentList={renderContentList} />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
 
       {/* Floating Action Button */}
