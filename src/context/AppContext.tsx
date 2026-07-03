@@ -855,7 +855,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Saved Questions Sync Set
   useEffect(() => {
     if (qSavedQuestionsData) {
-      setSavedQuestionIds(new Set(qSavedQuestionsData.map((q: any) => q.id)));
+      setSavedQuestionIds(new Set(qSavedQuestionsData.map((q: any) => q.question_id || q.id)));
     }
   }, [qSavedQuestionsData]);
 

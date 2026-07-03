@@ -4679,64 +4679,64 @@ export default function App() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-2xl w-full sm:w-fit overflow-x-auto no-scrollbar scroll-smooth">
+      <div className="flex items-center gap-2 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-2xl w-full sm:w-fit overflow-x-auto no-scrollbar scroll-smooth flex-nowrap">
         <button 
           onClick={() => setAdminTab('resources')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'resources' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${adminTab === 'resources' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
         >
           Resources
         </button>
         <button 
           onClick={() => setAdminTab('playlists')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'playlists' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${adminTab === 'playlists' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
         >
           Playlists
         </button>
         <button 
           onClick={() => setAdminTab('users')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'users' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${adminTab === 'users' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
         >
           Users
         </button>
         <button 
           onClick={() => setAdminTab('feedback')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'feedback' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${adminTab === 'feedback' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
         >
           Feedback
         </button>
         <button 
           onClick={() => setAdminTab('exams')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'exams' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${adminTab === 'exams' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
         >
           Exams
         </button>
         <button 
           onClick={() => setAdminTab('questions')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'questions' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${adminTab === 'questions' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
         >
           Questions
         </button>
         <button 
           onClick={() => setAdminTab('leaderboards')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'leaderboards' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${adminTab === 'leaderboards' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
         >
           Leaderboards
         </button>
         <button 
           onClick={() => setAdminTab('academics')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'academics' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${adminTab === 'academics' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
         >
           Academic Info
         </button>
         <button 
           onClick={() => setAdminTab('newsletter')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'newsletter' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${adminTab === 'newsletter' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
         >
           Newsletter Hub
         </button>
         <button 
           onClick={() => setAdminTab('subscriptions')}
-          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${adminTab === 'subscriptions' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+          className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${adminTab === 'subscriptions' ? 'bg-white dark:bg-zinc-900 text-blue-600 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
         >
           Subscription Management
         </button>

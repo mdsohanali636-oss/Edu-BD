@@ -102,6 +102,8 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
     };
   } | null>(null);
 
+  const [showEmptyWarning, setShowEmptyWarning] = useState(false);
+
   // Toggle single answer solution helper
   const toggleRevealSolution = (questionId: string) => {
     setRevealedSolutions(prev => ({
@@ -219,6 +221,12 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
     });
   }, [activeTab, savedQuestions, wrongQuestions, classFilter, groupFilter, subjectFilter, chapterFilter]);
 
+  React.useEffect(() => {
+    if (filteredItems.length > 0) {
+      setShowEmptyWarning(false);
+    }
+  }, [filteredItems.length]);
+
   // Handle manual removal of wrong question tracking row
   const handleRemoveWrong = async (questionId: string) => {
     if (!user) return;
@@ -232,7 +240,11 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
 
   // Launch customized practice session
   const startPractice = () => {
-    if (filteredItems.length === 0) return;
+    if (filteredItems.length === 0) {
+      setShowEmptyWarning(prev => !prev);
+      return;
+    }
+    setShowEmptyWarning(false);
     const practiceQuestions = filteredItems.map(item => item.question).filter(Boolean) as Question[];
     // Slice mock session to maximum of 10 items for responsive engagement
     const limitedQuestions = practiceQuestions.slice(0, 10);
@@ -476,18 +488,37 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
             <h4 className="text-xl font-bold tracking-tight text-white">ভুল সংশোধন প্র্যাকটিস সেশন</h4>
             <p className="text-xs text-blue-100 font-semibold">ভুল হওয়া প্রশ্নগুলো অনুশীলন করে আপনার কনসেপ্ট ক্লিয়ার ও ত্রুটি মুক্ত করুন। সঠিক উত্তর দিলে স্বয়ংক্রিয়ভাবে তালিকা হতে অবমুক্ত হবে।</p>
           </div>
-          <div className="flex items-center gap-3">
-            <Button 
-              className="!bg-white !text-blue-600 hover:!bg-blue-50 font-black rounded-xl text-xs h-11 px-5 shadow-sm"
-              onClick={startPractice}
-              disabled={filteredItems.length === 0}
-              icon={Play}
-            >
-               অনুশীলন শুরু করুন
-            </Button>
-            <span className="text-[10px] font-bold text-blue-100 italic">
-              {filteredItems.length}টি প্রশ্ন অনুশীলনে যোগ্য
-            </span>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <Button 
+                className="!bg-white !text-blue-600 hover:!bg-blue-50 font-bold rounded-xl text-sm h-11 px-5 shadow-sm transition-all duration-200"
+                onClick={startPractice}
+                icon={Play}
+              >
+                অনুশীলন শুরু করুন
+              </Button>
+              <span className="text-xs font-bold text-blue-100 italic">
+                {filteredItems.length}টি প্রশ্ন অনুশীলনে যোগ্য
+              </span>
+            </div>
+
+            <AnimatePresence>
+              {showEmptyWarning && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="bg-red-500/20 border border-red-500/30 p-4 rounded-2xl text-xs text-red-100 font-semibold space-y-1.5 mt-1"
+                >
+                  <p className="font-bold flex items-center gap-1.5 text-red-200">
+                    ⚠️ অনুশীলনের জন্য কোনো প্রশ্ন নেই!
+                  </p>
+                  <p className="text-zinc-200 leading-relaxed font-sans">
+                    অনুশীলন শুরু করতে প্রথমে নিচের ফিল্টার পরিবর্তন করে অন্য কোনো শ্রেণি বা বিষয় নির্বাচন করুন অথবা কোনো পূর্ণাঙ্গ পরীক্ষায় অংশগ্রহণ করে ভুল উত্তর দিন। ভুল উত্তর দেওয়া প্রশ্নগুলো স্বয়ংক্রিয়ভাবে এই তালিকায় জমা হবে।
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </div>
@@ -649,7 +680,7 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
                            <div className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-black text-xs">
                              <Check size={12} />
                            </div>
-                           <span className="text-xs text-zinc-500 font-bold">সঠিক উত্তর: </span>
+                           <span className="text-xs text-zinc-500 font-bold whitespace-nowrap shrink-0">সঠিক উত্তর: </span>
                            <Badge className="bg-green-500/10 text-green-600 border-none text-xs font-bold">
                              {q.options && q.options[Number(q.correctAnswer ?? q.correct_answer)] 
                                ? `Option ${String.fromCharCode(65 + Number(q.correctAnswer ?? q.correct_answer))}: ${q.options[Number(q.correctAnswer ?? q.correct_answer)]}`
@@ -664,7 +695,7 @@ export const RevisionCenter: React.FC<RevisionCenterProps> = ({
                              <div className="w-5 h-5 rounded-full bg-red-500/10 text-red-600 flex items-center justify-center font-black text-xs">
                                <X size={12} />
                              </div>
-                             <span className="text-xs text-zinc-500 font-bold">আপনার ভুল অপশন ছিল: </span>
+                             <span className="text-xs text-zinc-500 font-bold whitespace-nowrap shrink-0">আপনার ভুল অপশন ছিল: </span>
                              <Badge className="bg-red-500/10 text-red-600 border-none text-xs font-bold">
                                {q.options && q.options[Number(item.user_answer)] 
                                  ? `Option ${String.fromCharCode(65 + Number(item.user_answer))}: ${q.options[Number(item.user_answer)]}`
