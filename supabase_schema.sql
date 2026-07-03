@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   can_upload BOOLEAN DEFAULT FALSE,
   photo_url TEXT,
   phone_number TEXT,
+  school_name TEXT,
   has_premium_access BOOLEAN DEFAULT FALSE,
   premium_expiry TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()

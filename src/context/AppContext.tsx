@@ -720,7 +720,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           photoURL: profile.avatar_url || profile.photo_url || '',
           avatar_url: profile.avatar_url || '',
           avatarUrl: profile.avatar_url || '',
-          phoneNumber: profile.phone_number
+          phoneNumber: profile.phone_number,
+          school_name: profile.school_name || '',
+          schoolName: profile.school_name || ''
         };
         setFirestoreUser(mappedProfile);
 
@@ -762,7 +764,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             photoURL: newProfile.avatar_url || newProfile.photo_url || '',
             avatar_url: newProfile.avatar_url || '',
             avatarUrl: newProfile.avatar_url || '',
-            phoneNumber: newProfile.phone_number
+            phoneNumber: newProfile.phone_number,
+            school_name: newProfile.school_name || '',
+            schoolName: newProfile.school_name || ''
           };
           setFirestoreUser(mappedNewProfile);
         }

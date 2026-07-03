@@ -29,7 +29,7 @@ const LandingLogo = ({ className = "h-14 w-auto" }: { className?: string }) => {
 interface LandingPageProps {
   onGoogleLogin: () => void;
   onEmailLogin: (email: string, pass: string) => void;
-  onEmailSignUp: (name: string, email: string, pass: string, academicClass: string, academicGroup: string) => void;
+  onEmailSignUp: (name: string, email: string, pass: string, academicClass: string, academicGroup: string, schoolName: string) => void;
   onForgotPassword: (email: string) => Promise<void>;
   onPhoneSignIn: (phone: string, isSignUp?: boolean, name?: string, academicClass?: string, academicGroup?: string) => Promise<void>;
   onVerifyOtp: (otp: string) => Promise<void>;
@@ -53,6 +53,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [schoolName, setSchoolName] = useState('');
   const [academicClass, setAcademicClass] = useState('');
   const [academicGroup, setAcademicGroup] = useState('All');
   const [formMode, setFormMode] = useState<'login' | 'signup' | 'forgot'>('login');
@@ -799,7 +800,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       }
     } else if (formMode === 'signup') {
       if (isEmail) {
-        onEmailSignUp(name.trim(), email.trim(), password, academicClass, academicGroup);
+        if (!schoolName.trim()) {
+          const toast = document.getElementById('toast');
+          if (toast) {
+            toast.textContent = 'School/College name is required! 🎓';
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 5000);
+          }
+          return;
+        }
+        onEmailSignUp(name.trim(), email.trim(), password, academicClass, academicGroup, schoolName.trim());
       } else {
         if (!otpSent) {
           try {
@@ -1229,16 +1239,28 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           )}
 
           {formMode === 'signup' && (
-            <div className="ffield animate-in slide-in-from-top-1.5 duration-200">
-              <label>Full Name</label>
-              <input 
-                type="text"
-                placeholder="Abir Hossain"
-                required
-                value={name}
-                onChange={e => setName(e.target.value)}
-              />
-            </div>
+            <>
+              <div className="ffield animate-in slide-in-from-top-1.5 duration-200">
+                <label>Full Name</label>
+                <input 
+                  type="text"
+                  placeholder="Abir Hossain"
+                  required
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                />
+              </div>
+              <div className="ffield animate-in slide-in-from-top-1.5 duration-200">
+                <label>School / College Name</label>
+                <input 
+                  type="text"
+                  placeholder="e.g. Dhaka College"
+                  required
+                  value={schoolName}
+                  onChange={e => setSchoolName(e.target.value)}
+                />
+              </div>
+            </>
           )}
 
           {(formMode === 'login' || formMode === 'signup' || formMode === 'forgot') && (
@@ -1353,21 +1375,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 otpSent ? 'Verify & Let me in! 🔑' : 'Send OTP 💬'
               )
             )}
-          </button>
-
-          {/* Social connection bridge */}
-          <div className="relative py-2 pb-0">
-            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-zinc-200 dark:border-zinc-800/80" /></div>
-            <div className="relative flex justify-center text-[10px] uppercase tracking-widest font-extrabold text-zinc-400"><span className="bg-[#fffdf8] dark:bg-[#121c30] px-3 transition-colors duration-300">or</span></div>
-          </div>
-
-          <button 
-            type="button"
-            onClick={onGoogleLogin}
-            className="w-full py-3 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-900/40 flex items-center justify-center gap-3 font-extrabold text-xs text-zinc-600 dark:text-zinc-400 hover:border-indigo-400 dark:hover:border-indigo-400 transition-all cursor-pointer active:scale-98"
-          >
-            <img src="https://www.google.com/favicon.ico" className="w-4.5 h-4.5" alt="Google Logo" />
-            Continue with Google
           </button>
 
           <span className="bback" id="bback">← Go back</span>

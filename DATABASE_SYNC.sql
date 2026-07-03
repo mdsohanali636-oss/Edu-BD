@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   full_name TEXT,
   phone_number TEXT,
   photo_url TEXT,
+  school_name TEXT,
   has_premium_access BOOLEAN DEFAULT FALSE,
   premium_expiry TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()

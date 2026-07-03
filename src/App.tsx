@@ -84,7 +84,8 @@ import {
   Zap,
   MousePointer2,
   File as FileIcon,
-  Image as ImageIcon
+  Image as ImageIcon,
+  School
 } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1340,7 +1341,8 @@ export default function App() {
   const [profileFormData, setProfileFormData] = useState({ 
     displayName: '', 
     academicClass: (dynamicClasses?.[0]?.name || 'SSC') as AcademicClass,
-    academicGroup: 'All'
+    academicGroup: 'All',
+    schoolName: ''
   });
   const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
@@ -2564,7 +2566,8 @@ export default function App() {
           full_name: profileFormData.displayName,
           academic_class: profileFormData.academicClass,
           academic_group: profileFormData.academicGroup,
-          avatar_url: finalAvatarUrl
+          avatar_url: finalAvatarUrl,
+          school_name: profileFormData.schoolName
         }
       });
 
@@ -2579,6 +2582,7 @@ export default function App() {
         academic_class: profileFormData.academicClass,
         academic_group: profileFormData.academicGroup,
         avatar_url: finalAvatarUrl,
+        school_name: profileFormData.schoolName,
         updated_at: new Date().toISOString()
       });
 
@@ -2590,6 +2594,7 @@ export default function App() {
           academic_group: profileFormData.academicGroup,
           avatar_url: finalAvatarUrl,
           photo_url: finalAvatarUrl, // Keep both in sync to prevent broken photoURL references in existing parts
+          school_name: profileFormData.schoolName,
           updated_at: new Date().toISOString()
         })
         .eq('id', user.id)
@@ -2608,7 +2613,8 @@ export default function App() {
         user_metadata: { 
           ...prev.user_metadata, 
           full_name: profileFormData.displayName,
-          avatar_url: finalAvatarUrl
+          avatar_url: finalAvatarUrl,
+          school_name: profileFormData.schoolName
         } 
       } : null);
 
@@ -2623,7 +2629,9 @@ export default function App() {
         academic_group: profileFormData.academicGroup,
         avatar_url: finalAvatarUrl,
         avatarUrl: finalAvatarUrl,
-        photoURL: finalAvatarUrl
+        photoURL: finalAvatarUrl,
+        schoolName: profileFormData.schoolName,
+        school_name: profileFormData.schoolName
       } : null);
 
       // Instantly synchronize changes directly to both leaderboards and user_stats caches
@@ -3306,11 +3314,11 @@ export default function App() {
     }
   };
 
-  const handleEmailSignUp = async (name: string, email: string, pass: string, academicClass: AcademicClass, academicGroup: string = 'All') => {
+  const handleEmailSignUp = async (name: string, email: string, pass: string, academicClass: AcademicClass, academicGroup: string = 'All', schoolName: string = '') => {
     setAuthError(null);
     const trimmedEmail = email.trim();
-    if (!name || !trimmedEmail || !pass) {
-      setAuthError("All fields are required.");
+    if (!name || !trimmedEmail || !pass || !schoolName.trim()) {
+      setAuthError("All fields including School/College name are required.");
       return;
     }
     
@@ -3330,7 +3338,8 @@ export default function App() {
           data: {
             full_name: name,
             academic_class: academicClass,
-            academic_group: academicGroup
+            academic_group: academicGroup,
+            school_name: schoolName.trim()
           }
         }
       });
@@ -3342,14 +3351,47 @@ export default function App() {
 
       if (data.user) {
         // Create initial profile record in profiles table
-        await supabase.from('profiles').insert([{
-          id: data.user.id,
-          display_name: name,
-          academic_class: academicClass,
-          academic_group: academicGroup,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }]);
+        // Try inserting with school_name first, if it fails, fallback gracefully to appending it to display_name
+        try {
+          const { error: insertErr } = await supabase.from('profiles').insert([{
+            id: data.user.id,
+            display_name: name,
+            academic_class: academicClass,
+            academic_group: academicGroup,
+            school_name: schoolName.trim(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
+          
+          if (insertErr) {
+            console.warn("Could not insert with school_name column directly. Using display_name fallback...", insertErr);
+            const { error: fallbackErr } = await supabase.from('profiles').insert([{
+              id: data.user.id,
+              display_name: `${name} (${schoolName.trim()})`,
+              academic_class: academicClass,
+              academic_group: academicGroup,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }]);
+            if (fallbackErr) throw fallbackErr;
+          }
+        } catch (dbErr: any) {
+          console.error("Database profile insertion error:", dbErr);
+          // Absolute last resort fallback to ensure registration always succeeds
+          try {
+            await supabase.from('profiles').insert([{
+              id: data.user.id,
+              display_name: name,
+              academic_class: academicClass,
+              academic_group: academicGroup,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }]);
+          } catch (finalErr) {
+            console.error("Final registration database record insertion failed:", finalErr);
+          }
+        }
+        
         // Successful signup
         setView('home');
       }
@@ -6041,6 +6083,12 @@ export default function App() {
                 {userRole === 'admin' && <Badge className="bg-blue-500/10 text-blue-600 border-none scale-75 origin-left">Admin</Badge>}
               </div>
               <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">{user?.email}</p>
+              {(firestoreUser?.schoolName || firestoreUser?.school_name) && (
+                <p className="text-xs text-zinc-600 dark:text-zinc-400 font-bold mt-1.5 flex items-center gap-1.5 bg-blue-500/5 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 px-3 py-1.5 rounded-xl w-fit border border-blue-500/10">
+                  <School size={14} className="shrink-0" />
+                  <span>{firestoreUser.schoolName || firestoreUser.school_name}</span>
+                </p>
+              )}
               <div className="flex items-center gap-3 mt-3">
                 <div className="flex items-center gap-2 bg-blue-500/10 text-blue-600 px-3 py-1 rounded-full">
                   <GraduationCap size={14} />
@@ -6061,7 +6109,8 @@ export default function App() {
               setProfileFormData({ 
                 displayName: firestoreUser?.name || firestoreUser?.displayName || user?.user_metadata?.full_name || '', 
                 academicClass: firestoreUser?.academicClass || (dynamicClasses?.[0]?.name || '') as any,
-                academicGroup: firestoreUser?.academicGroup || 'All'
+                academicGroup: firestoreUser?.academicGroup || 'All',
+                schoolName: firestoreUser?.schoolName || firestoreUser?.school_name || ''
               });
               setSelectedAvatarFile(null);
               setAvatarPreviewUrl(firestoreUser?.avatarUrl || firestoreUser?.avatar_url || firestoreUser?.photoURL || user?.user_metadata?.avatar_url || null);
@@ -6173,6 +6222,18 @@ export default function App() {
                     value={profileFormData.displayName}
                     onChange={e => setProfileFormData(prev => ({ ...prev, displayName: e.target.value }))}
                     placeholder="Enter your name"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-zinc-400 ml-2">School / College Name</label>
+                  <input
+                    type="text"
+                    required
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border-none rounded-2xl px-6 py-4 text-sm font-bold text-zinc-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/50 transition-all shadow-sm"
+                    value={profileFormData.schoolName}
+                    onChange={e => setProfileFormData(prev => ({ ...prev, schoolName: e.target.value }))}
+                    placeholder="Enter your School or College name"
                   />
                 </div>
 
@@ -9160,6 +9221,16 @@ export default function App() {
                       <div className="space-y-0.5">
 
                         <button 
+                          onClick={() => { setView('dashboard'); setIsUserMenuOpen(false); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 rounded-xl transition-all"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 group-hover:text-blue-600 transition-colors">
+                            <Monitor size={18} />
+                          </div>
+                          My Dashboard
+                        </button>
+
+                        <button 
                           onClick={() => { setView('leaderboard'); setIsUserMenuOpen(false); }}
                           className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-zinc-600 dark:text-zinc-300 hover:bg-blue-50 dark:hover:bg-blue-500/10 hover:text-blue-600 rounded-xl transition-all"
                         >
@@ -9331,6 +9402,15 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto no-scrollbar pb-2 sm:pb-0 scroll-smooth">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              icon={Monitor} 
+              className={`h-11 sm:h-10 rounded-xl px-4 sm:px-4 border-none shadow-sm shrink-0 font-bold ${view === 'dashboard' ? 'bg-blue-600 text-white shadow-blue-500/20' : 'bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300'}`} 
+              onClick={() => setView('dashboard')}
+            >
+              Dashboard
+            </Button>
             <Button 
               variant="outline" 
               size="sm" 
