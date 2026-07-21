@@ -67,10 +67,297 @@ async function startServer() {
   const PORT = 3000;
 
   // JSON Parser Middleware
+  // JSON Parser Middleware
   app.use(express.json({ limit: "15mb" }));
 
-  // API Route to dynamically serve parodorshi-logo.png if captured, otherwise fallback to parodorshi-logo.svg
-  app.get("/api/logo.png", (req, res) => {
+  // ==========================================
+  // CONFIGURABLE RATE LIMITING ENGINE
+  // ==========================================
+  const RATE_LIMIT_CONFIG = {
+    // Auth routes limits (stricter)
+    authIpMax: Number(process.env.RATE_LIMIT_AUTH_IP_MAX) || 5, // Stricter limit per IP
+    authIpWindowMs: Number(process.env.RATE_LIMIT_AUTH_IP_WINDOW_MS) || 60000, // 1 minute
+    authAccountMax: Number(process.env.RATE_LIMIT_AUTH_ACCOUNT_MAX) || 3, // Max free attempts before backoff kicks in
+    authAccountBaseBackoffMs: Number(process.env.RATE_LIMIT_AUTH_ACCOUNT_BASE_BACKOFF_MS) || 2000, // 2s base backoff
+    authAccountMaxBackoffMs: Number(process.env.RATE_LIMIT_AUTH_ACCOUNT_MAX_BACKOFF_MS) || 300000, // 5 mins max backoff
+    
+    // Public routes limits (moderate)
+    publicMax: Number(process.env.RATE_LIMIT_PUBLIC_MAX) || 30, 
+    publicWindowMs: Number(process.env.RATE_LIMIT_PUBLIC_WINDOW_MS) || 60000, // 1 minute
+    
+    // Authenticated actions limits (looser)
+    authActionMax: Number(process.env.RATE_LIMIT_AUTH_ACTION_MAX) || 100, 
+    authActionWindowMs: Number(process.env.RATE_LIMIT_AUTH_ACTION_WINDOW_MS) || 60000, // 1 minute
+  };
+
+  // In-memory token/IP stores
+  const publicIpStore = new Map<string, { count: number; resetTime: number }>();
+  const authActionStore = new Map<string, { count: number; resetTime: number }>();
+  const authIpStore = new Map<string, { count: number; resetTime: number }>();
+  const authAccountStore = new Map<string, { attempts: number; lastAttemptTime: number }>();
+
+  // Extract client IP address safely
+  function getClientIp(req: express.Request): string {
+    const forwarded = req.headers['x-forwarded-for'];
+    if (forwarded) {
+      const ip = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0];
+      return ip.trim();
+    }
+    return req.ip || req.socket.remoteAddress || 'unknown';
+  }
+
+  // Extract account identifier for auth requests
+  function getAccountIdentifier(req: express.Request): string | null {
+    if (req.body) {
+      const email = req.body.email || req.body.username || req.body.phone || req.body.userId;
+      if (email) {
+        return String(email).trim().toLowerCase();
+      }
+    }
+    return null;
+  }
+
+  // Helper to reset auth account attempt counters on success
+  function resetAuthAccountAttempts(accountId: string) {
+    const normalized = accountId.trim().toLowerCase();
+    authAccountStore.delete(normalized);
+  }
+
+  // 1. STRICT Auth Route Rate Limiter (IP + Account combined with Exponential Backoff)
+  function authRouteRateLimiter(req: express.Request, res: express.Response, next: express.NextFunction) {
+    const ip = getClientIp(req);
+    const now = Date.now();
+    
+    // 1a. IP check
+    let ipRecord = authIpStore.get(ip);
+    if (!ipRecord || now > ipRecord.resetTime) {
+      ipRecord = { count: 1, resetTime: now + RATE_LIMIT_CONFIG.authIpWindowMs };
+      authIpStore.set(ip, ipRecord);
+    } else {
+      ipRecord.count++;
+    }
+    
+    if (ipRecord.count > RATE_LIMIT_CONFIG.authIpMax) {
+      const secondsToWait = Math.ceil((ipRecord.resetTime - now) / 1000);
+      res.setHeader("Retry-After", secondsToWait);
+      return res.status(429).json({
+        error: "Too Many Requests",
+        message: "Too many authentication attempts from this IP address. Please wait before retrying.",
+        retryAfterSeconds: secondsToWait,
+        limitType: "ip"
+      });
+    }
+    
+    // 1b. Account check with exponential backoff
+    const accountId = getAccountIdentifier(req);
+    if (accountId) {
+      let accountRecord = authAccountStore.get(accountId);
+      if (!accountRecord) {
+        accountRecord = { attempts: 1, lastAttemptTime: now };
+        authAccountStore.set(accountId, accountRecord);
+      } else {
+        if (accountRecord.attempts > RATE_LIMIT_CONFIG.authAccountMax) {
+          const excess = accountRecord.attempts - RATE_LIMIT_CONFIG.authAccountMax;
+          const backoffDelay = Math.min(
+            RATE_LIMIT_CONFIG.authAccountBaseBackoffMs * Math.pow(2, excess - 1),
+            RATE_LIMIT_CONFIG.authAccountMaxBackoffMs
+          );
+          
+          const timeElapsed = now - accountRecord.lastAttemptTime;
+          if (timeElapsed < backoffDelay) {
+            const secondsToWait = Math.ceil((backoffDelay - timeElapsed) / 1000);
+            res.setHeader("Retry-After", secondsToWait);
+            return res.status(429).json({
+              error: "Too Many Requests",
+              message: "This account has experienced too many failed login attempts. Please wait to prevent unauthorized access.",
+              retryAfterSeconds: secondsToWait,
+              backoffActive: true,
+              attemptsCount: accountRecord.attempts,
+              limitType: "account"
+            });
+          }
+        }
+        
+        // Advance attempts count
+        accountRecord.attempts++;
+        accountRecord.lastAttemptTime = now;
+        authAccountStore.set(accountId, accountRecord);
+      }
+    }
+    
+    next();
+  }
+
+  // 2. MODERATE Public Route Rate Limiter
+  function publicRouteRateLimiter(req: express.Request, res: express.Response, next: express.NextFunction) {
+    const ip = getClientIp(req);
+    const now = Date.now();
+    
+    let record = publicIpStore.get(ip);
+    if (!record || now > record.resetTime) {
+      record = { count: 1, resetTime: now + RATE_LIMIT_CONFIG.publicWindowMs };
+      publicIpStore.set(ip, record);
+    } else {
+      record.count++;
+    }
+    
+    res.setHeader("X-RateLimit-Limit", RATE_LIMIT_CONFIG.publicMax);
+    const remaining = Math.max(0, RATE_LIMIT_CONFIG.publicMax - record.count);
+    res.setHeader("X-RateLimit-Remaining", remaining);
+    res.setHeader("X-RateLimit-Reset", Math.ceil(record.resetTime / 1000));
+    
+    if (record.count > RATE_LIMIT_CONFIG.publicMax) {
+      const secondsToWait = Math.ceil((record.resetTime - now) / 1000);
+      res.setHeader("Retry-After", secondsToWait);
+      return res.status(429).json({
+        error: "Too Many Requests",
+        message: "Public endpoint limit reached. Please wait a moment.",
+        retryAfterSeconds: secondsToWait
+      });
+    }
+    
+    next();
+  }
+
+  // 3. LOOSER Authenticated User Action Rate Limiter
+  function authActionRateLimiter(req: express.Request, res: express.Response, next: express.NextFunction) {
+    const ip = getClientIp(req);
+    const now = Date.now();
+    
+    let record = authActionStore.get(ip);
+    if (!record || now > record.resetTime) {
+      record = { count: 1, resetTime: now + RATE_LIMIT_CONFIG.authActionWindowMs };
+      authActionStore.set(ip, record);
+    } else {
+      record.count++;
+    }
+    
+    res.setHeader("X-RateLimit-Limit", RATE_LIMIT_CONFIG.authActionMax);
+    const remaining = Math.max(0, RATE_LIMIT_CONFIG.authActionMax - record.count);
+    res.setHeader("X-RateLimit-Remaining", remaining);
+    res.setHeader("X-RateLimit-Reset", Math.ceil(record.resetTime / 1000));
+    
+    if (record.count > RATE_LIMIT_CONFIG.authActionMax) {
+      const secondsToWait = Math.ceil((record.resetTime - now) / 1000);
+      res.setHeader("Retry-After", secondsToWait);
+      return res.status(429).json({
+        error: "Too Many Requests",
+        message: "You have exceeded the rate limit for authenticated user actions. Please slow down.",
+        retryAfterSeconds: secondsToWait
+      });
+    }
+    
+    next();
+  }
+
+  // --- AUTHENTICATION ENDPOINTS (STRICT LIMITS WITH EXPONENTIAL BACKOFF) ---
+  
+  // Proxy Login Endpoint
+  app.post("/api/auth/login", authRouteRateLimiter, async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required." });
+    }
+
+    try {
+      const SUPABASE_URL = "https://cmusbkxuwikrpdrkkbsl.supabase.co";
+      const SUPABASE_PUBLIC_KEY = "sb_publishable_f-mymjUHI1oBAO2dg1OpCQ_rXg7ctii";
+      const client = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        }
+      });
+
+      const { data, error } = await client.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      // Reset the account backoff count on successful authentication
+      resetAuthAccountAttempts(email);
+
+      return res.json({ success: true, session: data.session, user: data.user });
+    } catch (err: any) {
+      console.error("Login proxy error:", err);
+      return res.status(500).json({ error: "Internal server authentication error." });
+    }
+  });
+
+  // Proxy Signup Endpoint
+  app.post("/api/auth/signup", authRouteRateLimiter, async (req, res) => {
+    const { email, password, options } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required." });
+    }
+
+    try {
+      const SUPABASE_URL = "https://cmusbkxuwikrpdrkkbsl.supabase.co";
+      const SUPABASE_PUBLIC_KEY = "sb_publishable_f-mymjUHI1oBAO2dg1OpCQ_rXg7ctii";
+      const client = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        }
+      });
+
+      const { data, error } = await client.auth.signUp({
+        email,
+        password,
+        options,
+      });
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      resetAuthAccountAttempts(email);
+      return res.json({ success: true, user: data.user, session: data.session });
+    } catch (err: any) {
+      console.error("Signup proxy error:", err);
+      return res.status(500).json({ error: "Internal server signup error." });
+    }
+  });
+
+  // Proxy Password Reset Endpoint
+  app.post("/api/auth/password-reset", authRouteRateLimiter, async (req, res) => {
+    const { email, redirectTo } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    try {
+      const SUPABASE_URL = "https://cmusbkxuwikrpdrkkbsl.supabase.co";
+      const SUPABASE_PUBLIC_KEY = "sb_publishable_f-mymjUHI1oBAO2dg1OpCQ_rXg7ctii";
+      const client = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        }
+      });
+
+      const { error } = await client.auth.resetPasswordForEmail(email, {
+        redirectTo: redirectTo || `${process.env.APP_URL || 'http://localhost:3000'}/reset-password`,
+      });
+
+      if (error) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      resetAuthAccountAttempts(email);
+      return res.json({ success: true, message: "Password reset instructions sent." });
+    } catch (err: any) {
+      console.error("Password reset proxy error:", err);
+      return res.status(500).json({ error: "Internal server password reset error." });
+    }
+  });
+
+  // API Route to dynamically serve parodorshi-logo.png if captured, otherwise fallback to parodorshi-logo.svg (MODERATE LIMITS)
+  app.get("/api/logo.png", publicRouteRateLimiter, (req, res) => {
     try {
       const pngPath = path.join(process.cwd(), "src", "assets", "logo", "parodorshi-logo.png");
       const svgPath = path.join(process.cwd(), "src", "assets", "logo", "parodorshi-logo.svg");
@@ -90,8 +377,8 @@ async function startServer() {
     }
   });
 
-  // API Route to receive a Base64-encoded logo image and write it directly to the local filesystem
-  app.post("/api/save-logo", (req, res) => {
+  // API Route to receive a Base64-encoded logo image and write it directly to the local filesystem (LOOSER LIMITS)
+  app.post("/api/save-logo", authActionRateLimiter, (req, res) => {
     try {
       const { base64 } = req.body;
       if (!base64) {
@@ -120,12 +407,12 @@ async function startServer() {
   });
 
   // API routes
-  app.get("/api/health", (req, res) => {
+  app.get("/api/health", publicRouteRateLimiter, (req, res) => {
     res.json({ status: "ok" });
   });
 
-  // GET Newsletter Subscriber Count
-  app.get("/api/newsletter/count", async (req, res) => {
+  // GET Newsletter Subscriber Count (MODERATE LIMITS)
+  app.get("/api/newsletter/count", publicRouteRateLimiter, async (req, res) => {
     try {
       const SUPABASE_URL = "https://cmusbkxuwikrpdrkkbsl.supabase.co";
       const SUPABASE_PUBLIC_KEY = "sb_publishable_f-mymjUHI1oBAO2dg1OpCQ_rXg7ctii";
@@ -153,7 +440,7 @@ async function startServer() {
   });
 
   // POST Dispatch Newsletter Emails via Resend API
-  app.post("/api/newsletter/send", async (req, res) => {
+  app.post("/api/newsletter/send", authActionRateLimiter, async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
       return res.status(401).json({ error: "Missing authorization header token." });
@@ -319,7 +606,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/youtube/playlist/:playlistId", async (req, res) => {
+  app.get("/api/youtube/playlist/:playlistId", publicRouteRateLimiter, async (req, res) => {
     const { playlistId } = req.params;
     if (!playlistId) {
       return res.status(400).json({ error: "Playlist ID is required" });

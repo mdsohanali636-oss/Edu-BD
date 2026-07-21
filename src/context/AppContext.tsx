@@ -336,7 +336,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Auth Listener
   useEffect(() => {
+    const handleAuthError = (err: any) => {
+      console.warn("Auth session error handled:", err);
+      const errMsg = String(err?.message || err || '').toLowerCase();
+      if (errMsg.includes("refresh token") || errMsg.includes("invalid_grant") || errMsg.includes("not found")) {
+        console.warn("Invalid refresh token detected. Cleaning local storage and signing out...");
+        try {
+          // Clear any local storage items that look like supabase tokens
+          const keysToRemove: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key.startsWith('sb-') || key.includes('-auth-token'))) {
+              keysToRemove.push(key);
+            }
+          }
+          keysToRemove.forEach(k => localStorage.removeItem(k));
+        } catch (e) {
+          console.error("Error clearing localStorage:", e);
+        }
+        supabase.auth.signOut().catch(() => {});
+        setUser(null);
+        setUserRole('user');
+        setCanUpload(false);
+      }
+    };
+
     supabase.auth.getSession().then((res) => {
+      if (res?.error) {
+        handleAuthError(res.error);
+      }
       const session = res?.data?.session;
       if (session?.user) {
         const mappedUser = {
@@ -357,7 +385,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setCanUpload(false);
       }
     }).catch(err => {
-      console.error("Auth session error:", err);
+      handleAuthError(err);
     }).finally(() => {
       setIsAuthReady(true);
     });
