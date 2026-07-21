@@ -3,6 +3,124 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
+import { z } from "zod";
+
+// ==========================================
+// STRICT SCHEMAS FOR ALL INPUT VALIDATION
+// ==========================================
+const LoginSchema = z.object({
+  email: z.string().email("Invalid email format").min(5, "Email is too short").max(255, "Email is too long"),
+  password: z.string().min(6, "Password must be at least 6 characters").max(100, "Password is too long"),
+});
+
+const SignupSchema = z.object({
+  email: z.string().email("Invalid email format").min(5, "Email is too short").max(255, "Email is too long"),
+  password: z.string().min(6, "Password must be at least 6 characters").max(100, "Password is too long"),
+  options: z.object({
+    data: z.record(z.string(), z.unknown()).optional(),
+    emailRedirectTo: z.string().max(500).optional().refine(val => {
+      if (!val) return true;
+      return val.startsWith("/") || /^(https?:\/\/)/.test(val);
+    }, {
+      message: "Redirect URL must be a valid relative path starting with '/' or an absolute URL"
+    }),
+  }).optional(),
+});
+
+const PasswordResetSchema = z.object({
+  email: z.string().email("Invalid email format").min(5, "Email is too short").max(255, "Email is too long"),
+  redirectTo: z.string().max(500).optional().refine(val => {
+    if (!val) return true;
+    return val.startsWith("/") || /^(https?:\/\/)/.test(val);
+  }, {
+    message: "Redirect URL must be a valid relative path starting with '/' or an absolute URL"
+  }),
+});
+
+const SaveLogoSchema = z.object({
+  base64: z.string()
+    .min(10, "Base64 data is too short")
+    .max(35000000, "Base64 data is too large") // Max ~25MB
+    .refine(
+      (val) => {
+        return /^data:image\/[a-zA-Z0-9\-\+\.]+;base64,([A-Za-z0-9+/=]+)$/i.test(val.trim());
+      },
+      { message: "Must be a valid base64 image data URI (PNG, JPEG, SVG)" }
+    )
+});
+
+const NewsletterSendSchema = z.object({
+  subject: z.string().min(1, "Subject is required").max(200, "Subject must be 200 characters or less"),
+  message: z.string().min(1, "Message content is required").max(100000, "Message is too long"),
+  htmlContent: z.string().max(500000, "HTML content is too long").optional(),
+});
+
+const YoutubePlaylistSchema = z.object({
+  playlistId: z.string()
+    .min(10, "Playlist ID is too short")
+    .max(100, "Playlist ID is too long")
+    .regex(/^[a-zA-Z0-9\-_]+$/, "Playlist ID contains invalid characters"),
+});
+
+// Middleware factory for body validation
+function validateBody<T>(schema: z.Schema<T>) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({
+        error: "Validation Failed",
+        details: result.error.issues.map(err => ({
+          field: err.path.join('.'),
+          message: err.message,
+        }))
+      });
+    }
+    req.body = result.data; // Use parsed and sanitized data
+    next();
+  };
+}
+
+// Helper to validate decoded image buffer content via magic bytes/signatures
+function isValidImageBuffer(buffer: Buffer): boolean {
+  if (buffer.length < 4) return false;
+  
+  // PNG: 89 50 4E 47
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+    return true;
+  }
+  
+  // JPEG: FF D8 FF
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+    return true;
+  }
+  
+  // GIF: GIF8 (47 49 46 38)
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+    return true;
+  }
+
+  // WebP: RIFF (52 49 46 46) and WEBP (57 45 42 50) at offset 8
+  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) {
+    if (buffer.length >= 12) {
+      const webpSig = buffer.toString('ascii', 8, 12);
+      if (webpSig === 'WEBP') {
+        return true;
+      }
+    }
+  }
+
+  // SVG: Check if it looks like XML/SVG
+  const snippet = buffer.slice(0, Math.min(buffer.length, 500)).toString('utf-8').trim().toLowerCase();
+  if (snippet.includes('<svg') && (snippet.startsWith('<svg') || snippet.startsWith('<?xml') || snippet.includes('xmlns='))) {
+    // Basic protection against embedded scripting/XSS in SVGs
+    if (snippet.includes('<script') || snippet.includes('javascript:') || snippet.includes('onload=')) {
+      return false; // Reject malicious SVGs containing scripts
+    }
+    return true;
+  }
+
+  return false;
+}
 
 function getResponsiveEmailTemplate(subject: string, message: string, customHtml?: string) {
   const content = customHtml || `<p style="margin: 0; font-size: 16px; color: #374151; line-height: 1.6; white-space: pre-wrap;">${message.replace(/\n/g, '<br>')}</p>`;
@@ -65,6 +183,10 @@ function getResponsiveEmailTemplate(subject: string, message: string, customHtml
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Supabase connection credentials
+  const SUPABASE_URL = process.env.SUPABASE_URL || "https://cmusbkxuwikrpdrkkbsl.supabase.co";
+  const SUPABASE_PUBLIC_KEY = process.env.SUPABASE_ANON_KEY || "sb_publishable_f-mymjUHI1oBAO2dg1OpCQ_rXg7ctii";
 
   // JSON Parser Middleware
   // JSON Parser Middleware
@@ -250,18 +372,13 @@ async function startServer() {
     next();
   }
 
-  // --- AUTHENTICATION ENDPOINTS (STRICT LIMITS WITH EXPONENTIAL BACKOFF) ---
+  // --- AUTHENTICATION ENDPOINTS (STRICT LIMITS WITH EXPONENTIAL BACKOFF & INPUT VALIDATION) ---
   
   // Proxy Login Endpoint
-  app.post("/api/auth/login", authRouteRateLimiter, async (req, res) => {
+  app.post("/api/auth/login", authRouteRateLimiter, validateBody(LoginSchema), async (req, res) => {
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required." });
-    }
 
     try {
-      const SUPABASE_URL = "https://cmusbkxuwikrpdrkkbsl.supabase.co";
-      const SUPABASE_PUBLIC_KEY = "sb_publishable_f-mymjUHI1oBAO2dg1OpCQ_rXg7ctii";
       const client = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
         auth: {
           persistSession: false,
@@ -289,15 +406,10 @@ async function startServer() {
   });
 
   // Proxy Signup Endpoint
-  app.post("/api/auth/signup", authRouteRateLimiter, async (req, res) => {
+  app.post("/api/auth/signup", authRouteRateLimiter, validateBody(SignupSchema), async (req, res) => {
     const { email, password, options } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required." });
-    }
 
     try {
-      const SUPABASE_URL = "https://cmusbkxuwikrpdrkkbsl.supabase.co";
-      const SUPABASE_PUBLIC_KEY = "sb_publishable_f-mymjUHI1oBAO2dg1OpCQ_rXg7ctii";
       const client = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
         auth: {
           persistSession: false,
@@ -324,15 +436,10 @@ async function startServer() {
   });
 
   // Proxy Password Reset Endpoint
-  app.post("/api/auth/password-reset", authRouteRateLimiter, async (req, res) => {
+  app.post("/api/auth/password-reset", authRouteRateLimiter, validateBody(PasswordResetSchema), async (req, res) => {
     const { email, redirectTo } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: "Email is required." });
-    }
 
     try {
-      const SUPABASE_URL = "https://cmusbkxuwikrpdrkkbsl.supabase.co";
-      const SUPABASE_PUBLIC_KEY = "sb_publishable_f-mymjUHI1oBAO2dg1OpCQ_rXg7ctii";
       const client = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
         auth: {
           persistSession: false,
@@ -362,6 +469,8 @@ async function startServer() {
       const pngPath = path.join(process.cwd(), "src", "assets", "logo", "parodorshi-logo.png");
       const svgPath = path.join(process.cwd(), "src", "assets", "logo", "parodorshi-logo.svg");
 
+      res.setHeader("X-Content-Type-Options", "nosniff");
+
       if (fs.existsSync(pngPath)) {
         res.setHeader("Content-Type", "image/png");
         return res.sendFile(pngPath);
@@ -378,12 +487,9 @@ async function startServer() {
   });
 
   // API Route to receive a Base64-encoded logo image and write it directly to the local filesystem (LOOSER LIMITS)
-  app.post("/api/save-logo", authActionRateLimiter, (req, res) => {
+  app.post("/api/save-logo", authActionRateLimiter, validateBody(SaveLogoSchema), (req, res) => {
     try {
       const { base64 } = req.body;
-      if (!base64) {
-        return res.status(400).json({ error: "Missing base64 data" });
-      }
 
       // Extract the raw base64 data
       const matches = base64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
@@ -392,6 +498,12 @@ async function startServer() {
       }
 
       const imageBuffer = Buffer.from(matches[2], "base64");
+
+      // Core content validation check against actual magic byte signatures to prevent code execution or spoofing
+      if (!isValidImageBuffer(imageBuffer)) {
+        return res.status(400).json({ error: "File content validation failed. The file is corrupted, malicious, or not a valid image type (PNG, JPEG, SVG, WebP, GIF)." });
+      }
+
       const targetPath = path.join(process.cwd(), "src", "assets", "logo", "parodorshi-logo.png");
       
       // Ensure target directory exists
@@ -399,10 +511,10 @@ async function startServer() {
       fs.writeFileSync(targetPath, imageBuffer);
 
       console.log("==> SUCCESS: Saved original high-quality logo image to filesystem:", targetPath);
-      return res.json({ success: true, path: targetPath });
+      return res.json({ success: true });
     } catch (err: any) {
       console.error("Failed to write logo to file:", err);
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ error: "An unexpected error occurred while saving the logo image on the server." });
     }
   });
 
@@ -414,8 +526,6 @@ async function startServer() {
   // GET Newsletter Subscriber Count (MODERATE LIMITS)
   app.get("/api/newsletter/count", publicRouteRateLimiter, async (req, res) => {
     try {
-      const SUPABASE_URL = "https://cmusbkxuwikrpdrkkbsl.supabase.co";
-      const SUPABASE_PUBLIC_KEY = "sb_publishable_f-mymjUHI1oBAO2dg1OpCQ_rXg7ctii";
       const client = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
         auth: {
           persistSession: false,
@@ -440,21 +550,24 @@ async function startServer() {
   });
 
   // POST Dispatch Newsletter Emails via Resend API
-  app.post("/api/newsletter/send", authActionRateLimiter, async (req, res) => {
+  app.post("/api/newsletter/send", authActionRateLimiter, validateBody(NewsletterSendSchema), async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
       return res.status(401).json({ error: "Missing authorization header token." });
     }
 
-    const { subject, message, htmlContent } = req.body;
-    if (!subject || !message) {
-      return res.status(400).json({ error: "Subject and message contents are required." });
+    const headerParse = z.string().refine(val => val.startsWith("Bearer ") && val.split(" ")[1]?.length > 10, {
+      message: "Invalid authorization header token format"
+    }).safeParse(authHeader);
+    
+    if (!headerParse.success) {
+      return res.status(401).json({ error: "Invalid authorization header token format." });
     }
+
+    const { subject, message, htmlContent } = req.body;
 
     try {
       const token = authHeader.split(" ")[1];
-      const SUPABASE_URL = "https://cmusbkxuwikrpdrkkbsl.supabase.co";
-      const SUPABASE_PUBLIC_KEY = "sb_publishable_f-mymjUHI1oBAO2dg1OpCQ_rXg7ctii";
 
       // Create Supabase client and load caller credentials
       const client = createClient(SUPABASE_URL, SUPABASE_PUBLIC_KEY, {
@@ -492,7 +605,8 @@ async function startServer() {
         .select('email');
 
       if (subsErr) {
-        return res.status(500).json({ error: "Failed to grab newsletter subscribers list.", details: subsErr.message });
+        console.error("[Newsletter Send Error] Database query failed:", subsErr);
+        return res.status(500).json({ error: "Failed to retrieve subscriber list. Please try again later." });
       }
 
       if (!subscribers || subscribers.length === 0) {
@@ -503,7 +617,10 @@ async function startServer() {
         });
       }
 
-      const resendKey = process.env.RESEND_API_KEY || "re_Cbytb2DD_8nrtvCVsAvGdEHKJNGwrj2oY";
+      const resendKey = process.env.RESEND_API_KEY;
+      if (!resendKey) {
+        return res.status(500).json({ error: "Resend API key is not configured on the server." });
+      }
       const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
       let sentCount = 0;
@@ -602,15 +719,24 @@ async function startServer() {
 
     } catch (e: any) {
       console.error("Central send-newsletter endpoint failure:", e);
-      return res.status(500).json({ error: "Failed to dispatch newsletters", details: e.message });
+      return res.status(500).json({ error: "An unexpected error occurred while dispatching the newsletters." });
     }
   });
 
   app.get("/api/youtube/playlist/:playlistId", publicRouteRateLimiter, async (req, res) => {
-    const { playlistId } = req.params;
-    if (!playlistId) {
-      return res.status(400).json({ error: "Playlist ID is required" });
+    const rawPlaylistId = req.params.playlistId;
+    const parsed = YoutubePlaylistSchema.safeParse({ playlistId: rawPlaylistId });
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Validation Failed",
+        details: parsed.error.issues.map(err => ({
+          field: err.path.join('.'),
+          message: err.message,
+        }))
+      });
     }
+
+    const playlistId = parsed.data.playlistId;
 
     try {
       console.log(`Scraping YouTube playlist page for ID: ${playlistId}`);
@@ -746,7 +872,7 @@ async function startServer() {
       res.json(videos.slice(0, 100));
     } catch (err: any) {
       console.error("Server API YouTube scraper failed error:", err);
-      res.status(500).json({ error: "Failed to load YouTube playlist", details: err.message });
+      res.status(500).json({ error: "An error occurred while loading or parsing the YouTube playlist." });
     }
   });
 
