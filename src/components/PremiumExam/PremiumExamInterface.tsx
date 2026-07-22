@@ -39,7 +39,7 @@ export const PremiumExamInterface: React.FC<Props> = ({
   const [answers, setAnswers] = useState<any[]>(new Array(questions.length).fill(null));
   const [flags, setFlags] = useState<boolean[]>(new Array(questions.length).fill(false));
   const [timeLeft, setTimeLeft] = useState(settings.duration * 60);
-  const [isStarted, setIsStarted] = useState(false);
+  const [isStarted, setIsStarted] = useState(true);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [isCancelledByTabSwitch, setIsCancelledByTabSwitch] = useState(false);
   
