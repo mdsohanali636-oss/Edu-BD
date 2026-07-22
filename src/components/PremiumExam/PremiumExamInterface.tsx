@@ -7,6 +7,8 @@ import {
   Flag, 
   Maximize2, 
   AlertCircle,
+  AlertTriangle,
+  XCircle,
   CheckCircle2,
   X,
   Play,
@@ -39,11 +41,12 @@ export const PremiumExamInterface: React.FC<Props> = ({
   const [timeLeft, setTimeLeft] = useState(settings.duration * 60);
   const [isStarted, setIsStarted] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [isCancelledByTabSwitch, setIsCancelledByTabSwitch] = useState(false);
   
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (isStarted) {
+    if (isStarted && !isCancelledByTabSwitch) {
       // Fullscreen mode logic
       if (settings.fullscreenMode) {
         try {
@@ -51,10 +54,24 @@ export const PremiumExamInterface: React.FC<Props> = ({
         } catch (e) {}
       }
 
-      // Tab switch detection
+      // Tab switch detection - Auto cancels exam if user changes tab/window
       const handleVisibilityChange = () => {
-        if (settings.tabSwitchDetection && document.hidden) {
-          alert("সতর্কবার্তা: ট্যাব পরিবর্তন শনাক্ত হয়েছে। এই ঘটনাটি লগ করা হয়েছে। স্ট্রিক্ট মোড সক্রিয় আছে।");
+        if (settings.tabSwitchDetection && (document.hidden || document.visibilityState === 'hidden')) {
+          if (timerRef.current) clearInterval(timerRef.current);
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+          }
+          setIsCancelledByTabSwitch(true);
+        }
+      };
+
+      const handleBlur = () => {
+        if (settings.tabSwitchDetection && isStarted && !isCancelledByTabSwitch) {
+          if (timerRef.current) clearInterval(timerRef.current);
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+          }
+          setIsCancelledByTabSwitch(true);
         }
       };
 
@@ -74,6 +91,8 @@ export const PremiumExamInterface: React.FC<Props> = ({
       };
 
       document.addEventListener('visibilitychange', handleVisibilityChange);
+      window.addEventListener('blur', handleBlur);
+
       if (settings.preventCopyPaste) {
         document.addEventListener('copy', handleCopyPaste);
         document.addEventListener('paste', handleCopyPaste);
@@ -85,6 +104,7 @@ export const PremiumExamInterface: React.FC<Props> = ({
 
       return () => {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('blur', handleBlur);
         document.removeEventListener('copy', handleCopyPaste);
         document.removeEventListener('paste', handleCopyPaste);
         document.removeEventListener('cut', handleCopyPaste);
@@ -94,7 +114,7 @@ export const PremiumExamInterface: React.FC<Props> = ({
         }
       };
     }
-  }, [isStarted, settings]);
+  }, [isStarted, settings, isCancelledByTabSwitch]);
 
   useEffect(() => {
     if (isStarted && timeLeft > 0) {
@@ -475,6 +495,49 @@ export const PremiumExamInterface: React.FC<Props> = ({
               >
                 পরীক্ষা ত্যাগ করুন (সতর্কবার্তা: কোনো প্রগ্রেস সেভ হবে না)
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Tab Switch Auto-Cancellation Modal */}
+      <AnimatePresence>
+        {isCancelledByTabSwitch && (
+          <div className="fixed inset-0 z-[200] bg-zinc-950/85 backdrop-blur-xl flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="bg-white dark:bg-zinc-900 border border-red-500/30 rounded-[32px] sm:rounded-[40px] p-8 sm:p-10 max-w-lg w-full text-center shadow-2xl space-y-6 relative overflow-hidden"
+            >
+              <div className="w-20 h-20 bg-red-500/10 text-red-500 rounded-3xl flex items-center justify-center mx-auto ring-8 ring-red-500/5">
+                <AlertTriangle size={42} className="animate-bounce" />
+              </div>
+
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-500/10 text-red-600 dark:text-red-400 rounded-full text-xs font-black uppercase tracking-widest">
+                  <XCircle size={14} />
+                  পরীক্ষা বাতিল করা হয়েছে
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+                  ট্যাব পরিবর্তন সনাক্ত হয়েছে!
+                </h3>
+              </div>
+
+              <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-2xl p-4 text-left space-y-2">
+                <p className="text-sm font-bold text-red-700 dark:text-red-300">
+                  পরীক্ষা চলাকালীন ট্যাব পরিবর্তন বা অন্য উইন্ডোতে যাওয়ার কারণে আপনার পরীক্ষাটি স্বয়ংক্রিয়ভাবে বাতিল করা হয়েছে।
+                </p>
+                <p className="text-xs text-red-600/80 dark:text-red-400/80 font-medium leading-relaxed">
+                  "ট্যাব পরিবর্তন রোধ" (Tab Switch Prevention) সক্রিয় থাকার কারণে পরীক্ষাটি বন্ধ করা হলো। এই পরীক্ষার কোনো উত্তর বা নম্বর সংরক্ষণ করা হয়নি এবং আপনার স্কোর বা রেকর্ড গণনা করা হবে না।
+                </p>
+              </div>
+
+              <Button 
+                className="w-full py-4 bg-red-600 hover:bg-red-700 text-white font-black rounded-2xl shadow-lg shadow-red-600/25 transition-all"
+                onClick={onClose}
+              >
+                ঠিক আছে, পরীক্ষা কেন্দ্রে ফিরে যান
+              </Button>
             </motion.div>
           </div>
         )}

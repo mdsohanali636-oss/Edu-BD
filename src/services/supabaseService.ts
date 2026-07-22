@@ -542,7 +542,9 @@ export const supabaseService = {
       createdAt: exam.created_at,
       updatedAt: exam.updated_at,
       createdBy: exam.created_by,
-      isPremium: exam.is_premium
+      isPremium: exam.is_premium,
+      tabSwitchDetection: exam.tab_switch_detection ?? exam.tabSwitchDetection,
+      tab_switch_detection: exam.tab_switch_detection ?? exam.tabSwitchDetection
     })) as Exam[];
   },
 
@@ -574,7 +576,8 @@ export const supabaseService = {
       negative_value: exam.negativeValue ?? (exam as any).negative_value,
       status: exam.status,
       created_by: exam.createdBy || (exam as any).created_by,
-      is_premium: exam.isPremium ?? (exam as any).is_premium
+      is_premium: exam.isPremium ?? (exam as any).is_premium,
+      tab_switch_detection: exam.tabSwitchDetection ?? (exam as any).tab_switch_detection
     };
 
     const data = await this.safeWrite('exams', mappedExam, 'insert');
@@ -594,7 +597,9 @@ export const supabaseService = {
       createdAt: data.created_at,
       updatedAt: data.updated_at,
       createdBy: data.created_by,
-      isPremium: data.is_premium
+      isPremium: data.is_premium,
+      tabSwitchDetection: data.tab_switch_detection,
+      tab_switch_detection: data.tab_switch_detection
     } as unknown as Exam;
   },
 
@@ -626,6 +631,9 @@ export const supabaseService = {
     if (exam.negativeValue !== undefined) mappedExam.negative_value = exam.negativeValue;
     if (exam.status !== undefined) mappedExam.status = exam.status;
     if (exam.isPremium !== undefined) mappedExam.is_premium = exam.isPremium;
+    if (exam.tabSwitchDetection !== undefined || (exam as any).tab_switch_detection !== undefined) {
+      mappedExam.tab_switch_detection = exam.tabSwitchDetection ?? (exam as any).tab_switch_detection;
+    }
 
     const data = await this.safeWrite('exams', mappedExam, 'update', id);
 
@@ -644,7 +652,9 @@ export const supabaseService = {
       createdAt: data.created_at,
       updatedAt: data.updated_at,
       createdBy: data.created_by,
-      isPremium: data.is_premium
+      isPremium: data.is_premium,
+      tabSwitchDetection: data.tab_switch_detection,
+      tab_switch_detection: data.tab_switch_detection
     } as unknown as Exam;
   },
 

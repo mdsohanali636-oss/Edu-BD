@@ -198,6 +198,8 @@ export interface Exam {
   created_by?: string; // Compatibility
   isPremium: boolean;
   is_premium?: boolean; // Compatibility
+  tabSwitchDetection?: boolean;
+  tab_switch_detection?: boolean; // Compatibility
   questions: Question[];
 }
 

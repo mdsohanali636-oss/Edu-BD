@@ -85,7 +85,9 @@ import {
   MousePointer2,
   File as FileIcon,
   Image as ImageIcon,
-  School
+  School,
+  AlertTriangle,
+  XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'motion/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1336,6 +1338,44 @@ export default function App() {
   const [examResults, setExamResults] = useState<ExamAttempt | null>(null);
   const [isExamActive, setIsExamActive] = useState(false);
   const [currentAttemptId, setCurrentAttemptId] = useState<string | null>(null);
+  const [isCancelledByTabSwitch, setIsCancelledByTabSwitch] = useState(false);
+
+  // Tab switch auto-cancellation listener for standard exams
+  useEffect(() => {
+    if (isExamActive && activeExam && !examResults) {
+      const isTabSwitchEnabled = Boolean(
+        activeExam.tabSwitchDetection || 
+        (activeExam as any).tab_switch_detection || 
+        (activeExam as any).settings?.tabSwitchDetection
+      );
+
+      if (isTabSwitchEnabled) {
+        const handleVisibilityChange = () => {
+          if (document.hidden || document.visibilityState === 'hidden') {
+            setIsCancelledByTabSwitch(true);
+            setIsExamActive(false);
+            setCurrentAttemptId(null);
+          }
+        };
+
+        const handleBlur = () => {
+          if (isExamActive && !examResults) {
+            setIsCancelledByTabSwitch(true);
+            setIsExamActive(false);
+            setCurrentAttemptId(null);
+          }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('blur', handleBlur);
+
+        return () => {
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+          window.removeEventListener('blur', handleBlur);
+        };
+      }
+    }
+  }, [isExamActive, activeExam, examResults]);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [profileFormData, setProfileFormData] = useState({ 
@@ -2122,6 +2162,7 @@ export default function App() {
     totalQuestionsToShow: 30,
     negativeMarking: false,
     negativeValue: 0.25,
+    tabSwitchDetection: false,
     status: 'approved'
   });
 
@@ -8704,6 +8745,7 @@ export default function App() {
         totalQuestionsToShow: newExam.totalQuestionsToShow || 30,
         negativeMarking: newExam.negativeMarking || false,
         negativeValue: newExam.negativeValue || 0.25,
+        tabSwitchDetection: newExam.tabSwitchDetection || false,
         createdBy: user?.id,
         isPremium: newExam.isPremium || false,
         status: (canUpload || userRole === 'admin') ? 'approved' : 'pending'
@@ -11212,6 +11254,22 @@ export default function App() {
                         </div>
                       )}
                     </div>
+
+                    <div className="grid grid-cols-1 gap-4 p-4 bg-zinc-50 dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <p className="text-xs font-bold text-zinc-900 dark:text-white">ট্যাব পরিবর্তন রোধ (Tab Switch Prevention)</p>
+                          <p className="text-[10px] text-zinc-500">ট্যাব পরিবর্তন করলে পরীক্ষা স্বয়ংক্রিয়ভাবে বাতিল হবে</p>
+                        </div>
+                        <button 
+                          type="button"
+                          onClick={() => setNewExam({...newExam, tabSwitchDetection: !newExam.tabSwitchDetection})}
+                          className={`w-12 h-6 rounded-full transition-colors relative ${newExam.tabSwitchDetection ? 'bg-amber-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}
+                        >
+                          <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${newExam.tabSwitchDetection ? 'left-7' : 'left-1'}`} />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -12012,6 +12070,57 @@ export default function App() {
           </motion.div>
         </div>
       )}
+
+      {/* Tab Switch Auto-Cancellation Modal for Standard Exams */}
+      <AnimatePresence>
+        {isCancelledByTabSwitch && (
+          <div className="fixed inset-0 z-[250] bg-zinc-950/85 backdrop-blur-xl flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-zinc-900 border border-red-500/30 rounded-[32px] sm:rounded-[40px] p-8 sm:p-10 max-w-lg w-full text-center shadow-2xl space-y-6 relative overflow-hidden"
+            >
+              <div className="w-20 h-20 bg-red-500/10 text-red-500 rounded-3xl flex items-center justify-center mx-auto ring-8 ring-red-500/5">
+                <AlertTriangle size={42} className="animate-bounce" />
+              </div>
+
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-500/10 text-red-600 dark:text-red-400 rounded-full text-xs font-black uppercase tracking-widest">
+                  <XCircle size={14} />
+                  পরীক্ষা বাতিল করা হয়েছে
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+                  ট্যাব পরিবর্তন সনাক্ত হয়েছে!
+                </h3>
+              </div>
+
+              <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-2xl p-4 text-left space-y-2">
+                <p className="text-sm font-bold text-red-700 dark:text-red-300">
+                  পরীক্ষা চলাকালীন ট্যাব পরিবর্তন বা অন্য উইন্ডোতে যাওয়ার কারণে আপনার পরীক্ষাটি স্বয়ংক্রিয়ভাবে বাতিল করা হয়েছে।
+                </p>
+                <p className="text-xs text-red-600/80 dark:text-red-400/80 font-medium leading-relaxed">
+                  "ট্যাব পরিবর্তন রোধ" (Tab Switch Prevention) সক্রিয় থাকায় পরীক্ষাটি বন্ধ করা হলো। এই পরীক্ষার কোনো উত্তর বা নম্বর সংরক্ষণ করা হয়নি এবং আপনার ফলাফল বা রেকর্ড গণনা করা হবে না।
+                </p>
+              </div>
+
+              <Button 
+                className="w-full py-4 bg-red-600 hover:bg-red-700 text-white font-black rounded-2xl shadow-lg shadow-red-600/25 transition-all"
+                onClick={() => {
+                  setIsCancelledByTabSwitch(false);
+                  setActiveExam(null);
+                  setIsExamActive(false);
+                  setExamAnswers({});
+                  setExamResults(null);
+                  setView('exam');
+                }}
+              >
+                ঠিক আছে, পরীক্ষা কেন্দ্রে ফিরে যান
+              </Button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {renderFooter()}
       <FloatingMathKeyboard />
