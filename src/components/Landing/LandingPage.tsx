@@ -219,69 +219,73 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
         @media (max-width: 768px) {
           .stage {
-            flex-direction: column;
+            flex-direction: row;
             width: 100%;
             max-width: 100%;
-            height: auto;
-            max-height: 92vh;
+            height: 520px;
             border-radius: 20px;
-            overflow-y: auto;
-            box-shadow: 0 20px 50px rgba(0,0,0,.9);
+            box-shadow: 0 20px 60px rgba(0,0,0,.9);
           }
           .visual, .formside {
-            width: 100%;
-            transform: none !important;
-            transition: none;
+            width: 50%;
+            height: 100%;
           }
           .visual {
-            height: auto;
-            min-height: 110px;
-            padding: 20px 16px 12px;
+            padding: 12px;
           }
-          .visual .brand h1 {
-            font-size: 20px;
-            margin-bottom: 2px;
+          .brand {
+            padding: 0 10px;
           }
-          .visual .brand p {
-            font-size: 12px;
+          .brand h1 {
+            font-size: 18px;
+            margin-bottom: 4px;
+          }
+          .brand p {
+            font-size: 11px;
+            line-height: 1.4;
             max-width: 100%;
           }
           .formside {
-            padding: 20px 16px 28px;
-            height: auto;
+            padding: 16px 12px;
           }
           .formside form {
             max-width: 100%;
           }
           .formside h2 {
-            font-size: 22px;
-            margin-bottom: 16px;
-          }
-          .field {
+            font-size: 20px;
             margin-bottom: 14px;
           }
+          .toggle-title {
+            font-size: 10px;
+            margin-bottom: 2px;
+          }
+          .field {
+            margin-bottom: 12px;
+          }
           .field input, .field select {
-            font-size: 16px; /* Prevents auto-zoom on iOS */
-            padding: 12px 14px;
-            border-radius: 10px;
+            font-size: 13px;
+            padding: 10px 12px;
+            border-radius: 8px;
           }
           .field label {
-            font-size: 13px;
-            top: 12px;
+            font-size: 12px;
+            top: 10px;
+            left: 12px;
           }
           .field input:focus + label, .field input:not(:placeholder-shown) + label, .field select + label {
-            top: -9px;
-            left: 10px;
-            font-size: 10px;
+            top: -8px;
+            left: 8px;
+            font-size: 9px;
+            padding: 0 4px;
           }
           .btn {
-            padding: 13px;
-            border-radius: 10px;
-            font-size: 15px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 13px;
           }
-          .stage.signup .visual,
-          .stage.signup .formside {
-            transform: none !important;
+          .switch {
+            margin-top: 12px;
+            font-size: 11px;
           }
         }
 
@@ -295,8 +299,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         {/* Visual Side */}
         <div className="visual">
           <div className="brand">
-            <div className="flex justify-center mb-3">
-              <LandingLogo className="h-12 w-auto filter drop-shadow-[0_0_25px_rgba(55,240,255,0.8)]" />
+            <div className="flex justify-center mb-2 sm:mb-3">
+              <LandingLogo className="h-8 sm:h-12 w-auto filter drop-shadow-[0_0_25px_rgba(55,240,255,0.8)]" />
             </div>
             <h1 id="brandTitle">
               {formMode === 'signup' ? 'Join Parodorshi' : 'Welcome Back'}
