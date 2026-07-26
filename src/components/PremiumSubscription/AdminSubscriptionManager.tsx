@@ -22,24 +22,72 @@ import {
   Sparkles,
   RefreshCw,
   Coins,
-  Tag
+  Tag,
+  Key,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Copy,
+  Lock
 } from 'lucide-react';
 import { supabaseService } from '../../services/supabaseService';
 import { supabase } from '../../supabaseClient';
 import { SubscriptionSettings, SubscriptionPackage, SubscriptionBenefit, SubscriptionRequest, SubscriptionCoupon } from '../../types';
 import { Button, Card } from '../ui/Base';
+import { getSecretKeys, saveSecretKeys, SecretKeysConfig } from '../../utils/secretKeys';
 
 export const AdminSubscriptionManager: React.FC<{ 
   adminUser: any; 
   allUsers?: any[]; 
   fetchUsersInfo?: () => void;
 }> = ({ adminUser, allUsers = [], fetchUsersInfo }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'requests' | 'users' | 'stats' | 'settings' | 'packages' | 'benefits' | 'coupons'>('requests');
+  const [activeSubTab, setActiveSubTab] = useState<'requests' | 'users' | 'stats' | 'settings' | 'keys' | 'packages' | 'benefits' | 'coupons'>('requests');
   const [settings, setSettings] = useState<SubscriptionSettings | null>(null);
   const [packages, setPackages] = useState<SubscriptionPackage[]>([]);
   const [benefits, setBenefits] = useState<SubscriptionBenefit[]>([]);
   const [requests, setRequests] = useState<SubscriptionRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Secret Keys state
+  const [secretKeys, setSecretKeys] = useState<SecretKeysConfig>({
+    gemini_api_key: '',
+    supabase_url: '',
+    supabase_anon_key: '',
+    supabase_service_key: '',
+    bkash_app_key: '',
+    bkash_app_secret: '',
+    nagad_app_key: '',
+    nagad_app_secret: '',
+    custom_webhook_secret: ''
+  });
+  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
+  const [keysSavedToast, setKeysSavedToast] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSecretKeys(getSecretKeys());
+  }, []);
+
+  const handleSaveSecretKeys = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveSecretKeys(secretKeys);
+    if (secretKeys.gemini_api_key) {
+      (window as any).__CUSTOM_GEMINI_API_KEY = secretKeys.gemini_api_key;
+    }
+    setKeysSavedToast(true);
+    setTimeout(() => setKeysSavedToast(false), 3500);
+  };
+
+  const toggleShowKey = (field: string) => {
+    setShowKeys(prev => ({ ...prev, [field]: !prev[field] }));
+  };
+
+  const copyToClipboard = (text: string, field: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedKey(field);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
 
   // Filter/Search states
   const [searchQuery, setSearchQuery] = useState('');
@@ -901,6 +949,16 @@ The student will remain guest/basic tier. Are you sure you want to proceed?`,
           <Settings size={14} /> Poster Settings
         </button>
         <button 
+          onClick={() => setActiveSubTab('keys')}
+          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 shrink-0 ${
+            activeSubTab === 'keys' 
+              ? 'bg-white dark:bg-zinc-900 text-cyan-500 shadow-sm' 
+              : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+          }`}
+        >
+          <Key size={14} /> Secret Keys
+        </button>
+        <button 
           onClick={() => setActiveSubTab('packages')}
           className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 shrink-0 ${
             activeSubTab === 'packages' 
@@ -1648,6 +1706,298 @@ The student will remain guest/basic tier. Are you sure you want to proceed?`,
                   className="bg-blue-600 hover:bg-blue-700 hover:shadow-lg font-black text-xs uppercase tracking-widest px-8 py-3.5 rounded-2xl shadow-blue-500/25 flex items-center gap-2 cursor-pointer"
                 >
                   <Save size={14} /> {isSavingSettings ? 'Saving...' : 'Commit Configuration Changes'}
+                </Button>
+              </div>
+            </form>
+          </motion.div>
+        )}
+
+        {/* Tab 4.5: Secret Keys Manager */}
+        {activeSubTab === 'keys' && (
+          <motion.div 
+            key="tab-keys" 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[32px] p-6 sm:p-8 space-y-6"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-5 border-zinc-200 dark:border-zinc-800">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="p-2 rounded-xl bg-cyan-500/10 text-cyan-500">
+                    <Key size={18} />
+                  </span>
+                  <h2 className="text-xl font-black text-zinc-900 dark:text-white">
+                    API & Secret Keys Configuration
+                  </h2>
+                </div>
+                <p className="text-xs text-zinc-500 font-semibold">
+                  Manage API credentials, database keys, and payment gateway secrets stored securely in application memory.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-bold border border-emerald-500/20 flex items-center gap-1.5">
+                  <ShieldCheck size={14} /> Encrypted Local Storage
+                </span>
+              </div>
+            </div>
+
+            {keysSavedToast && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="p-4 bg-emerald-500/10 border-2 border-emerald-500/30 text-emerald-500 rounded-2xl flex items-center justify-between text-xs font-bold"
+              >
+                <div className="flex items-center gap-2">
+                  <CheckCircle size={18} />
+                  <span>Secret keys have been successfully saved to secure storage!</span>
+                </div>
+                <span className="text-[10px] uppercase font-black px-2 py-1 bg-emerald-500/20 rounded-lg">Saved</span>
+              </motion.div>
+            )}
+
+            <form onSubmit={handleSaveSecretKeys} className="space-y-8">
+              {/* Section 1: AI & LLM Service Keys */}
+              <div className="bg-zinc-50 dark:bg-zinc-800/30 p-5 sm:p-6 rounded-3xl border border-zinc-200/80 dark:border-zinc-800 space-y-4">
+                <div className="flex items-center justify-between border-b pb-3 border-zinc-200 dark:border-zinc-800">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={16} className="text-purple-500" />
+                    <h3 className="text-sm font-black uppercase tracking-wider text-zinc-900 dark:text-white">
+                      Google Gemini AI API Key
+                    </h3>
+                  </div>
+                  <span className="text-[10px] font-mono text-purple-400 bg-purple-500/10 px-2.5 py-1 rounded-full border border-purple-500/20 font-bold">
+                    {secretKeys.gemini_api_key ? 'Custom Key Active' : 'Environment Default'}
+                  </span>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase text-zinc-400 font-mono flex items-center justify-between">
+                    <span>GEMINI_API_KEY</span>
+                    <span className="text-[10px] normal-case text-zinc-500 font-sans">Required for AI Quiz Generation, Explainers & Tutor</span>
+                  </label>
+                  <div className="relative flex items-center">
+                    <input 
+                      type={showKeys.gemini_api_key ? "text" : "password"}
+                      value={secretKeys.gemini_api_key}
+                      onChange={e => setSecretKeys({ ...secretKeys, gemini_api_key: e.target.value })}
+                      placeholder="AIzaSy..."
+                      className="w-full pl-4 pr-24 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 text-sm font-mono text-zinc-900 dark:text-white focus:outline-none focus:border-cyan-500 transition-all"
+                    />
+                    <div className="absolute right-2 flex items-center gap-1">
+                      <button 
+                        type="button" 
+                        onClick={() => toggleShowKey('gemini_api_key')}
+                        className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all cursor-pointer"
+                        title={showKeys.gemini_api_key ? "Hide Key" : "Show Key"}
+                      >
+                        {showKeys.gemini_api_key ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                      <button 
+                        type="button" 
+                        onClick={() => copyToClipboard(secretKeys.gemini_api_key, 'gemini_api_key')}
+                        className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all cursor-pointer"
+                        title="Copy Key"
+                      >
+                        {copiedKey === 'gemini_api_key' ? <Check size={16} className="text-emerald-500" /> : <Copy size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Supabase Credentials */}
+              <div className="bg-zinc-50 dark:bg-zinc-800/30 p-5 sm:p-6 rounded-3xl border border-zinc-200/80 dark:border-zinc-800 space-y-4">
+                <div className="flex items-center justify-between border-b pb-3 border-zinc-200 dark:border-zinc-800">
+                  <div className="flex items-center gap-2">
+                    <Lock size={16} className="text-emerald-500" />
+                    <h3 className="text-sm font-black uppercase tracking-wider text-zinc-900 dark:text-white">
+                      Supabase Database Credentials
+                    </h3>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20 font-bold">
+                    Backend Connection
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5 md:col-span-2">
+                    <label className="text-xs font-bold uppercase text-zinc-400 font-mono">SUPABASE_URL</label>
+                    <input 
+                      type="text" 
+                      value={secretKeys.supabase_url}
+                      onChange={e => setSecretKeys({ ...secretKeys, supabase_url: e.target.value })}
+                      placeholder="https://xyz.supabase.co"
+                      className="w-full px-4 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 text-sm font-mono text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-zinc-400 font-mono">SUPABASE_ANON_KEY</label>
+                    <div className="relative flex items-center">
+                      <input 
+                        type={showKeys.supabase_anon_key ? "text" : "password"}
+                        value={secretKeys.supabase_anon_key}
+                        onChange={e => setSecretKeys({ ...secretKeys, supabase_anon_key: e.target.value })}
+                        placeholder="eyJhbG..."
+                        className="w-full pl-4 pr-20 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 text-sm font-mono text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => toggleShowKey('supabase_anon_key')}
+                        className="absolute right-3 p-2 text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                      >
+                        {showKeys.supabase_anon_key ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-zinc-400 font-mono">SUPABASE_SERVICE_ROLE_KEY</label>
+                    <div className="relative flex items-center">
+                      <input 
+                        type={showKeys.supabase_service_key ? "text" : "password"}
+                        value={secretKeys.supabase_service_key}
+                        onChange={e => setSecretKeys({ ...secretKeys, supabase_service_key: e.target.value })}
+                        placeholder="eyJhbG... (Admin Bypass)"
+                        className="w-full pl-4 pr-20 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 text-sm font-mono text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => toggleShowKey('supabase_service_key')}
+                        className="absolute right-3 p-2 text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                      >
+                        {showKeys.supabase_service_key ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 3: Payment Gateway API Secrets */}
+              <div className="bg-zinc-50 dark:bg-zinc-800/30 p-5 sm:p-6 rounded-3xl border border-zinc-200/80 dark:border-zinc-800 space-y-4">
+                <div className="flex items-center justify-between border-b pb-3 border-zinc-200 dark:border-zinc-800">
+                  <div className="flex items-center gap-2">
+                    <Coins size={16} className="text-pink-500" />
+                    <h3 className="text-sm font-black uppercase tracking-wider text-zinc-900 dark:text-white">
+                      Payment Gateway API Credentials
+                    </h3>
+                  </div>
+                  <span className="text-[10px] font-mono text-pink-400 bg-pink-500/10 px-2.5 py-1 rounded-full border border-pink-500/20 font-bold">
+                    bKash & Nagad Integration
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* bKash */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-pink-500 font-mono">BKASH_APP_KEY</label>
+                    <input 
+                      type="text" 
+                      value={secretKeys.bkash_app_key}
+                      onChange={e => setSecretKeys({ ...secretKeys, bkash_app_key: e.target.value })}
+                      placeholder="bKash App Key"
+                      className="w-full px-4 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 text-sm font-mono text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-pink-500 font-mono">BKASH_APP_SECRET</label>
+                    <div className="relative flex items-center">
+                      <input 
+                        type={showKeys.bkash_app_secret ? "text" : "password"}
+                        value={secretKeys.bkash_app_secret}
+                        onChange={e => setSecretKeys({ ...secretKeys, bkash_app_secret: e.target.value })}
+                        placeholder="••••••••••••"
+                        className="w-full pl-4 pr-20 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 text-sm font-mono text-zinc-900 dark:text-white focus:outline-none focus:border-pink-500"
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => toggleShowKey('bkash_app_secret')}
+                        className="absolute right-3 p-2 text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                      >
+                        {showKeys.bkash_app_secret ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Nagad */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-orange-500 font-mono">NAGAD_APP_KEY</label>
+                    <input 
+                      type="text" 
+                      value={secretKeys.nagad_app_key}
+                      onChange={e => setSecretKeys({ ...secretKeys, nagad_app_key: e.target.value })}
+                      placeholder="Nagad App Key"
+                      className="w-full px-4 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 text-sm font-mono text-zinc-900 dark:text-white focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-orange-500 font-mono">NAGAD_APP_SECRET</label>
+                    <div className="relative flex items-center">
+                      <input 
+                        type={showKeys.nagad_app_secret ? "text" : "password"}
+                        value={secretKeys.nagad_app_secret}
+                        onChange={e => setSecretKeys({ ...secretKeys, nagad_app_secret: e.target.value })}
+                        placeholder="••••••••••••"
+                        className="w-full pl-4 pr-20 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 text-sm font-mono text-zinc-900 dark:text-white focus:outline-none focus:border-orange-500"
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => toggleShowKey('nagad_app_secret')}
+                        className="absolute right-3 p-2 text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                      >
+                        {showKeys.nagad_app_secret ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 4: Webhook & Custom Secrets */}
+              <div className="bg-zinc-50 dark:bg-zinc-800/30 p-5 sm:p-6 rounded-3xl border border-zinc-200/80 dark:border-zinc-800 space-y-4">
+                <div className="flex items-center justify-between border-b pb-3 border-zinc-200 dark:border-zinc-800">
+                  <div className="flex items-center gap-2">
+                    <Key size={16} className="text-cyan-500" />
+                    <h3 className="text-sm font-black uppercase tracking-wider text-zinc-900 dark:text-white">
+                      Custom Webhook / Token Secret
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold uppercase text-zinc-400 font-mono">CUSTOM_WEBHOOK_SECRET</label>
+                  <div className="relative flex items-center">
+                    <input 
+                      type={showKeys.custom_webhook_secret ? "text" : "password"}
+                      value={secretKeys.custom_webhook_secret}
+                      onChange={e => setSecretKeys({ ...secretKeys, custom_webhook_secret: e.target.value })}
+                      placeholder="Enter custom API authentication token or webhook secret"
+                      className="w-full pl-4 pr-20 py-3.5 rounded-2xl bg-white dark:bg-zinc-900 border-2 border-zinc-200 dark:border-zinc-800 text-sm font-mono text-zinc-900 dark:text-white focus:outline-none focus:border-cyan-500"
+                    />
+                    <button 
+                      type="button" 
+                      onClick={() => toggleShowKey('custom_webhook_secret')}
+                      className="absolute right-3 p-2 text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                    >
+                      {showKeys.custom_webhook_secret ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                <p className="text-xs text-zinc-500 font-medium">
+                  🔒 Secrets are stored safely in local application memory and can be copied or modified at any time.
+                </p>
+                <Button 
+                  type="submit" 
+                  className="w-full sm:w-auto bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-black text-xs uppercase tracking-widest px-8 py-3.5 rounded-2xl shadow-lg shadow-cyan-500/25 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Save size={16} /> Save Secret Keys
                 </Button>
               </div>
             </form>
