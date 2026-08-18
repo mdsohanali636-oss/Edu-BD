@@ -178,25 +178,54 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           overflow-y:auto;
         }
         .formside form{width:100%;max-width:320px;}
-        .toggle-title{color:var(--muted);font-size:12px;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;font-weight:700;}
-        .formside h2{color:var(--text);font-size:28px;margin:0 0 22px;font-weight:800;}
+        .toggle-title{color:#94a3b8;font-size:12px;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;font-weight:700;}
+        .formside h2{color:#ffffff;font-size:28px;margin:0 0 22px;font-weight:800;letter-spacing:-0.5px;}
         .field{position:relative;margin-bottom:18px;}
         .field input, .field select{
           width:100%;padding:14px 16px;
-          background:#12141f;border:1px solid #232640;
-          border-radius:12px;color:var(--text);font-size:14px;
+          background:#141724;border:1.5px solid #2e3452;
+          border-radius:12px;
+          color:#ffffff !important;
+          -webkit-text-fill-color:#ffffff !important;
+          caret-color:#37f0ff;
+          font-size:14px;
+          font-weight:600;
           outline:none;transition:.25s;
+        }
+        .field input::placeholder{
+          color:#94a3b8;
+          opacity:0.7;
+        }
+        .field input:-webkit-autofill,
+        .field input:-webkit-autofill:hover, 
+        .field input:-webkit-autofill:focus,
+        .field select:-webkit-autofill{
+          -webkit-text-fill-color:#ffffff !important;
+          -webkit-box-shadow:0 0 0px 1000px #141724 inset !important;
+          box-shadow:0 0 0px 1000px #141724 inset !important;
+          caret-color:#37f0ff !important;
+          transition:background-color 5000s ease-in-out 0s;
+        }
+        .field select option{
+          background-color:#0d0f18;
+          color:#ffffff !important;
+          font-weight:600;
         }
         .field input:focus, .field select:focus{
           border-color:var(--cyan);
-          box-shadow:0 0 0 3px rgba(55,240,255,.15), 0 0 20px rgba(55,240,255,.25);
+          background:#181c2d;
+          box-shadow:0 0 0 3px rgba(55,240,255,.2), 0 0 20px rgba(55,240,255,.3);
         }
         .field label{
-          position:absolute;left:16px;top:14px;color:var(--muted);font-size:14px;
+          position:absolute;left:16px;top:14px;
+          color:#94a3b8;
+          font-size:13.5px;
+          font-weight:600;
           pointer-events:none;transition:.2s;background:transparent;
+          text-shadow:0 1px 2px rgba(0,0,0,0.5);
         }
         .field input:focus + label, .field input:not(:placeholder-shown) + label, .field select + label{
-          top:-9px;left:12px;font-size:11px;background:var(--panel);padding:0 6px;color:var(--cyan);font-weight:700;
+          top:-9px;left:12px;font-size:11px;background:#0d0f18;padding:0 6px;color:#37f0ff !important;font-weight:700;border-radius:4px;
         }
         .btn{
           width:100%;padding:14px;border:none;border-radius:12px;
@@ -266,17 +295,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             font-size: 13px;
             padding: 10px 12px;
             border-radius: 8px;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            font-weight: 600;
           }
           .field label {
             font-size: 12px;
             top: 10px;
             left: 12px;
+            color: #94a3b8;
+            font-weight: 600;
           }
           .field input:focus + label, .field input:not(:placeholder-shown) + label, .field select + label {
             top: -8px;
             left: 8px;
-            font-size: 9px;
+            font-size: 9.5px;
             padding: 0 4px;
+            color: #37f0ff !important;
           }
           .btn {
             padding: 10px 12px;
